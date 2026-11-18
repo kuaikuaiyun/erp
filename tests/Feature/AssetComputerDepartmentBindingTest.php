@@ -329,4 +329,49 @@ class AssetComputerDepartmentBindingTest extends TestCase
         $this->assertSame(1, DB::table('portal_menus')->where('code', 'asset_computer_department_bindings')->count());
         $this->assertSame([$this->outside->id], $this->service()->selectedIds($this->a->id));
     }
+
+    public function test_binding_index_names_fit_mysql_identifier_limit(): void
+    {
+        foreach (['asset_computer_department_bindings', 'asset_computer_department_binding_logs'] as $table) {
+            foreach (Schema::getIndexes($table) as $index) {
+                $this->assertLessThanOrEqual(64, strlen($index['name']), $index['name']);
+            }
+        }
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_bindings', 'acdb_target_idx'));
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_binding_logs', 'acdbl_source_idx'));
+    }
+
+    public function test_retry_repairs_missing_indexes_without_losing_bindings_logs_or_custom_menu(): void
+    {
+        $this->configure($this->a, [$this->outside->id]);
+        $beforeLogs = DB::table('asset_computer_department_binding_logs')->get()->toJson();
+        DB::table('portal_menus')->where('code', 'asset_computer_department_bindings')->update(['sort' => 999]);
+        Schema::table('asset_computer_department_bindings', function (Blueprint $t) {
+            $t->dropIndex('acdb_target_idx');
+            $t->dropUnique('asset_computer_department_binding_unique');
+        });
+        Schema::table('asset_computer_department_binding_logs', fn (Blueprint $t) => $t->dropIndex('acdbl_source_idx'));
+        $migration = require base_path('database/migrations/2026_11_18_000400_install_asset_computer_department_bindings.php');
+        $migration->up();
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_binding_logs', ['source_department_id']));
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_bindings', ['target_department_id']));
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_bindings', ['source_department_id', 'target_department_id'], 'unique'));
+        $counts = collect(['asset_computer_department_bindings', 'asset_computer_department_binding_logs'])->mapWithKeys(fn ($table) => [$table => count(Schema::getIndexes($table))])->all();
+        $migration->up();
+        foreach ($counts as $table => $count) {
+            $this->assertCount($count, Schema::getIndexes($table));
+        }
+        $this->assertSame([$this->outside->id], $this->service()->selectedIds($this->a->id));
+        $this->assertSame($beforeLogs, DB::table('asset_computer_department_binding_logs')->get()->toJson());
+        $this->assertSame(999, DB::table('portal_menus')->where('code', 'asset_computer_department_bindings')->value('sort'));
+    }
+
+    public function test_existing_equivalent_indexes_do_not_get_duplicate_short_indexes(): void
+    {
+        Schema::table('asset_computer_department_binding_logs', fn (Blueprint $t) => $t->dropIndex('acdbl_source_idx'));
+        Schema::table('asset_computer_department_binding_logs', fn (Blueprint $t) => $t->index('source_department_id', 'previous_source_index'));
+        (require base_path('database/migrations/2026_11_18_000400_install_asset_computer_department_bindings.php'))->up();
+        $this->assertTrue(Schema::hasIndex('asset_computer_department_binding_logs', 'previous_source_index'));
+        $this->assertFalse(Schema::hasIndex('asset_computer_department_binding_logs', 'acdbl_source_idx'));
+    }
 }

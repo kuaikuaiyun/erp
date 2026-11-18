@@ -20,7 +20,7 @@ return new class extends Migration
             $schema->create('asset_computer_department_bindings', function (Blueprint $t) {
                 $t->id();
                 $t->unsignedBigInteger('source_department_id');
-                $t->unsignedBigInteger('target_department_id')->index();
+                $t->unsignedBigInteger('target_department_id')->index('acdb_target_idx');
                 $t->unsignedBigInteger('updated_by');
                 $t->timestamps();
                 $t->unique(['source_department_id', 'target_department_id'], 'asset_computer_department_binding_unique');
@@ -29,7 +29,7 @@ return new class extends Migration
         if (! $schema->hasTable('asset_computer_department_binding_logs')) {
             $schema->create('asset_computer_department_binding_logs', function (Blueprint $t) {
                 $t->id();
-                $t->unsignedBigInteger('source_department_id')->index();
+                $t->unsignedBigInteger('source_department_id')->index('acdbl_source_idx');
                 $t->string('source_name');
                 foreach (['before_ids', 'after_ids', 'before_labels', 'after_labels'] as $column) {
                     $t->text($column);
@@ -38,6 +38,19 @@ return new class extends Migration
                 $t->string('actor_name');
                 $t->timestamp('created_at');
             });
+        }
+        // MySQL may retain a created table after a later ADD INDEX statement fails.
+        // Match by columns so successful older installations keep their existing names.
+        foreach ([
+            ['asset_computer_department_bindings', ['source_department_id', 'target_department_id'], 'asset_computer_department_binding_unique', true],
+            ['asset_computer_department_bindings', ['target_department_id'], 'acdb_target_idx', false],
+            ['asset_computer_department_binding_logs', ['source_department_id'], 'acdbl_source_idx', false],
+        ] as [$table, $columns, $name, $unique]) {
+            if (! $schema->hasIndex($table, $columns, $unique ? 'unique' : null)) {
+                $schema->table($table, function (Blueprint $t) use ($columns, $name, $unique) {
+                    $unique ? $t->unique($columns, $name) : $t->index($columns, $name);
+                });
+            }
         }
         if (! $db->table(config('admin.database.permissions_table'))->where('slug', 'asset-manager.computer-department-bindings')->exists()) {
             $db->table(config('admin.database.permissions_table'))->insert([
