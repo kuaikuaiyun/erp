@@ -36,10 +36,7 @@
 <hr><h4><i class="fa fa-history"></i> 我的投放记录</h4>
 <div class="table-responsive"><table class="table table-bordered table-striped"><thead><tr><th>测评编号</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>ROI</th><th>素材名称</th><th>投放视频</th></tr></thead><tbody>
 @forelse($evaluations as $evaluation) @foreach($evaluation->records as $record)
-@php
-    $videoCode = $record->video_name ? pathinfo((string) $record->video_name, PATHINFO_FILENAME) : null;
-    $isPrivateOperatorVideo = \App\Models\OperationAiProductReferenceVideo::isOperatorMaterialFile($record->video_name);
-@endphp
-<tr><td>{{ $evaluation->evaluation_code }}</td><td>{{ $evaluation->test_started_on?->format('Y-m-d') }} 至 {{ $evaluation->data_ended_on?->format('Y-m-d') }}</td><td>{{ ucfirst($record->platform) }}</td><td>{{ strtoupper($record->currency) }} {{ $record->actual_spend }}</td><td>{{ $record->orders }}</td><td>{{ $record->roi !== null ? number_format((float) $record->roi, 2) : '—' }}</td><td>{{ $record->material_name ?: '—' }}</td><td>@if($record->video_path && ! $isPrivateOperatorVideo)<a class="btn btn-xs btn-info" target="_blank" href="{{ route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) }}"><i class="fa fa-play"></i> {{ $videoCode ?: '投放视频' }}</a>@elseif($videoCode)<code>{{ $videoCode }}</code>@else — @endif</td></tr>
+@php($videoCode = $record->video_name ? pathinfo((string) $record->video_name, PATHINFO_FILENAME) : null)
+<tr><td>{{ $evaluation->evaluation_code }}</td><td>{{ $evaluation->test_started_on?->format('Y-m-d') }} 至 {{ $evaluation->data_ended_on?->format('Y-m-d') }}</td><td>{{ ucfirst($record->platform) }}</td><td>{{ strtoupper($record->currency) }} {{ $record->actual_spend }}</td><td>{{ $record->orders }}</td><td>{{ $record->roi !== null ? number_format((float) $record->roi, 2) : '—' }}</td><td>{{ $record->material_name ?: '—' }}</td><td>@if($record->video_path)<a class="btn btn-xs btn-info" target="_blank" href="{{ route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) }}"><i class="fa fa-play"></i> {{ $videoCode ?: '投放视频' }}</a>@elseif($videoCode)<code>{{ $videoCode }}</code>@else — @endif</td></tr>
 @endforeach @empty <tr><td colspan="8" class="text-center text-muted">暂无本人提交的投放记录</td></tr> @endforelse
 </tbody></table></div>
