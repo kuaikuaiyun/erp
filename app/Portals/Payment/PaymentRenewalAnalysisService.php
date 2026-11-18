@@ -133,7 +133,7 @@ class PaymentRenewalAnalysisService
         $timezone = $filters[$module.'_timezone'] ?? $filters['timezone'] ?? '+08:00';
         $today = now($timezone);
         return [
-            'date_from' => $filters[$module.'_date_from'] ?? $filters['date_from'] ?? $today->copy()->subDays(89)->toDateString(),
+            'date_from' => $filters[$module.'_date_from'] ?? $filters['date_from'] ?? $today->copy()->subDays(6)->toDateString(),
             'date_to' => $filters[$module.'_date_to'] ?? $filters['date_to'] ?? $today->toDateString(),
             'timezone' => $timezone, 'store' => $filters[$module.'_store'] ?? $filters['store'] ?? '',
             'channel' => '', 'risk_date_mode' => 'payment',

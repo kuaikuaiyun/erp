@@ -715,7 +715,7 @@ class PaymentPortalController extends Controller
             $timezone = (string) ($validated[$module.'_timezone'] ?? $validated['timezone'] ?? '+08:00');
             $today = now($timezone);
             $filters[$module.'_timezone'] = $timezone;
-            $filters[$module.'_date_from'] = (string) ($validated[$module.'_date_from'] ?? $validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d'));
+            $filters[$module.'_date_from'] = (string) ($validated[$module.'_date_from'] ?? $validated['date_from'] ?? $today->copy()->subDays(6)->format('Y-m-d'));
             $filters[$module.'_date_to'] = (string) ($validated[$module.'_date_to'] ?? $validated['date_to'] ?? $today->format('Y-m-d'));
             $filters[$module.'_store'] = trim((string) ($validated[$module.'_store'] ?? $validated['store'] ?? ''));
             if ($filters[$module.'_date_to'] < $filters[$module.'_date_from']) {

@@ -314,6 +314,41 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame([], $changed['stages']);
     }
 
+    public function test_default_dates_cover_seven_days_in_each_timezone_and_explicit_dates_are_preserved(): void
+    {
+        \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-11-18 02:00:00','UTC'));
+        try {
+            $method = new \ReflectionMethod(PaymentPortalController::class,'renewalAnalysisFilters');
+            $controller = (new \ReflectionClass(PaymentPortalController::class))->newInstanceWithoutConstructor();
+            $filters = $method->invoke($controller, Request::create('/','GET',[
+                'initial_timezone'=>'+08:00','renewal_timezone'=>'-05:00',
+            ]));
+            self::assertSame('2026-11-12',$filters['initial_date_from']);
+            self::assertSame('2026-11-18',$filters['initial_date_to']);
+            self::assertSame('2026-11-11',$filters['renewal_date_from']);
+            self::assertSame('2026-11-17',$filters['renewal_date_to']);
+            $moduleMethod = new \ReflectionMethod(PaymentRenewalAnalysisService::class,'moduleFilters');
+            foreach (['initial'=>'+08:00','renewal'=>'-05:00'] as $module=>$timezone) {
+                $moduleFilters = $moduleMethod->invoke(app(PaymentRenewalAnalysisService::class),[$module.'_timezone'=>$timezone],$module);
+                self::assertSame($filters[$module.'_date_from'],$moduleFilters['date_from']);
+                self::assertSame($filters[$module.'_date_to'],$moduleFilters['date_to']);
+            }
+            $explicit = $method->invoke($controller, Request::create('/','GET',$this->filters(['stage_page'=>2])));
+            self::assertSame('2026-11-01',$explicit['initial_date_from']);
+            self::assertSame('2026-11-01',$explicit['renewal_date_to']);
+            self::assertSame(2,$explicit['stage_page']);
+            // Reset links omit only their own module dates; the other module remains intact.
+            $resetInitial = $method->invoke($controller, Request::create('/','GET',[
+                'renewal_date_from'=>'2026-09-01','renewal_date_to'=>'2026-09-30',
+            ]));
+            self::assertSame('2026-11-12',$resetInitial['initial_date_from']);
+            self::assertSame('2026-09-01',$resetInitial['renewal_date_from']);
+            self::assertSame('2026-09-30',$resetInitial['renewal_date_to']);
+        } finally {
+            \Carbon\Carbon::setTestNow();
+        }
+    }
+
     public function test_controller_ignores_legacy_channel_and_rejects_reversed_module_dates(): void
     {
         $method = new \ReflectionMethod(PaymentPortalController::class, 'renewalAnalysisFilters');
