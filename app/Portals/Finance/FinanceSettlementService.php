@@ -678,6 +678,18 @@ class FinanceSettlementService
                         $row['card_layout']['ledger_settlement_type'] = $saved['_ye_settlement_type'];
                     }
                     $layout = $conflux->storeFees($row['card_layout'], $ledger->get($record->id, collect()), $manual);
+                    // Simple bills contribute deltas; never freeze the official ledger's totals.
+                    foreach ($saved['_ye_bill_deltas'] ?? [] as $field => $delta) {
+                        $layout[$field] = bcadd($this->number($layout[$field] ?? null) ?? '0', $delta, 8);
+                        if (! array_key_exists('payable', $manual) && $this->number($layout['payable'] ?? null) !== null) {
+                            if ($field === 'release') {
+                                $layout['payable'] = bcadd($layout['payable'], $delta, 8);
+                            } elseif (in_array($field, ['refund', 'refund_fee', 'chargeback', 'chargeback_fee',
+                                'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'], true)) {
+                                $layout['payable'] = bcsub($layout['payable'], $delta, 8);
+                            }
+                        }
+                    }
                     $builder = trim((string) ($group->site_builder ?? ''));
                     $platform = strcasecmp($builder, 'xshoppy') === 0 ? '索引' : ($builder === '' ? null : $builder);
                     foreach (['store_platform' => $platform, 'project' => $group->project ?? null] as $field => $value) {

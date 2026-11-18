@@ -2977,6 +2977,13 @@ class FinanceController extends Controller
                     [$kind, $rows] = $official;
                     return [$worldpay->import($kind, $rows, $account, $data['timezone'], $actor), count($rows)];
                 }
+                if ($worldpay !== null) {
+                    $adjustments = app(\App\Portals\Finance\FinanceWorldpayBillAdjustments::class);
+                    $rows = $adjustments->read($file);
+                    if ($rows !== null) {
+                        return [$adjustments->import($rows, '', $actor, $directWorldpay ? null : $account), count($rows)];
+                    }
+                }
                 $count = $total = 0;
                 foreach ($this->creditChannelOrderBatches($file, $data['card_channel']) as $rows) {
                     $count += $this->workbooks->importRecords('xuzong2-details', $rows, $account,
@@ -3024,7 +3031,14 @@ class FinanceController extends Controller
                     try {
                         $batches = $worldpay->readBatches($file);
                         if (! $batches->valid()) {
-                            throw ValidationException::withMessages(['file' => '无法识别 Worldpay 交易表头。']);
+                            $adjustments = app(\App\Portals\Finance\FinanceWorldpayBillAdjustments::class);
+                            $rows = $adjustments->read($file);
+                            if ($rows === null) {
+                                throw ValidationException::withMessages(['file' => '无法识别 Worldpay 交易或账单表头。']);
+                            }
+                            $count += $adjustments->import($rows, '', $actor);
+                            $total += count($rows);
+                            continue;
                         }
                         foreach ($batches as [$kind, $rows]) {
                             $count += $worldpay->import($kind, $rows, \App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT, 'Asia/Shanghai', $actor);

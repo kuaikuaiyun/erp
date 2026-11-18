@@ -146,9 +146,9 @@ class FinanceWorldpayImport
                         '支付方式' => $row['支付方式'] ?? '', '卡种' => $row['卡种'] ?? '',
                     ]);
                 }
-                $payload['_worldpay_posted'][$row['结算批次号']] = $row;
+                $payload['_worldpay_posted'][(string) \Illuminate\Support\Str::uuid()] = $row;
             } else {
-                $payload['_worldpay_events'][$row['结算批次号'].'|'.$row['Case ID'].'|'.$row['结算类型']] = $row;
+                $payload['_worldpay_events'][(string) \Illuminate\Support\Str::uuid()] = $row;
             }
             if ($kind !== 'general') {
                 $month = substr($row['记账时间'], 0, 7);
@@ -254,6 +254,9 @@ class FinanceWorldpayImport
         if (! array_key_exists('per_order_fee', $saved) && blank($values['per_order_fee'])
             && ! empty($payload['_worldpay_general']) && ($success || $failed)) {
             $values['per_order_fee'] = '0.30';
+        }
+        foreach ($saved['_worldpay_bill_deltas'] ?? [] as $field => $delta) {
+            $values[$field] = bcadd(self::amount($values[$field] ?? null), $delta, 8);
         }
         if (! array_key_exists('payable', $saved) && blank($values['payable'])
             && (is_numeric($values['settlement']) || $events !== [])) {
