@@ -38,7 +38,6 @@ abstract class FinanceOnlineIndexMigration extends Migration
         }
         try {
             $this->acquire($db);
-            $this->assertIdle($db);
             // Keep the lease through Laravel's subsequent write to the migrations table.
             $this->heldForBatch = true;
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event) use ($db): void {
@@ -106,7 +105,7 @@ abstract class FinanceOnlineIndexMigration extends Migration
         }
         $acquired = $db->selectOne('SELECT GET_LOCK(?, 0) AS acquired', [$this->lockName($db)]);
         if ((int) ($acquired->acquired ?? 0) !== 1) {
-            throw new FinanceIndexMigrationDeferred('后台财务汇总或另一条索引迁移正在运行，未排队改表。');
+            throw new FinanceIndexMigrationDeferred('另一条财务索引迁移正在运行，未排队改表。');
         }
         $this->lockedPdo = $db->getPdo();
     }
@@ -116,42 +115,6 @@ abstract class FinanceOnlineIndexMigration extends Migration
         if ($db->getPdo() !== $this->lockedPdo) {
             throw new FinanceIndexMigrationDeferred('数据库连接已变化，等待下一次安全重试。');
         }
-    }
-
-    private function assertIdle(Connection $db): void
-    {
-        $this->assertConnection($db);
-        try {
-            try {
-                $transaction = $db->selectOne(
-                    'SELECT t.trx_mysql_thread_id AS connection_id FROM information_schema.INNODB_TRX t '
-                    .'JOIN information_schema.PROCESSLIST p ON p.ID = t.trx_mysql_thread_id '
-                    .'WHERE t.trx_mysql_thread_id <> CONNECTION_ID() AND (p.DB = ? OR p.DB IS NULL) LIMIT 1',
-                    [$db->getDatabaseName()],
-                );
-            } catch (Throwable $exception) {
-                if (! in_array((int) ($exception->errorInfo[1] ?? 0), [1044, 1142, 1227], true)) {
-                    throw $exception;
-                }
-                // Without PROCESS, MySQL still exposes this login's connections. Treat even
-                // sleeping peer connections as busy because their transaction state is unknown.
-                $transaction = $db->selectOne(
-                    'SELECT ID AS connection_id FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() '
-                    .'AND (DB = ? OR DB IS NULL) LIMIT 1', [$db->getDatabaseName()],
-                );
-            }
-            $active = $db->selectOne(
-                "SELECT ID AS connection_id FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() "
-                ."AND DB = ? AND COMMAND <> 'Sleep' LIMIT 1",
-                [$db->getDatabaseName()],
-            );
-        } catch (Throwable $exception) {
-            throw new FinanceIndexMigrationDeferred('无法安全检查数据库事务或连接状态，未执行改表；请运维核对数据库监控权限。', previous: $exception);
-        }
-        if ($transaction || $active) {
-            throw new FinanceIndexMigrationDeferred('数据库仍有活动查询或未结束事务，未提交 ALTER TABLE，业务请求继续运行。');
-        }
-        $this->assertConnection($db);
     }
 
     private function apply(bool $down): void
@@ -169,7 +132,6 @@ abstract class FinanceOnlineIndexMigration extends Migration
         $succeeded = false;
         try {
             $this->acquire($db);
-            $this->assertIdle($db);
             $settings = $db->selectOne('SELECT @@SESSION.lock_wait_timeout AS metadata_timeout, @@SESSION.innodb_lock_wait_timeout AS row_timeout');
             $this->assertConnection($db);
             $this->previousTimeouts = [(int) $settings->metadata_timeout, (int) $settings->row_timeout];
@@ -178,7 +140,6 @@ abstract class FinanceOnlineIndexMigration extends Migration
             // Schema inspection can itself need metadata locks, so bound it as well as ALTER.
             $operations = $this->pending($db, $down);
             foreach ($operations as $operation) {
-                $this->assertIdle($db);
                 $table = $operation['table'];
                 $engine = $db->selectOne('SELECT ENGINE AS engine FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
                     [$db->getDatabaseName(), $db->getTablePrefix().$table]);
@@ -229,7 +190,7 @@ abstract class FinanceOnlineIndexMigration extends Migration
 
     private function lockName(Connection $db): string
     {
-        return hash('sha256', 'finance:summaries:refresh:'.$db->getDatabaseName());
+        return hash('sha256', 'finance:indexes:apply:'.$db->getDatabaseName());
     }
 
     private function release(Connection $db): void

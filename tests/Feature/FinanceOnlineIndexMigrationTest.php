@@ -57,11 +57,6 @@ class FinanceOnlineIndexMigrationTest extends TestCase
         }
     }
 
-    private function idle(): void
-    {
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/INNODB_TRX|COMMAND <>/'), ['finance_test'])->andReturn(null);
-    }
-
     private function settings(): void
     {
         $this->db->shouldReceive('selectOne')->with('SELECT @@SESSION.lock_wait_timeout AS metadata_timeout, @@SESSION.innodb_lock_wait_timeout AS row_timeout')
@@ -73,7 +68,7 @@ class FinanceOnlineIndexMigrationTest extends TestCase
             ->andReturn((object) ['engine' => 'InnoDB']);
     }
 
-    public function test_busy_summary_skips_before_issuing_alter(): void
+    public function test_concurrent_index_migration_skips_before_issuing_alter(): void
     {
         $this->lock(false);
         $this->pdo->shouldNotReceive('exec');
@@ -83,21 +78,17 @@ class FinanceOnlineIndexMigrationTest extends TestCase
         $this->assertStringContainsString('未排队改表', $message);
     }
 
-    public function test_open_transaction_defers_and_releases_summary_lock(): void
+    public function test_normal_business_connections_do_not_require_process_monitoring_permission(): void
     {
-        $this->lock();
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/INNODB_TRX/'), ['finance_test'])
-            ->once()->andReturn((object) ['connection_id' => 42]);
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/COMMAND <>/'), ['finance_test'])->once()->andReturn(null);
-        $this->pdo->shouldNotReceive('exec');
-        ob_start();
-        try { $this->assertFalse($this->migration()->shouldRun()); }
-        finally { ob_end_clean(); }
+        $this->lock(); $this->settings();
+        $this->db->shouldNotReceive('selectOne')->with(Mockery::pattern('/INNODB_TRX|PROCESSLIST/'), Mockery::any());
+        $this->pdo->shouldReceive('exec')->twice()->andReturn(0);
+        $this->migration()->up();
     }
 
     public function test_online_ddl_restores_session_settings_and_is_additive(): void
     {
-        $this->lock(); $this->idle(); $this->settings();
+        $this->lock(); $this->settings();
         $sql = [];
         $this->pdo->shouldReceive('exec')->twice()->andReturnUsing(function ($statement) use (&$sql): int { $sql[] = $statement; return 0; });
         $this->migration()->up();
@@ -111,14 +102,14 @@ class FinanceOnlineIndexMigrationTest extends TestCase
     public function test_partial_migration_resumes_only_the_missing_index(): void
     {
         $this->schema->shouldReceive('hasColumn')->with('finance_records', 'finance_has_statement_notice')->andReturn(true);
-        $this->lock(); $this->idle(); $this->settings();
+        $this->lock(); $this->settings();
         $this->pdo->shouldReceive('exec')->once()->with(Mockery::pattern('/ADD INDEX.*LOCK=NONE$/'))->andReturn(0);
         $this->migration()->up();
     }
 
     public function test_racing_lock_timeout_is_deferred_without_faking_success(): void
     {
-        $this->lock(); $this->idle(); $this->settings();
+        $this->lock(); $this->settings();
         $exception = new PDOException('lock timeout');
         $exception->errorInfo = ['HY000', 1205, 'lock timeout'];
         $this->pdo->shouldReceive('exec')->once()->andThrow($exception);
@@ -128,7 +119,7 @@ class FinanceOnlineIndexMigrationTest extends TestCase
 
     public function test_unsupported_online_ddl_never_falls_back_to_copy(): void
     {
-        $this->lock(); $this->idle(); $this->settings();
+        $this->lock(); $this->settings();
         $exception = new PDOException('LOCK=NONE is not supported');
         $exception->errorInfo = ['0A000', 1846, 'LOCK=NONE is not supported'];
         $this->pdo->shouldReceive('exec')->once()->andThrow($exception);
@@ -166,7 +157,7 @@ class FinanceOnlineIndexMigrationTest extends TestCase
                 $this->assertTrue($historyRecorded, 'The lease must cover the migration history write.');
                 return (object) ['released' => 1];
             });
-        $this->idle(); $this->settings();
+        $this->settings();
         $this->pdo->shouldReceive('exec')->twice()->andReturn(0);
         ob_start();
         try {
@@ -178,37 +169,10 @@ class FinanceOnlineIndexMigrationTest extends TestCase
         Event::dispatch(new MigrationsEnded('up', []));
     }
 
-    public function test_missing_process_visibility_defers_instead_of_running_unchecked_ddl(): void
-    {
-        $this->lock();
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/INNODB_TRX/'), ['finance_test'])
-            ->once()->andThrow(new \RuntimeException('PROCESS permission denied'));
-        $this->pdo->shouldNotReceive('exec');
-        ob_start();
-        try { $this->assertFalse($this->migration()->shouldRun()); }
-        finally { $message = ob_get_clean(); }
-        $this->assertStringContainsString('事务或连接状态', $message);
-    }
-
-    public function test_restricted_database_login_defers_for_even_a_sleeping_peer_connection(): void
-    {
-        $this->lock();
-        $exception = new PDOException('PROCESS permission denied');
-        $exception->errorInfo = ['42000', 1227, 'PROCESS permission denied'];
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/INNODB_TRX/'), ['finance_test'])->once()->andThrow($exception);
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/AND \(DB = \? OR DB IS NULL\)/'), ['finance_test'])
-            ->once()->andReturn((object) ['connection_id' => 42]);
-        $this->db->shouldReceive('selectOne')->with(Mockery::pattern('/COMMAND <>/'), ['finance_test'])->once()->andReturn(null);
-        $this->pdo->shouldNotReceive('exec');
-        ob_start();
-        try { $this->assertFalse($this->migration()->shouldRun()); }
-        finally { ob_end_clean(); }
-    }
-
     public function test_already_completed_schema_is_not_altered_again(): void
     {
         $this->schema->shouldReceive('hasColumn', 'hasIndex')->andReturn(true);
-        $this->lock(); $this->idle(); $this->settings();
+        $this->lock(); $this->settings();
         $this->pdo->shouldNotReceive('exec');
         $this->migration()->up();
     }
