@@ -40,6 +40,15 @@ class ShopifyStoreController extends Controller
         if (!in_array($perPage, [20, 50, 100], true)) {
             $perPage = 20;
         }
+        $search = $request->validate([
+            'shop_name' => ['nullable', 'string', 'max:2000'],
+            'store_prefix' => ['nullable', 'string', 'max:2000'],
+        ], [], [
+            'shop_name' => __('logistics.shopify_stores.shop_name'),
+            'store_prefix' => __('logistics.shopify_stores.store_prefix'),
+        ]);
+        $search = array_map(static fn ($value): string => trim((string) $value), $search);
+        $search += ['shop_name' => '', 'store_prefix' => ''];
 
         $webhookStatus = $request->input('webhook_status', '');
         if (!in_array($webhookStatus, ['', 'active', 'failed', 'not_registered'], true)) {
@@ -53,6 +62,7 @@ class ShopifyStoreController extends Controller
         $stores = AssistantDomainStore::query()
             ->where('site_builder', 'shopify')
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
+            ->tap(fn ($query) => $this->applyStoreSearch($query, $search))
             ->when($webhookStatus !== '', function ($query) use ($webhookStatus) {
                 if ($webhookStatus === 'not_registered') {
                     $query->where(function ($query) {
@@ -91,11 +101,25 @@ class ShopifyStoreController extends Controller
         return view('portals.logistics.shopify-stores.index', [
             ...$this->viewContext($context),
             'stores' => $stores,
-            'filters' => ['per_page' => $perPage, 'webhook_status' => $webhookStatus, 'sync_status' => $syncStatus],
+            'filters' => ['per_page' => $perPage, 'webhook_status' => $webhookStatus, 'sync_status' => $syncStatus, ...$search],
             'activeSyncBatch' => $syncBatch,
             'syncIssueDetails' => $syncBatch ? $this->syncIssueDetails($syncBatch) : [],
             'manualSyncDays' => self::MANUAL_SYNC_DAYS,
         ]);
+    }
+
+    private function applyStoreSearch(\Illuminate\Database\Eloquent\Builder $query, array $search): void
+    {
+        foreach (['shop_name', 'store_prefix'] as $column) {
+            $terms = array_values(array_unique(array_filter(array_map('trim', preg_split('/[,，]+/u', $search[$column]) ?: []), static fn (string $term): bool => $term !== '')));
+            if ($terms === []) continue;
+            $query->where(function ($group) use ($terms, $column): void {
+                foreach ($terms as $term) {
+                    $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
+                    $group->orWhereRaw($group->getQuery()->getGrammar()->wrap($column)." LIKE ? ESCAPE '!'", [$like]);
+                }
+            });
+        }
     }
 
     public function sync(Request $request, AssistantDomainStore $domainStore): RedirectResponse

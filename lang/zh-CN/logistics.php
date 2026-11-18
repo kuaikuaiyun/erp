@@ -84,6 +84,10 @@ return [
         'menu' => '数据大盘',
     ],
     'shopify_stores' => [
+        'shop_name' => '店铺名称',
+        'store_prefix' => '店铺前缀',
+        'search_placeholder' => '支持模糊搜索，多条用逗号分隔',
+        'search_hint' => '名称、前缀支持中英文逗号分隔；同一框内任一项命中即可，不同筛选项需同时满足。',
         'webhook_status' => 'Webhook 状态',
         'sync_status' => '最近同步结果',
         'webhook_options' => ['active' => '成功（已登记）', 'failed' => '失败（登记失败）', 'not_registered' => '未登记'],

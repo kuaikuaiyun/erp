@@ -23,6 +23,13 @@
             <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
             <div class="box-body">
                 <div class="logistics-filter-grid">
+                    @foreach(['shop_name', 'store_prefix'] as $field)
+                        <div class="logistics-filter-field">
+                            <label for="shopify-{{ $field }}">{{ __('logistics.shopify_stores.'.$field) }}</label>
+                            <input id="shopify-{{ $field }}" name="{{ $field }}" class="form-control" value="{{ $filters[$field] }}" maxlength="2000" placeholder="{{ __('logistics.shopify_stores.search_placeholder') }}">
+                            @error($field)<span class="text-danger">{{ $message }}</span>@enderror
+                        </div>
+                    @endforeach
                     <div class="logistics-filter-field">
                         <label for="shopify-webhook-status">{{ __('logistics.shopify_stores.webhook_status') }}</label>
                         <select id="shopify-webhook-status" name="webhook_status" class="form-control">
@@ -43,6 +50,7 @@
                     </div>
                 </div>
                 <p class="help-block">{{ __('logistics.shopify_stores.filter_hint') }}</p>
+                <p class="help-block">{{ __('logistics.shopify_stores.search_hint') }}</p>
                 <button type="submit" class="btn btn-primary btn-sm"><i class="fa fa-search"></i> {{ __('logistics.common.search') }}</button>
                 <a href="{{ route('logistics.shopify-stores.index') }}" class="btn btn-default btn-sm">{{ __('logistics.common.reset') }}</a>
             </div>
