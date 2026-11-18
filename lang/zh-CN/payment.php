@@ -257,6 +257,31 @@ $translations = [
 ];
 
 return array_replace_recursive($translations, [
+    'renewal_details' => [
+        'actions'=>'订单明细', 'orders'=>'分母订单明细', 'refunds'=>'退款订单明细',
+        'title'=>'首购订单核查', 'close'=>'关闭', 'loading'=>'正在加载订单明细…',
+        'error'=>'订单明细加载失败，请重试。', 'retry'=>'重试', 'empty'=>'当前筛选条件下没有订单。',
+        'all'=>'全部', 'unknown'=>'未识别', 'query'=>'查询', 'reset'=>'重置筛选',
+        'keyword_hint'=>'搜索 ERP ID、订单号、交易号或店铺',
+        'scope'=>'原始范围：:method / :type / :kind；付款日期 :from ～ :to（:timezone）；店铺：:store。',
+        'scope_note'=>'弹窗筛选仅在原始范围内缩小；退款按关联订单统计，不限制退款发生日期，同一订单多次退款只算一个退款订单。',
+        'generated'=>'数据生成：:time；与页面相同统计缓存，若期间数据更新，请刷新页面后核对。',
+        'scope_total'=>'原始范围：:orders 单 / 实收 :revenue / 退款订单 :refunded 单 / 退款金额 :amount',
+        'filtered'=>'筛选结果', 'order_count'=>'订单总数', 'revenue'=>'实收金额', 'refund_orders'=>'退款订单数', 'refund_amount'=>'退款金额',
+        'erp_id'=>'ERP ID', 'order'=>'订单号', 'transaction'=>'交易号', 'store'=>'店铺', 'method'=>'支付方式',
+        'type'=>'订单类型', 'paid_at'=>'付款时间', 'refund_count'=>'退款记录数',
+        'refund_yes'=>'有关联退款', 'refund_no'=>'无关联退款', 'refund_state'=>'退款状态',
+        'records'=>'查看退款记录', 'record_amount'=>'退款金额', 'reason'=>'原因', 'status'=>'状态', 'time'=>'退款时间',
+        'pagination'=>'显示 :from–:to，共 :total 单', 'page'=>'第 :page / :last 页',
+        'previous'=>'上一页', 'next'=>'下一页', 'per_page'=>'每页', 'jump'=>'跳转', 'page_number'=>'页码',
+        'paid_from'=>'付款开始日期', 'paid_to'=>'付款结束日期', 'keyword'=>'搜索',
+        'fields'=>[
+            'detail_group'=>'原始支付方式分组', 'detail_purchase'=>'原始订单类型', 'detail_kind'=>'明细类型',
+            'detail_keyword'=>'搜索内容', 'detail_store'=>'店铺', 'detail_method'=>'支付方式', 'detail_type'=>'订单类型',
+            'detail_refund'=>'退款状态', 'detail_from'=>'付款开始日期', 'detail_to'=>'付款结束日期',
+            'detail_per_page'=>'每页条数', 'detail_page'=>'页码',
+        ],
+    ],
     'renewal_two_sections' => [
         'payment_method' => '支付方式',
         'method_names' => ['ap'=>'苹果支付', 'gp'=>'谷歌支付', 'pp'=>'PayPal支付', 'cc'=>'信用卡支付'],

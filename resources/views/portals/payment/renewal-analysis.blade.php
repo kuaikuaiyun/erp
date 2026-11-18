@@ -40,7 +40,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-10">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-1">
 @endpush
 
 @section('content')
@@ -91,12 +91,16 @@
         <p class="payment-renewal-scope-note">{{ $text('method_rule') }}</p>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
         <div class="table-responsive"><table class="table payment-data-table payment-subscription-refunds"><caption>{{ $text('first_refunds') }}</caption><thead><tr>
-            <th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
+            <th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th><th>{{ __('payment.renewal_details.actions') }}</th>
         </tr></thead><tbody>
         @foreach($groups as $channel=>$group)
             @foreach(['all','subscription','non_subscription'] as $type)
                 @php $refund = $dashboard['initial_refunds_by_type'][$channel][$type]; @endphp
-                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
+                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td><td class="payment-renewal-detail-actions">
+                    @foreach(['orders','refunds'] as $kind)
+                        <button type="button" class="btn btn-default btn-sm" data-renewal-detail-open data-group="{{ $channel }}" data-purchase="{{ $type }}" data-kind="{{ $kind }}" data-title="{{ $methodLabel($group).' / '.$text('purchase_'.$type).' / '.__('payment.renewal_details.'.$kind) }}">{{ __('payment.renewal_details.'.$kind) }}</button>
+                    @endforeach
+                </td></tr>
             @endforeach
         @endforeach
         </tbody></table></div>
@@ -198,9 +202,20 @@
         </details>
     </article>
 </section>
+<div class="modal fade payment-renewal-detail-modal" id="payment-renewal-detail-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="payment-renewal-detail-title"
+    data-endpoint="{{ route('payment.renewal-analysis.order-details') }}"
+    data-parent-filters="{{ json_encode(array_intersect_key($filters,array_flip(['initial_date_from','initial_date_to','initial_timezone','initial_store'])),JSON_UNESCAPED_UNICODE) }}"
+    data-messages="{{ json_encode(['loading'=>__('payment.renewal_details.loading'),'error'=>__('payment.renewal_details.error'),'retry'=>__('payment.renewal_details.retry')],JSON_UNESCAPED_UNICODE) }}">
+    <div class="modal-dialog" role="document"><div class="modal-content">
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('payment.renewal_details.close') }}"><span aria-hidden="true">&times;</span></button><h3 class="modal-title" id="payment-renewal-detail-title">{{ __('payment.renewal_details.title') }}</h3></div>
+        <div class="modal-body"><p data-renewal-detail-feedback role="status" aria-live="polite"></p><div data-renewal-detail-content></div></div>
+        <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('payment.renewal_details.close') }}</button></div>
+    </div></div>
+</div>
 @endsection
 
 @push('scripts')
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261118-1"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 <script>
 (function () {

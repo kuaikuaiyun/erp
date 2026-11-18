@@ -451,6 +451,43 @@ class PaymentPortalController extends Controller
         ]);
     }
 
+    public function renewalAnalysisOrderDetails(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        return response()->view('portals.payment.renewal-order-details', [
+            'detail' => $this->renewalAnalysis->initialOrderDetails(
+                $this->renewalAnalysisFilters($request), $this->renewalOrderDetailFilters($request),
+            ),
+        ])->header('Cache-Control', 'private, no-store');
+    }
+
+    private function renewalOrderDetailFilters(Request $request): array
+    {
+        $rules = [
+            'detail_group' => ['required', Rule::in(['total','method_pp','method_cc','method_gp','method_ap'])],
+            'detail_purchase' => ['required', Rule::in(['all','subscription','non_subscription'])],
+            'detail_kind' => ['required', Rule::in(['orders','refunds'])],
+            'detail_keyword' => ['nullable','string','max:100'],
+            'detail_store' => ['nullable','string','max:191'],
+            'detail_method' => ['nullable', Rule::in(['pp','cc','gp','ap','unknown'])],
+            'detail_type' => ['nullable', Rule::in(['subscription','non_subscription'])],
+            'detail_refund' => ['nullable', Rule::in(['yes','no'])],
+            'detail_from' => ['nullable','date_format:Y-m-d'],
+            'detail_to' => ['nullable','date_format:Y-m-d','after_or_equal:detail_from'],
+            'detail_per_page' => ['nullable','integer', Rule::in([20,50,100])],
+            'detail_page' => ['nullable','integer','min:1','max:1000000'],
+        ];
+        $labels = [];
+        foreach (array_keys($rules) as $key) $labels[$key] = __('payment.renewal_details.fields.'.$key);
+        $data = $request->validate($rules, [], $labels);
+        return array_replace([
+            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'',
+            'detail_from'=>'', 'detail_to'=>'', 'detail_per_page'=>20, 'detail_page'=>1,
+        ], array_filter($data, static fn ($value) => $value !== null));
+    }
+
     public function exportRenewalAnalysis(Request $request): Response
     {
         $context = $this->portalContext($request);
