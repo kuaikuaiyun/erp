@@ -74,6 +74,6 @@ class OperationDashboardDepartmentScopeService
 
     public function canManage(AdminUser $user): bool
     {
-        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+        return strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 }

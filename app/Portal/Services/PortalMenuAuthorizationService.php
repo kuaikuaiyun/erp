@@ -11,12 +11,18 @@ use Illuminate\Support\Str;
 
 class PortalMenuAuthorizationService
 {
+    private const BOSS_ONLY_MENU_CODES = ['dashboard_department_scopes'];
+
     public function __construct(private readonly DepartmentAuthorizationService $authorization)
     {
     }
 
     public function canAccess(AdminUser $user, PortalMenu $menu): bool
     {
+        if ($this->isBossOnlyMenu($menu)) {
+            return $this->isBoss($user);
+        }
+
         if ($user->isAdministrator() || !$menu->permission_slug) {
             return true;
         }
@@ -28,13 +34,19 @@ class PortalMenuAuthorizationService
     {
         $menus = $portal->menus;
         if ($user->isAdministrator()) {
-            return $menus;
+            return $this->isBoss($user)
+                ? $menus
+                : $menus->reject(fn (PortalMenu $menu): bool => $this->isBossOnlyMenu($menu))->values();
         }
 
         $byParent = $menus->groupBy(fn (PortalMenu $menu) => (int) ($menu->parent_id ?: 0));
         $visibleIds = collect();
         $permissionSlugs = null;
         $walk = function (PortalMenu $menu) use (&$walk, $byParent, $user, $visibleIds, &$permissionSlugs): bool {
+            if ($this->isBossOnlyMenu($menu)) {
+                return false;
+            }
+
             $hasVisibleChild = false;
             foreach ($byParent->get((int) $menu->getKey(), collect()) as $child) {
                 $hasVisibleChild = $walk($child) || $hasVisibleChild;
@@ -55,6 +67,16 @@ class PortalMenuAuthorizationService
         }
 
         return $menus->whereIn('id', $visibleIds->unique()->all())->values();
+    }
+
+    private function isBossOnlyMenu(PortalMenu $menu): bool
+    {
+        return in_array((string) $menu->code, self::BOSS_ONLY_MENU_CODES, true);
+    }
+
+    private function isBoss(AdminUser $user): bool
+    {
+        return strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 
     public function menuForRequest(Portal $portal, string $requestPath): ?PortalMenu

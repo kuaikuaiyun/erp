@@ -25,6 +25,7 @@ class OperationDashboardDepartmentScopeController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
+        abort_unless($this->scopes->canManage($context['user']), 403);
 
         $keyword = trim((string) $request->query('account_keyword', ''));
         $canManage = $this->scopes->canManage($context['user']);
