@@ -12,6 +12,7 @@ use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -29,6 +30,7 @@ class AppLovinSpendReviewController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -43,7 +45,7 @@ class AppLovinSpendReviewController extends Controller
             abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
         }
         $visibleIds = $isDashboard
-            ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $filters = $request->validate([
             'operator' => ['nullable', 'string', 'max:100'],
@@ -54,7 +56,7 @@ class AppLovinSpendReviewController extends Controller
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
-        if (! $isDashboard && ! $context['user']->isAdministrator()) {
+        if ($isDashboard || ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $query->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
@@ -64,11 +66,19 @@ class AppLovinSpendReviewController extends Controller
         $fashionQuery = FashionAdvertisingReport::query()
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments']);
+        if ($isDashboard || ! $context['user']->isAdministrator()) {
+            $visibleIds === []
+                ? $fashionQuery->whereRaw('1=0')
+                : $fashionQuery->whereHas('submitter.departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleIds));
+        }
         $fashionQuery->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('submitter_name', 'like', '%'.$name.'%'));
+        $restrictToVisibleDepartments = $isDashboard || ! $context['user']->isAdministrator();
         $fashionRows = $fashionQuery->get()
-            ->flatMap(function (FashionAdvertisingReport $report) {
-                $department = $report->submitter?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
-                    ?: $report->submitter?->departments?->first();
+            ->flatMap(function (FashionAdvertisingReport $report) use ($restrictToVisibleDepartments, $visibleIds) {
+                $departments = $report->submitter?->departments ?? collect();
+                $department = $restrictToVisibleDepartments
+                    ? $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true))
+                    : ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first());
 
                 return $report->adSpendEntries
                     ->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
@@ -88,7 +98,7 @@ class AppLovinSpendReviewController extends Controller
                     ]);
             });
         $rows = $rows->concat($fashionRows);
-        if (! $isDashboard && ! $context['user']->isAdministrator()) {
+        if ($isDashboard || ! $context['user']->isAdministrator()) {
             $rows = $rows->whereIn('department_id', $visibleIds)->values();
         }
         $availableDepartmentIds = $rows->pluck('department_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
@@ -188,9 +198,11 @@ class AppLovinSpendReviewController extends Controller
             'store_id' => ['nullable', 'integer', Rule::exists((new AssistantDomainStore)->getTable(), 'id')],
         ]);
 
-        $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleIds = $isDashboard
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
+            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $account = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED)
-            ->when(! $isDashboard && ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds))
+            ->when($isDashboard || ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds))
             ->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->map(function (array $row) use ($report): array {
                 return [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->operator_user_id, (string) ($row['agency'] ?? ''), (string) ($row['media_source'] ?? ''), (string) ($row['account_name'] ?? ''), (string) ($row['account_number'] ?? '')),
@@ -200,7 +212,11 @@ class AppLovinSpendReviewController extends Controller
             }))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
         if (! $account) {
             $account = FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
-                ->with('adSpendEntries')->get()->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
+                ->with(['adSpendEntries', 'submitter.departments'])
+                ->when($isDashboard || ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === []
+                    ? $query->whereRaw('1=0')
+                    : $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereIn('admin_roles.id', $visibleIds)))
+                ->get()->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number),
                     'operator_user_id' => (int) $report->submitter_id,
                     'media' => mb_strtolower(trim((string) $entry->media)),
@@ -242,6 +258,8 @@ class AppLovinSpendReviewController extends Controller
             if (! $context['user']->isAdministrator()) {
                 abort_unless(in_array((int) $screenshot->operation_department_id, $this->storeOwners->visibleOperationDepartmentIds($context['user']), true), 403);
             }
+        } else {
+            abort_unless(in_array((int) $screenshot->operation_department_id, $this->dashboardScopes->visibleDepartmentIds($context['user']), true), 403);
         }
         abort_unless(Storage::disk('local')->exists($screenshot->screenshot_path), 404);
 

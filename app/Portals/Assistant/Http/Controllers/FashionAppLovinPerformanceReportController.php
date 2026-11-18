@@ -13,6 +13,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -52,7 +54,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->map(fn ($id) => (int) $id)->values()->all();
         $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedDepartmentIds === [];
         $visibleDepartmentIds = $isDashboard
-            ? null
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : ($isFashionPortal
             ? ($canSeeAll ? null : $managedDepartmentIds)
             : $this->visibleDepartmentIds($context['user']));
