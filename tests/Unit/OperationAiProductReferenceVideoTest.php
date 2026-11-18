@@ -26,6 +26,7 @@ class OperationAiProductReferenceVideoTest extends TestCase
 
         $this->assertTrue(OperationAiProductReferenceVideo::isOperatorMaterialFile($firstOperator));
         $this->assertTrue(OperationAiProductReferenceVideo::isOperatorMaterialFile($secondOperator));
+        $this->assertTrue(OperationAiProductReferenceVideo::isOperatorMaterialFile('kky-146-ZZ-261117-placement-3ptpid.mp4'));
         $this->assertFalse(OperationAiProductReferenceVideo::isOperatorMaterialFile('kky-146-flow-261117-001.mp4'));
         $this->assertFalse(OperationAiProductReferenceVideo::isOperatorMaterialFile('kky-146-spy-261117-002.mp4'));
 
