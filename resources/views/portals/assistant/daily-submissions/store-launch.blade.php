@@ -75,14 +75,14 @@
                         <td><span class="status-pill {{ $item->status }}">{{ $item->statusLabel() }}</span><br><span style="white-space:pre-wrap">{{ $item->response_text ?: '—' }}</span></td>
                         <td style="min-width:260px">
                             @if($item->status === 'pending')
-                                <form method="post" action="{{ route('assistant.daily-submissions.store-launches.process', $item) }}" class="js-store-launch-decision-form" novalidate>
+                                <form method="post" action="{{ route('assistant.daily-submissions.store-launches.process', $item) }}">
                                     @csrf
                                     @method('PATCH')
-                                    <textarea class="form-control input-sm" name="response_text" rows="3" maxlength="5000" placeholder="填写处理结果或驳回原因"></textarea>
+                                    <textarea class="form-control input-sm" name="response_text" rows="3" maxlength="5000" required placeholder="填写处理结果或驳回原因"></textarea>
                                     <input type="hidden" name="decision" value="">
                                     <div class="decision-actions">
-                                        <button type="button" class="btn btn-xs btn-success js-store-launch-decision" data-decision="processed"><i class="fa fa-check"></i> 回复并标记已处理</button>
-                                        <button type="button" class="btn btn-xs btn-danger js-store-launch-decision" data-decision="rejected"><i class="fa fa-times"></i> 驳回</button>
+                                        <button type="submit" class="btn btn-xs btn-success" onclick="this.form.elements.decision.value='processed'"><i class="fa fa-check"></i> 回复并标记已处理</button>
+                                        <button type="submit" class="btn btn-xs btn-danger" onclick="this.form.elements.decision.value='rejected'; return confirm('确认驳回这条下店需求？')"><i class="fa fa-times"></i> 驳回</button>
                                     </div>
                                 </form>
                             @else
@@ -103,30 +103,3 @@
     </div>
 </section>
 @endsection
-
-@push('scripts')
-<script>
-(function () {
-    document.addEventListener('click', function (event) {
-        var button = event.target.closest && event.target.closest('.js-store-launch-decision');
-        if (!button) return;
-
-        var form = button.closest('.js-store-launch-decision-form');
-        var textarea = form && form.querySelector('textarea[name="response_text"]');
-        var decision = button.getAttribute('data-decision');
-        var response = textarea ? textarea.value.trim() : '';
-
-        if (!response) {
-            alert(decision === 'rejected' ? '请先填写驳回原因。' : '请先填写处理结果。');
-            if (textarea) textarea.focus();
-            return;
-        }
-        if (decision === 'rejected' && !confirm('确认驳回这条下店需求？')) return;
-
-        form.querySelector('input[name="decision"]').value = decision;
-        button.disabled = true;
-        form.submit();
-    });
-})();
-</script>
-@endpush
