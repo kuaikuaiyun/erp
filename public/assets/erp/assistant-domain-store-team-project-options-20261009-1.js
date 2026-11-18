@@ -44,10 +44,11 @@
     }
 
     function appendOption(group, field, value, canDelete) {
-        var presets = group.find(field === 'team' ? '.assistant-tag-presets' : '.assistant-project-option-presets').first();
-        var selector = field === 'team' ? '.assistant-tag-preset' : '.assistant-project-option-choice';
+        var isTagField = field === 'team' || field === 'erp';
+        var presets = group.find(isTagField ? '.assistant-tag-presets' : '.assistant-project-option-presets').first();
+        var selector = isTagField ? '.assistant-tag-preset' : '.assistant-project-option-choice';
         var existing = presets.find(selector).filter(function () {
-            var attribute = field === 'team' ? 'data-tag-value' : 'data-option-value';
+            var attribute = isTagField ? 'data-tag-value' : 'data-option-value';
 
             return String($(this).attr(attribute)) === value;
         }).first();
@@ -59,8 +60,8 @@
         var wrapper = $('<span>', { class: 'assistant-custom-quick-option-wrap' });
         var choice = $('<button>', {
             type: 'button',
-            class: 'btn btn-default btn-sm ' + (field === 'team' ? 'assistant-tag-preset' : 'assistant-project-option-choice'),
-        }).attr(field === 'team' ? 'data-tag-value' : 'data-option-value', value)
+            class: 'btn btn-default btn-sm ' + (isTagField ? 'assistant-tag-preset' : 'assistant-project-option-choice'),
+        }).attr(isTagField ? 'data-tag-value' : 'data-option-value', value)
             .text(value)
             .appendTo(wrapper);
 
@@ -116,7 +117,7 @@
         var button = $(this);
         var group = button.closest('[data-quick-option-field]');
 
-        if (String(group.attr('data-quick-option-field') || '') === 'team') {
+        if (['team', 'erp'].indexOf(String(group.attr('data-quick-option-field') || '')) !== -1) {
             button.data('team-option-value', $.trim(String(group.find('.assistant-tag-entry').first().val() || '')));
         }
     });
@@ -125,10 +126,11 @@
         var button = $(this);
         var group = button.closest('[data-quick-option-field]');
         var field = String(group.attr('data-quick-option-field') || '');
-        var input = field === 'team'
+        var isTagField = field === 'team' || field === 'erp';
+        var input = isTagField
             ? group.find('.assistant-tag-entry').first()
             : group.find('input[name="project"]').first();
-        var value = field === 'team'
+        var value = isTagField
             ? $.trim(String(button.data('team-option-value') || input.val() || ''))
             : $.trim(String(input.val() || ''));
         var optionConfig = config();
@@ -141,7 +143,7 @@
             return;
         }
 
-        if (!optionConfig.url || (field !== 'team' && field !== 'project')) {
+        if (!optionConfig.url || ['team', 'project', 'erp'].indexOf(field) === -1) {
             showButtonFeedback(button, message('failed'), false);
             return;
         }
@@ -167,7 +169,7 @@
 
             var choice = appendOption(group, field, String(option.value), true);
 
-            if (field === 'team') {
+            if (isTagField) {
                 var hasTag = group.find('.assistant-tag-chip').filter(function () {
                     return String($(this).attr('data-tag-value')) === String(option.value);
                 }).length > 0;
@@ -197,7 +199,7 @@
         var value = String(button.attr('data-option-value') || '');
         var optionConfig = config();
 
-        if (!optionConfig.deleteUrl || (field !== 'team' && field !== 'project') || !value) {
+        if (!optionConfig.deleteUrl || ['team', 'project', 'erp'].indexOf(field) === -1 || !value) {
             showDeleteFailure(button, message('deleteFailed'));
             return;
         }
