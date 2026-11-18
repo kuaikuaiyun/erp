@@ -2320,9 +2320,12 @@ class ProductLibraryController extends Controller
 
                 $normalization = $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
                 if ($normalization === BrowserCompatibleVideoService::FAILED) {
-                    Storage::disk('local')->delete($path);
-                    throw ValidationException::withMessages([
-                        'material_videos' => '该视频使用 H.265/HEVC 编码，服务器转为网页可播放格式失败。旧视频未删除，请稍后重试或上传 H.264 编码的 MP4 视频。',
+                    // Conversion is only a playback enhancement. Preserve the
+                    // source video and allow the product save to complete; a
+                    // browser that cannot decode it can use the download link.
+                    logger()->warning('AI product material video transcoding failed; original file retained.', [
+                        'product_id' => $product->getKey(),
+                        'path' => $path,
                     ]);
                 }
                 OperationAiProductReferenceVideo::query()->create([
