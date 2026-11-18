@@ -184,12 +184,16 @@ class PaymentRenewalAnalysisExportService
             $detail->fromArray([[
                 $row['stage_number'] === 0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
                 $channels[$row['initial_channel']], $channels[$row['actual_channel']],
-                $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'],
+                $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'], $row['bill_number'], $row['buyer_email'],
                 $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'], $eventTimes($row['refund_details']),
                 $row['dispute_count'], $row['dispute_amount'], $eventTimes($row['dispute_details']),
                 $row['payment_method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
                 $data[$row['stage_number'] === 0 ? 'initial_calculation' : 'calculation']['timezone'],
-            ]], null, 'A'.$rowNumber++);
+            ]], null, 'A'.$rowNumber);
+            foreach (['H'=>'bill_number','I'=>'buyer_email'] as $column=>$field) {
+                $detail->setCellValueExplicit($column.$rowNumber, $row[$field], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            }
+            $rowNumber++;
         }
         foreach ([[$first,8],[$refunds,5],[$renewals,6],[$detail,1]] as [$sheet,$headerRow]) {
             $range = 'A'.$headerRow.':'.$sheet->getHighestColumn().$headerRow;
@@ -198,7 +202,7 @@ class PaymentRenewalAnalysisExportService
             $sheet->freezePane('A'.($headerRow+1));
             foreach (range('A',$sheet->getHighestColumn()) as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
         }
-        foreach (['L','O'] as $column) {
+        foreach (['N','Q'] as $column) {
             $detail->getColumnDimension($column)->setAutoSize(false)->setWidth(24);
             if ($rowNumber > 2) $detail->getStyle($column.'2:'.$column.($rowNumber-1))->getAlignment()->setWrapText(true);
         }

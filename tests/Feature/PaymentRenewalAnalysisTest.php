@@ -546,6 +546,8 @@ class PaymentRenewalAnalysisTest extends TestCase
             ['logistics_order_id'=>3,'dispute_amount_usd'=>6,'dispute_created_at'=>'2026-11-04 04:00:00'],
             ['logistics_order_id'=>3,'dispute_amount_usd'=>6,'dispute_created_at'=>'2026-11-05 20:00:00'],
         ]);
+        DB::table('logistics_orders')->where('id',5)->update(['bill_number'=>'00009549574570768548249622','buyer_email'=>'buyer@example.com']);
+        DB::table('logistics_orders')->where('id',3)->update(['bill_number'=>'=1+1','buyer_email'=>null]);
         $response = app(PaymentRenewalAnalysisExportService::class)->download($this->filters(['initial_timezone'=>'-05:00']));
         ob_start(); $response->sendContent(); $bytes=ob_get_clean();
         $path=tempnam(sys_get_temp_dir(),'renewal-event-times-');
@@ -553,26 +555,34 @@ class PaymentRenewalAnalysisTest extends TestCase
             file_put_contents($path,$bytes);
             $book=IOFactory::load($path);
             $sheet=$book->getSheet(3);
-            self::assertSame('退款时间',$sheet->getCell('L1')->getValue());
-            self::assertSame('争议时间',$sheet->getCell('O1')->getValue());
-            self::assertSame('时间所属时区',$sheet->getCell('Q1')->getValue());
+            self::assertSame('退款时间',$sheet->getCell('N1')->getValue());
+            self::assertSame('争议时间',$sheet->getCell('Q1')->getValue());
+            self::assertSame('时间所属时区',$sheet->getCell('S1')->getValue());
+            self::assertSame('账单号',$sheet->getCell('H1')->getValue());
+            self::assertSame('客户邮箱',$sheet->getCell('I1')->getValue());
             $matched=[];
             for ($r=2;$r<=$sheet->getHighestRow();$r++) {
                 $id=(string)$sheet->getCell('E'.$r)->getValue();
                 if ($id==='5') {
-                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00",$sheet->getCell('L'.$r)->getValue());
-                    self::assertNull($sheet->getCell('O'.$r)->getValue());
-                    self::assertSame('UTC-05:00',$sheet->getCell('Q'.$r)->getValue());
-                    self::assertTrue($sheet->getStyle('L'.$r)->getAlignment()->getWrapText());
+                    self::assertSame('00009549574570768548249622',$sheet->getCell('H'.$r)->getValue());
+                    self::assertSame('s',$sheet->getCell('H'.$r)->getDataType());
+                    self::assertSame('buyer@example.com',$sheet->getCell('I'.$r)->getValue());
+                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00",$sheet->getCell('N'.$r)->getValue());
+                    self::assertNull($sheet->getCell('Q'.$r)->getValue());
+                    self::assertSame('UTC-05:00',$sheet->getCell('S'.$r)->getValue());
+                    self::assertTrue($sheet->getStyle('N'.$r)->getAlignment()->getWrapText());
                     $matched[]=$id;
                 } elseif ($id==='3') {
-                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00",$sheet->getCell('O'.$r)->getValue());
-                    self::assertNull($sheet->getCell('L'.$r)->getValue());
-                    self::assertSame('UTC+08:00',$sheet->getCell('Q'.$r)->getValue());
+                    self::assertSame('=1+1',$sheet->getCell('H'.$r)->getValue());
+                    self::assertSame('s',$sheet->getCell('H'.$r)->getDataType());
+                    self::assertNull($sheet->getCell('I'.$r)->getValue());
+                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00",$sheet->getCell('Q'.$r)->getValue());
+                    self::assertNull($sheet->getCell('N'.$r)->getValue());
+                    self::assertSame('UTC+08:00',$sheet->getCell('S'.$r)->getValue());
                     $matched[]=$id;
                 } elseif ($id==='6') {
                     // A refund with no event timestamp remains blank; never invent a payment-time substitute.
-                    self::assertNull($sheet->getCell('L'.$r)->getValue());
+                    self::assertNull($sheet->getCell('N'.$r)->getValue());
                     $matched[]=$id;
                 }
             }

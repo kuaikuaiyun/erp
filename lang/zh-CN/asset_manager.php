@@ -22,6 +22,7 @@ return [
         'attributes' => ['source_department_id' => '授权部门', 'department_ids' => '目标部门', 'department_ids.*' => '目标部门编号', 'version' => '配置版本', 'page' => '页码'],
     ],
     'computer_ui' => [
+        'classification_brand' => '分类/品牌', 'usage_area' => '使用区域', 'detail_label' => ':label：',
         'subtitle' => '电脑设备台账与部门资产管理',
         'filters' => '筛选条件', 'list' => '设备列表',
         'search_placeholder' => '请输入:key', 'option_search' => '输入关键词筛选选项',

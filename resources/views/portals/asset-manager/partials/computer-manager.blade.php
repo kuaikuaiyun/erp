@@ -2,6 +2,22 @@
     $computerOwners = array_intersect_key($ownerDepartments, array_flip($writableDepartmentIds));
     $pageNumbers = collect([1, 2, $rows->currentPage()-1, $rows->currentPage(), $rows->currentPage()+1, $rows->lastPage()-1, $rows->lastPage()])->filter(fn ($page) => $page >= 1 && $page <= $rows->lastPage())->unique()->sort()->values();
     $lastVisiblePage = null;
+    $computerColumns = [
+        'owner_department_id' => ['owner_department_id'],
+        'classification_brand' => ['category', 'brand'],
+        'serial_number' => ['serial_number'],
+        'monthly_rent' => ['monthly_rent'],
+        'usage_area' => ['area', 'user_id', 'office'],
+        'project' => ['project'],
+        'notes' => ['notes'],
+    ];
+    $computerValue = static function ($record, $key) use ($ownerDepartments, $service, $fields) {
+        if ($key === 'owner_department_id') {
+            return $ownerDepartments[$record->owner_department_id] ?? __('asset_manager.computer_unassigned');
+        }
+        $value = $service->display($record, $key, $fields[$key]);
+        return $value !== '' ? $value : '—';
+    };
 @endphp
 <section class="content">
 <div class="am-workspace am-computers" id="asset-manager">
@@ -65,16 +81,27 @@
         <div class="am-table-wrap am-computer-table-scroll">
             <table class="table table-bordered table-hover am-computer-table">
                 <thead><tr><th class="am-computer-select"><input type="checkbox" id="am-select-all" aria-label="{{ __('asset_manager.all') }}"></th>
-                    @foreach($fields as $key=>$type)
-                    <th>{{ $labels[$key] }}</th>
+                    @foreach($computerColumns as $columnKey=>$columnFields)
+                    <th>{{ count($columnFields)>1 ? __('asset_manager.computer_ui.'.$columnKey) : $labels[$columnKey] }}</th>
                     @endforeach
                     <th>{{ $labels['created_at'] }}</th><th>{{ __('asset_manager.actions') }}</th>
                 </tr></thead>
                 <tbody>
                     @forelse($rows as $row)
                     <tr><td class="am-computer-select"><input type="checkbox" class="am-selected" value="{{ $row->id }}" aria-label="{{ __('asset_manager.record_id') }} {{ $row->id }}"></td>
-                        @foreach($fields as $key=>$type)
-                        <td class="{{ $key==='monthly_rent' ? 'am-computer-money' : '' }}">{{ $key==='owner_department_id' ? ($ownerDepartments[$row->owner_department_id] ?? __('asset_manager.computer_unassigned')) : ($service->display($row, $key, $type) !== '' ? $service->display($row, $key, $type) : '—') }}</td>
+                        @foreach($computerColumns as $columnKey=>$columnFields)
+                        <td class="{{ $columnKey==='monthly_rent' ? 'am-computer-money' : '' }} {{ count($columnFields)>1 ? 'am-computer-details-cell' : '' }}">
+                            @if(count($columnFields)>1)
+                            <dl class="am-computer-details">
+                                @foreach($columnFields as $fieldKey)
+                                <dt>{{ __('asset_manager.computer_ui.detail_label', ['label'=>$labels[$fieldKey]]) }}</dt>
+                                <dd>{{ $computerValue($row, $fieldKey) }}</dd>
+                                @endforeach
+                            </dl>
+                            @else
+                            {{ $computerValue($row, $columnFields[0]) }}
+                            @endif
+                        </td>
                         @endforeach
                         <td class="am-computer-time">{{ $row->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</td>
                         <td class="am-actions"><button class="btn btn-default btn-xs" data-view="{{ $row->id }}"><i class="fa fa-eye" aria-hidden="true"></i> {{ __('asset_manager.view') }}</button>
@@ -85,7 +112,7 @@
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="{{ count($fields)+3 }}" class="am-computer-empty">{{ __('asset_manager.empty') }}</td></tr>
+                    <tr><td colspan="{{ count($computerColumns)+3 }}" class="am-computer-empty">{{ __('asset_manager.empty') }}</td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -152,12 +179,18 @@ $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>
 (function ($) {
     var writableDepartments = @json(array_values($writableDepartmentIds));
     var pickerText = window.AssetManagerConfig.text.computer_ui;
-    if ($.fn.select2) {
-        $('.am-computers .am-computer-search-select').each(function () {
+    function enhanceSelects(elements, modal) {
+        if (!$.fn.select2) return;
+        elements.each(function () {
             var select = $(this);
+            if (select.data('select2') || this.disabled) return;
+            var previous = this.previousElementSibling;
+            if (modal && previous && previous.tagName === 'INPUT' && !previous.name) previous.remove();
+            select.addClass('am-computer-search-select');
             select.select2({
                 width: '100%',
                 minimumResultsForSearch: 0,
+                dropdownParent: modal ? $(modal) : $(document.body),
                 dropdownCssClass: 'am-computer-select-dropdown',
                 language: {
                     noResults: function () { return pickerText.no_results; },
@@ -172,16 +205,32 @@ $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>
             });
         });
     }
+    enhanceSelects($('.am-computers .am-computer-search-select'));
     $('#am-modal').on('show.bs.modal', function () {
         var owner = this.querySelector('select[name="owner_department_id"]');
-        if (!owner || owner.disabled) return;
-        Array.from(owner.options).forEach(function (option) {
-            var blocked = option.value !== '' && writableDepartments.indexOf(Number(option.value)) < 0;
-            option.disabled = blocked;
-            option.hidden = blocked;
+        if (owner && !owner.disabled) {
+            Array.from(owner.options).forEach(function (option) {
+                if (option.value !== '' && writableDepartments.indexOf(Number(option.value)) < 0) option.remove();
+            });
+            if (owner.value !== '' && writableDepartments.indexOf(Number(owner.value)) < 0) owner.value = '';
+            if (!owner.value && writableDepartments.length === 1) owner.value = String(writableDepartments[0]);
+        }
+        enhanceSelects($(this).find('#am-fields select'), this);
+    });
+    $('#am-import-modal').on('show.bs.modal', function () {
+        enhanceSelects($(this).find('#am-import-owner'), this);
+    });
+    $('#am-modal, #am-import-modal').on('hide.bs.modal', function () {
+        if (!$.fn.select2) return;
+        $(this).find('select.am-computer-search-select').each(function () {
+            if ($(this).data('select2')) $(this).select2('close');
         });
-        if (owner.value !== '' && writableDepartments.indexOf(Number(owner.value)) < 0) owner.value = '';
-        if (!owner.value && writableDepartments.length === 1) owner.value = String(writableDepartments[0]);
+    });
+    $('#am-modal').on('hidden.bs.modal', function () {
+        if (!$.fn.select2) return;
+        $(this).find('#am-fields select.am-computer-search-select').each(function () {
+            if ($(this).data('select2')) $(this).select2('destroy');
+        });
     });
 })(window.jQuery);
 </script>

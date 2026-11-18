@@ -1001,7 +1001,7 @@ return array_replace_recursive($translations, [
             'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
             'columns' => [
                 'stage' => '付款阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
-                'initial_order' => '首扣订单', 'renewal_order' => '本阶段订单', 'store' => '店铺', 'transaction' => '支付流水',
+                'initial_order' => '首扣订单', 'renewal_order' => '本阶段订单', 'store' => '店铺', 'transaction' => '支付流水', 'bill_number' => '账单号', 'buyer_email' => '客户邮箱',
                 'paid_at' => '付款时间', 'amount' => '实收金额', 'refund_count' => '退款笔数', 'refund_amount' => '退款金额', 'refund_time' => '退款时间',
                 'dispute_count' => '争议笔数', 'dispute_amount' => '争议金额', 'dispute_time' => '争议时间',
             ],
