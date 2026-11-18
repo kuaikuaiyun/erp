@@ -9,6 +9,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PrivateVideoResponse
 {
+    public function __construct(private readonly BrowserCompatibleVideoService $videoCompatibility) {}
+
     /**
      * Stream a private video with explicit byte-range support.
      *
@@ -28,6 +30,8 @@ class PrivateVideoResponse
 
         $absolutePath = Storage::disk($disk)->path($path);
         abort_unless(is_file($absolutePath) && is_readable($absolutePath), 404);
+
+        $compatibility = $this->videoCompatibility->normalize($absolutePath);
 
         $request ??= request();
         $fileSize = (int) filesize($absolutePath);
@@ -74,6 +78,7 @@ class PrivateVideoResponse
             'Content-Encoding' => 'identity',
             'X-Accel-Buffering' => 'no',
             'X-Content-Type-Options' => 'nosniff',
+            'X-Video-Compatibility' => $compatibility,
         ]);
 
         if ($partial) {

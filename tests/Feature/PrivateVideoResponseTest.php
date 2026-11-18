@@ -31,6 +31,7 @@ class PrivateVideoResponseTest extends TestCase
         self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
         self::assertSame('identity', $response->headers->get('Content-Encoding'));
         self::assertSame('no', $response->headers->get('X-Accel-Buffering'));
+        self::assertSame('ready', $response->headers->get('X-Video-Compatibility'));
     }
 
     public function test_inline_video_response_returns_not_found_for_missing_file(): void
