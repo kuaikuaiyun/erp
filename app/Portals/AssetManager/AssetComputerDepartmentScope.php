@@ -34,8 +34,7 @@ final class AssetComputerDepartmentScope
             return array_keys($this->departments($user));
         }
 
-        return $user->can('asset-manager.computers.manage')
-            ? $this->authorization->managedDepartmentIds($user)->all() : [];
+        return $this->authorization->managedDepartmentIds($user)->all();
     }
 
     public function canManage(AdminUser $user): bool

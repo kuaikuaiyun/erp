@@ -144,10 +144,10 @@ class AssetManagerTest extends TestCase
         $id = AssetComputerEquipment::first()->id;
         $this->getJson('/asset-manager/computers/'.$id)->assertOk()->assertJsonPath('monthly_rent', '10.10');
         $this->putJson('/asset-manager/computers/'.$id, ['monthly_rent' => '20.20'])->assertOk();
-        $this->joinDepartment($owner, 'manager');
+        $this->joinDepartment($owner, 'member');
         $this->actor->manage = false;
         $this->deleteJson('/asset-manager/computers/'.$id)->assertForbidden();
-        $this->actor->manage = true;
+        $this->joinDepartment($owner, 'manager');
         $this->deleteJson('/asset-manager/computers/'.$id)->assertOk();
         $this->assertSame(0, AssetComputerEquipment::count());
         DB::table('portal_menus')->where('code', 'asset_manager_computers')->update(['is_enabled' => false]);
@@ -599,6 +599,7 @@ class AssetManagerTest extends TestCase
         $this->postJson($url.'/import', ['token' => $token, 'owner_department_id' => $b->id])->assertOk();
         $this->assertSame($a->id, (int) AssetComputerEquipment::first()->owner_department_id);
         $this->actor->manage = false;
+        $this->joinDepartment($a, 'member');
         $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['serial_number' => 'blocked'])])->assertForbidden();
     }
 
@@ -625,6 +626,7 @@ class AssetManagerTest extends TestCase
     public function test_computer_manager_cannot_write_department_where_they_are_only_a_member(): void
     {
         [$root, $a, $b] = $this->departmentsForIsolation();
+        $this->actor->manage = false;
         $this->joinDepartment($a, 'manager');
         DB::table('admin_role_users')->insert(['role_id' => $b->id, 'user_id' => $this->actor->id, 'position' => 'member']);
         $mine = AssetComputerEquipment::create(['owner_department_id' => $a->id, 'serial_number' => 'ManagerRecord']);
@@ -640,13 +642,14 @@ class AssetManagerTest extends TestCase
         $this->assertSame($b->id, (int) $readonly->fresh()->owner_department_id);
     }
 
-    public function test_computer_manager_and_deputy_can_write_with_permission_and_revocation_blocks_import(): void
+    public function test_computer_manager_and_deputy_can_write_without_manage_permission_and_demotion_blocks_import(): void
     {
         [$root, $a, $b] = $this->departmentsForIsolation();
         $url = '/asset-manager/computers';
+        $this->actor->manage = false;
         foreach (['manager', 'deputy'] as $position) {
             $this->joinDepartment($a, $position);
-            $this->get($url)->assertViewHas('canManage', true);
+            $this->get($url)->assertViewHas('canManage', true)->assertSee('id="am-add"', false)->assertSee('id="am-import"', false);
             $this->postJson($url, ['serial_number' => $position])->assertOk();
             $row = AssetComputerEquipment::orderByDesc('id')->first();
             $this->putJson($url.'/'.$row->id, ['brand' => $position])->assertOk();
@@ -656,10 +659,11 @@ class AssetManagerTest extends TestCase
             $this->postJson($url.'/import', ['token' => $preview->json('token')])->assertForbidden();
             $this->joinDepartment($a, $position);
             $this->postJson($url.'/import', ['token' => $preview->json('token')])->assertOk();
-            $this->actor->manage = false;
-            $this->get($url)->assertViewHas('canManage', false);
+            $this->actor->view = false;
+            $this->get($url)->assertForbidden();
             $this->postJson($url, [])->assertForbidden();
-            $this->actor->manage = true;
+            $this->postJson($url.'/import/preview', [])->assertForbidden();
+            $this->actor->view = true;
         }
         $this->actor->administrator = true;
         $this->actor->manage = false;
