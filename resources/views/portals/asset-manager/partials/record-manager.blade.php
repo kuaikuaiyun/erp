@@ -1,5 +1,5 @@
 @push('styles')
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261118-1">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261118-2">
 @endpush
 <div class="am-workspace" id="asset-manager">
 <h2>{{ __('asset_manager.titles.'.$kind) }}</h2><p class="text-muted">{{ __('asset_manager.expired_hint') }}</p>
@@ -29,7 +29,11 @@
 
 <form method="get" id="am-filters" class="am-panel"><div class="am-grid">
 @foreach($fields as $key=>$type)<label>{{ $labels[$key] }}
-@if(in_array($type,['user','department']))<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}"><select class="form-control" name="filter[{{ $key }}]"><option value="">{{ __('asset_manager.all') }}</option>@foreach($key==='owner_department_id'?$ownerDepartments:($type==='user'?$users:$departments) as $id=>$label)<option value="{{ $id }}" @selected((string)request('filter.'.$key)===(string)$id)>{{ $label }}</option>
+@if(in_array($type,['user','department']))<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}"><select class="form-control" name="filter[{{ $key }}]"><option value="">{{ __('asset_manager.all') }}</option>
+@if($kind==='computers' && $key==='owner_department_id' && $user->isAdministrator())
+<option value="0" @selected(request('filter.owner_department_id')==='0')>{{ __('asset_manager.computer_unassigned') }}</option>
+@endif
+@foreach($key==='owner_department_id'?$ownerDepartments:($type==='user'?$users:$departments) as $id=>$label)<option value="{{ $id }}" @selected((string)request('filter.'.$key)===(string)$id)>{{ $label }}</option>
 @endforeach
 </select>
 
@@ -68,7 +72,7 @@
  @if($kind==='codex-renewals')<th>{{ __('asset_manager.remaining') }}</th>
 @endif
 <th>{{ __('asset_manager.actions') }}</th></tr></thead><tbody>
-@forelse($rows as $row)<tr><td><input type="checkbox" class="am-selected" value="{{ $row->id }}" aria-label="{{ __('asset_manager.record_id') }} {{ $row->id }}"></td>@foreach($fields as $key=>$type)<td>{{ $key==='owner_department_id' ? ($ownerDepartments[$row->owner_department_id] ?? '—') : ($kind==='ipfoxy' ? ($key==='expires_at'?($row->expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')??'—'):($row->$key??'—')) : ($service->display($row,$key,$type) !== '' ? $service->display($row,$key,$type) : '—')) }}</td>
+@forelse($rows as $row)<tr><td><input type="checkbox" class="am-selected" value="{{ $row->id }}" aria-label="{{ __('asset_manager.record_id') }} {{ $row->id }}"></td>@foreach($fields as $key=>$type)<td>{{ $key==='owner_department_id' ? ($ownerDepartments[$row->owner_department_id] ?? ($kind==='computers'?__('asset_manager.computer_unassigned'):'—')) : ($kind==='ipfoxy' ? ($key==='expires_at'?($row->expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')??'—'):($row->$key??'—')) : ($service->display($row,$key,$type) !== '' ? $service->display($row,$key,$type) : '—')) }}</td>
 @endforeach
 
 @if($kind!=='ipfoxy')<td>{{ $row->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</td>
@@ -99,12 +103,11 @@ $days=(int) \Carbon\CarbonImmutable::now('Asia/Shanghai')->startOfDay()->diffInD
 @endif
 </div>
 <div class="modal fade" id="am-modal" tabindex="-1" role="dialog" aria-labelledby="am-modal-title"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button class="close" data-dismiss="modal" aria-label="{{ __('asset_manager.cancel') }}">×</button><h4 id="am-modal-title"></h4></div><form id="am-form"><div class="modal-body"><div id="am-errors" role="alert"></div><div class="am-grid" id="am-fields"></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-primary" id="am-save">{{ __('asset_manager.save') }}</button></div></form></div></div></div>
-<div class="modal fade" id="am-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h4>{{ __('asset_manager.import') }}</h4></div><div class="modal-body"><p>{{ __('asset_manager.import_help') }}</p>@if($kind!=='computers')
+<div class="modal fade" id="am-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h4>{{ __('asset_manager.import') }}</h4></div><div class="modal-body"><p>{{ __('asset_manager.import_help') }}</p>
 <label>{{ __('asset_manager.fields.owner_department_id') }}<select class="form-control" id="am-import-owner">
 <option value="">{{ __('asset_manager.choose_owner') }}</option>
 @foreach($ownerDepartments as $id=>$label)<option value="{{ $id }}" @selected(count($ownerDepartments)===1)>{{ $label }}</option>@endforeach
-</select></label><p>{{ __('asset_manager.import_owner_help') }}</p>
-@endif
+</select></label><p>{{ __($kind==='computers'?'asset_manager.computer_import_owner_help':'asset_manager.import_owner_help') }}</p>
 <input type="file" id="am-file" accept=".xlsx,.csv"><div id="am-import-result" role="status"></div></div><div class="modal-footer"><button class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-default" id="am-preview">{{ __('asset_manager.preview') }}</button><button class="btn btn-primary" id="am-import-confirm" disabled>{{ __('asset_manager.confirm_import') }}</button></div></div></div></div>
 </div>
 @push('scripts')
@@ -112,5 +115,5 @@ $days=(int) \Carbon\CarbonImmutable::now('Asia/Shanghai')->startOfDay()->diffInD
 $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>$departments,'ownerDepartments'=>$ownerDepartments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>$assetBase,'csrf'=>csrf_token()];
 @endphp
 <script>window.AssetManagerConfig=@json($clientConfig);</script>
-<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-1"></script>
+<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-2"></script>
 @endpush

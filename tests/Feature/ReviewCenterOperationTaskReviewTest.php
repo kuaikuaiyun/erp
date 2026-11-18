@@ -88,6 +88,86 @@ class ReviewCenterOperationTaskReviewTest extends TestCase
         $this->bind(8, 2);
     }
 
+    public function test_dashboard_uses_bound_departments_and_keeps_all_task_links_inside_review_center(): void
+    {
+        (require database_path('migrations/2026_11_18_000100_install_review_center_operation_task_dashboard.php'))->up();
+        $task = $this->task();
+        $this->asset($task);
+        // The same member has an out-of-scope historical task: it must not leak through membership.
+        $outside = $this->task(3);
+        $this->asset($outside);
+        $this->get(route('review-center.operation-tasks.dashboard'))
+            ->assertOk()->assertSee(__('review_center.dashboard'))
+            ->assertViewHas('teamRows', function ($teams) use ($task): bool {
+                self::assertSame([2], $teams->pluck('id')->all());
+                $member = $teams->first()->members->firstWhere('id', 7);
+                self::assertSame(1, $member->single_count);
+                self::assertSame(1, $member->initial_assets);
+                self::assertSame([$task->id], array_column($member->task_records, 'id'));
+                self::assertSame(route('review-center.operation-tasks.tests.show', $task), $member->task_records[0]['url']);
+                return true;
+            })->assertViewHas('tasks', fn ($tasks) => $tasks->modelKeys() === [$task->id]);
+        $this->get(route('review-center.operation-tasks.dashboard', ['team_search' => '无匹配部门']))
+            ->assertOk()->assertViewHas('teamRows', fn ($teams) => $teams->isEmpty());
+    }
+
+    public function test_dashboard_menu_access_is_independent_and_root_bindings_expand(): void
+    {
+        $migration = require database_path('migrations/2026_11_18_000100_install_review_center_operation_task_dashboard.php');
+        $migration->up();
+        $migration->up();
+        self::assertSame(1, DB::table('portal_menus')->where('code', 'review_center_operation_task_dashboard')->count());
+        DB::table('portal_menus')->where('code', 'review_center_operation_tasks')->update(['is_enabled' => false]);
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertOk();
+        DB::table('review_center_department_bindings')->delete();
+        $this->bind(8, 1);
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertOk()
+            ->assertViewHas('teamRows', fn ($teams) => $teams->pluck('id')->sort()->values()->all() === [2, 3]);
+        $this->menuAllowed = false;
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertForbidden();
+        $this->menuAllowed = true;
+        $migration->down();
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertForbidden();
+        $migration->up();
+        DB::table('review_center_department_bindings')->delete();
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertForbidden();
+        $this->actor->setAttribute('system_admin', true);
+        $this->get(route('review-center.operation-tasks.dashboard'))->assertOk();
+    }
+
+    public function test_dashboard_preserves_submission_dates_financial_totals_plans_and_historical_supplements(): void
+    {
+        (require database_path('migrations/2026_11_18_000100_install_review_center_operation_task_dashboard.php'))->up();
+        $first = $this->pendingRecap();
+        $first->update(['data_date' => '2026-11-11', 'submitted_at' => '2026-11-12 16:00:00', 'total_revenue_usd' => 120, 'total_spend_usd' => 40, 'total_orders' => 3]);
+        $other = $this->pendingRecap();
+        $other->update(['data_date' => '2026-11-10', 'department_id' => 3, 'submitted_at' => '2026-11-13 01:00:00', 'total_revenue_usd' => 900]);
+        $task = $this->task();
+        $task->update(['created_at' => '2026-11-12 01:00:00']);
+        $asset = $this->asset($task);
+        $asset->update(['created_at' => '2026-11-13 01:00:00']);
+        $newTask = $this->task();
+        $this->asset($newTask);
+        DB::table('operation_task_daily_plans')->insert(['user_id' => 7, 'user_name' => '测试运营', 'department_id' => 2, 'plan_date' => '2026-11-13', 'plan_mode' => 'single', 'single_target' => 1, 'category_target' => 0]);
+        $this->get(route('review-center.operation-tasks.dashboard', ['from' => '2026-11-13', 'to' => '2026-11-13', 'person_search' => '测试运营']))
+            ->assertOk()->assertViewHas('recaps', fn ($recaps) => $recaps->modelKeys() === [$first->id])
+            ->assertViewHas('teamRows', function ($teams): bool {
+                $member = $teams->first()->members->sole();
+                self::assertSame(120.0, $member->revenue);
+                self::assertSame(40.0, $member->spend);
+                self::assertSame(3, $member->orders);
+                self::assertSame(1, $member->recap_days);
+                self::assertSame(1, $member->single_count);
+                self::assertSame(1, $member->supplement_assets);
+                self::assertSame(1, $member->planned_days);
+                self::assertSame(1, $member->completed_days);
+                self::assertSame('2026-11-11', $member->recap_day_records[0]['date']);
+                self::assertSame('2026-11-13 00:00', $member->recap_day_records[0]['submitted_at']);
+                return true;
+            });
+        $this->get(route('review-center.operation-tasks.dashboard', ['from' => '2026-11-14', 'to' => '2026-11-13']))->assertSessionHasErrors('to');
+    }
+
     protected function tearDown(): void { $this->travelBack(); parent::tearDown(); }
 
     private function bind(int $user, int $department): void

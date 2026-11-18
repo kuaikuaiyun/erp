@@ -40,7 +40,7 @@
 @endphp
 <div class="wrapper">
     <header class="main-header">
-        <a href="{{ $portalOrigin }}{{ app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal) }}" class="logo">
+        <a href="{{ app(\App\Portal\Services\PortalDomainService::class)->mainAdminUrl() }}" class="logo">
             <span class="logo-mini"><i class="fa fa-cube"></i></span>
             <span class="logo-lg"><i class="fa fa-cube"></i> {{ $portal->name }}</span>
         </a>

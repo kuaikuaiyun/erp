@@ -8,6 +8,7 @@ Route::prefix('review-center')->name('review-center.')->group(function (): void 
     Route::get('/department-bindings', [DepartmentBindingController::class, 'index'])->name('department-bindings.index');
     Route::put('/department-bindings', [DepartmentBindingController::class, 'update'])->name('department-bindings.update');
     Route::prefix('operation-tasks')->name('operation-tasks.')->controller(OperationTaskReviewController::class)->group(function (): void {
+        Route::get('/dashboard', 'dashboard')->name('dashboard');
         Route::get('/reviews', 'reviews')->name('reviews.index');
         Route::post('/reviews/batch', 'reviewBatch')->name('reviews.batch.store');
         Route::post('/recaps/{recap}/reviews', 'reviewRecap')->whereNumber('recap')->name('recaps.reviews.store');

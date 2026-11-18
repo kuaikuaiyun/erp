@@ -140,11 +140,33 @@ class FashionAppLovinPerformanceReportController extends Controller
         $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->merge($accountBindings->values())->merge($bindingByIdentity->values())
             ->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain', 'site_builder'])->keyBy('id');
-        $accountSpendTotals = $accountSpendReports->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
-            'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number),
-            'spend' => (float) $entry->actual_spend_usd,
-        ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
-        $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
+        $accountSpendRecords = $accountSpendReports->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(function ($entry) use ($report): array {
+            $accountKey = AppLovinSpendScreenshot::accountKey(
+                (int) $report->submitter_id,
+                (string) $entry->agency,
+                (string) $entry->media,
+                (string) $entry->account_name,
+                (string) $entry->account_number,
+            );
+
+            return [
+                'account_identity' => AppLovinGiftConsumption::accountIdentity(
+                    (int) $report->submitter_id,
+                    (string) $entry->account_number,
+                    $accountKey,
+                ),
+                'spend' => (float) $entry->actual_spend_usd,
+            ];
+        }));
+        $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        $giftScreenshots = AppLovinSpendScreenshot::query()
+            ->whereIn('operator_user_id', $accountSpendReports->pluck('submitter_id')->filter()->unique()->values())
+            ->get()
+            ->keyBy(fn (AppLovinSpendScreenshot $screenshot): string => AppLovinGiftConsumption::accountIdentity(
+                (int) $screenshot->operator_user_id,
+                (string) $screenshot->account_number,
+                (string) $screenshot->account_key,
+            ));
         $historicalRevenueByGroup = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
             $groups = $report->adSpendEntries->map(function ($entry) use ($report, $stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
@@ -177,6 +199,11 @@ class FashionAppLovinPerformanceReportController extends Controller
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
                 $storeId = (int) ($bindingByIdentity->get($identity, 0) ?: $entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
                 $entry->setAttribute('resolved_account_key', $accountKey);
+                $entry->setAttribute('resolved_account_identity', AppLovinGiftConsumption::accountIdentity(
+                    (int) $report->submitter_id,
+                    (string) $entry->account_number,
+                    $accountKey,
+                ));
                 $entry->setAttribute('resolved_store_id', $storeId);
                 $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'identity:'.$identity);
 
@@ -204,12 +231,12 @@ class FashionAppLovinPerformanceReportController extends Controller
                     'store_domain' => (string) ($store?->domain ?: $entries->pluck('store_domain')->filter()->first() ?: '未绑定店铺'),
                     'site_builder' => $storeId > 0 ? ($platform === 'shopline' ? 'Shopline' : 'XShoppy') : '未绑定',
                     'account_numbers' => $entries->pluck('account_number')->map(fn ($number) => trim((string) $number))->filter()->unique()->values()->all(),
-                    'account_keys' => $entries->pluck('resolved_account_key')->filter()->unique()->values()->all(),
+                    'account_keys' => $entries->pluck('resolved_account_identity')->filter()->unique()->values()->all(),
                     'orders' => $orders,
                     'revenue' => $revenue,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
-                    'total_consumption' => round((float) $entries->pluck('resolved_account_key')->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
+                    'total_consumption' => round((float) $entries->pluck('resolved_account_identity')->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
                 ];
             })->filter()->values()->all();
         })->values();

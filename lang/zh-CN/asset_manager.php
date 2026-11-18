@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'computer_unassigned' => '未分配部门',
+    'computer_install_required' => '请先执行电脑设备安装迁移，再增加部门隔离字段。',
+    'computer_import_owner_help' => '本次导入的全部电脑设备归属于所选管理部门，表格中的归属部门仅供参考；设备使用人不决定管理归属。',
+
     'field_overrides' => ['computers' => ['project' => '隶属项目'], 'resources' => ['project' => '项目名称', 'department_id' => '团队'], 'codex-renewals' => ['department_id' => '部门', 'created_at' => '日期']],
     'titles' => ['computers' => '电脑设备', 'resources' => '资源管理资产', 'codex-renewals' => 'Codex 续费', 'ipfoxy' => 'IPFoxy 即将到期代理'],
     'assistant_required' => '请先创建编码为 zhuli 的助理门户。',

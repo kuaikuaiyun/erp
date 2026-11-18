@@ -46,6 +46,12 @@
     var productViewTitle = document.querySelector('[data-aikaipin-product-view-title]');
     var productViewVideos = document.querySelector('[data-aikaipin-product-view-videos]');
     var productViewReference = document.querySelector('[data-aikaipin-product-view-reference]');
+    var materialVideoPreviewModal = document.getElementById('aikaipin-material-video-preview-modal');
+    var materialVideoPreviewTitle = document.querySelector('[data-aikaipin-material-video-preview-title]');
+    var materialVideoPreviewPlayer = document.querySelector('[data-aikaipin-material-video-preview-player]');
+    var materialVideoPreviewFrame = document.querySelector('[data-aikaipin-material-video-preview-frame]');
+    var materialVideoPreviewOpen = document.querySelector('[data-aikaipin-material-video-preview-open]');
+    var materialVideoPreviewError = document.querySelector('[data-aikaipin-material-video-preview-error]');
     var packageFile = document.querySelector('[data-aikaipin-package-file]');
     var packageFileName = document.querySelector('[data-aikaipin-package-file-name]');
     var uploadShopifyCsvList = document.querySelector('[data-aikaipin-upload-shopify-csv-list]');
@@ -1048,9 +1054,7 @@
         if (!items.length) return '<div class="aikaipin-material-video-empty"><i class="fa fa-film"></i> 暂无素材视频</div>';
         return items.map(function (item) {
             var media = item.preview_url
-                ? (item.historical
-                    ? '<iframe class="aikaipin-material-video-frame" loading="lazy" src="' + escapeHtml(item.preview_url) + '" title="' + escapeHtml(item.name || '历史素材视频') + '" allow="fullscreen" referrerpolicy="same-origin"></iframe>'
-                    : '<video controls preload="metadata" playsinline src="' + escapeHtml(item.preview_url) + '"></video><div class="aikaipin-material-video-playback-error"><i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请下载后查看。</div>')
+                ? '<button type="button" class="aikaipin-material-video-trigger" data-aikaipin-material-video-preview data-video-mode="' + (item.historical ? 'frame' : 'video') + '" data-video-src="' + escapeHtml(item.preview_url) + '" data-video-name="' + escapeHtml(item.name || '素材视频') + '"><i class="fa fa-play-circle"></i><span>点击播放素材视频</span></button>'
                 : (item.pending
                     ? '<div class="aikaipin-material-video-history"><i class="fa fa-upload"></i><span>保存产品后即可在线播放</span></div>'
                     : '<div class="aikaipin-material-video-history"><i class="fa fa-file-code-o"></i><span>视频保存在历史 HTML 参考页中</span>' +
@@ -1099,14 +1103,60 @@
     }
 
     function bindMaterialVideoPlaybackErrors(root) {
-        if (!root) return;
-        Array.prototype.forEach.call(root.querySelectorAll('.aikaipin-material-video-card video'), function (video) {
-            video.addEventListener('error', function () {
-                var card = video.closest('.aikaipin-material-video-card');
-                if (card) card.classList.add('is-playback-error');
-            });
-            video.load();
+        return root;
+    }
+
+    function resetMaterialVideoPreview() {
+        if (materialVideoPreviewPlayer) {
+            materialVideoPreviewPlayer.pause();
+            materialVideoPreviewPlayer.removeAttribute('src');
+            materialVideoPreviewPlayer.classList.remove('is-active');
+            materialVideoPreviewPlayer.load();
+        }
+        if (materialVideoPreviewFrame) {
+            materialVideoPreviewFrame.removeAttribute('src');
+            materialVideoPreviewFrame.classList.remove('is-active');
+        }
+        if (materialVideoPreviewError) materialVideoPreviewError.hidden = true;
+    }
+
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest('[data-aikaipin-material-video-preview]');
+        if (!trigger || !materialVideoPreviewModal || !window.jQuery) return;
+        var source = trigger.getAttribute('data-video-src') || '';
+        if (!source) return;
+        resetMaterialVideoPreview();
+        if (materialVideoPreviewTitle) materialVideoPreviewTitle.textContent = trigger.getAttribute('data-video-name') || '素材视频';
+        if (materialVideoPreviewOpen) materialVideoPreviewOpen.href = source;
+        if (trigger.getAttribute('data-video-mode') === 'frame' && materialVideoPreviewFrame) {
+            materialVideoPreviewFrame.src = source;
+            materialVideoPreviewFrame.classList.add('is-active');
+        } else if (materialVideoPreviewPlayer) {
+            materialVideoPreviewPlayer.src = source;
+            materialVideoPreviewPlayer.classList.add('is-active');
+            materialVideoPreviewPlayer.load();
+        }
+        window.jQuery(materialVideoPreviewModal).modal('show');
+    });
+    if (materialVideoPreviewPlayer) {
+        materialVideoPreviewPlayer.addEventListener('error', function () {
+            if (materialVideoPreviewError) materialVideoPreviewError.hidden = false;
         });
+    }
+    if (materialVideoPreviewModal && window.jQuery) {
+        window.jQuery(materialVideoPreviewModal)
+            .on('shown.bs.modal', function () {
+                var backdrops = document.querySelectorAll('.modal-backdrop');
+                var backdrop = backdrops.length ? backdrops[backdrops.length - 1] : null;
+                if (backdrop) backdrop.classList.add('aikaipin-material-video-preview-backdrop');
+            })
+            .on('hidden.bs.modal', function () {
+                resetMaterialVideoPreview();
+                Array.prototype.forEach.call(document.querySelectorAll('.aikaipin-material-video-preview-backdrop'), function (backdrop) {
+                    backdrop.classList.remove('aikaipin-material-video-preview-backdrop');
+                });
+                if (document.querySelector('.modal.in')) document.body.classList.add('modal-open');
+            });
     }
 
     function openProductViewModal(productId) {

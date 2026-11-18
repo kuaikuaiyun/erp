@@ -17,9 +17,21 @@ class ModeService
         if (!in_array($mode, ['dingtalk', 'password'], true) || !Schema::hasTable('erp_authentication_states')) {
             throw new HttpException(503, __('dingtalk.mode.unavailable'));
         }
+        // Read from the primary connection: a replica may lag after a mode switch.
+        // Steady-state authentication must not attempt an insert or take a row write lock.
+        $state = DB::table('erp_authentication_states')->useWritePdo()->where('id', 1)->first();
+        if ($state && $state->mode === $mode) {
+            return $state;
+        }
+
         return DB::transaction(function () use ($mode): object {
-            DB::table('erp_authentication_states')->insertOrIgnore(['id' => 1, 'mode' => $mode, 'version' => 1, 'updated_at' => now()]);
-            $state = DB::table('erp_authentication_states')->where('id', 1)->lockForUpdate()->first();
+            // Recheck after obtaining the lock; another request may have completed the switch.
+            $state = DB::table('erp_authentication_states')->useWritePdo()->where('id', 1)->lockForUpdate()->first();
+            if (!$state) {
+                $state = (object) ['id' => 1, 'mode' => $mode, 'version' => 1, 'updated_at' => now()];
+                DB::table('erp_authentication_states')->insert((array) $state);
+                return $state;
+            }
             if ($state->mode !== $mode) {
                 DB::table('erp_authentication_states')->where('id', 1)->update(['mode' => $mode, 'version' => (int) $state->version + 1, 'updated_at' => now()]);
                 DB::table('dingtalk_challenges')->whereNull('consumed_at')->update(['consumed_at' => now()]);
@@ -41,8 +53,20 @@ class ModeService
 
     public function accountVersion(int $id): int
     {
-        DB::table('erp_authentication_account_versions')->insertOrIgnore(['account_id' => $id, 'version' => 1]);
-        return (int) DB::table('erp_authentication_account_versions')->where('account_id', $id)->value('version');
+        $version = DB::table('erp_authentication_account_versions')->useWritePdo()->where('account_id', $id)->value('version');
+        if ($version !== null) {
+            return (int) $version;
+        }
+
+        return DB::transaction(function () use ($id): int {
+            $version = DB::table('erp_authentication_account_versions')->useWritePdo()
+                ->where('account_id', $id)->lockForUpdate()->value('version');
+            if ($version === null) {
+                DB::table('erp_authentication_account_versions')->insert(['account_id' => $id, 'version' => 1]);
+                return 1;
+            }
+            return (int) $version;
+        }, 3);
     }
 
     public function stamp(Request $request, AdminUser $account, object $expected): void

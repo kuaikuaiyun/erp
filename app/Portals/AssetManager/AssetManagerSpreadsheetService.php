@@ -2,7 +2,9 @@
 
 namespace App\Portals\AssetManager;
 
+use App\Models\Department;
 use App\Portals\Logistics\StreamedXlsxWriter;
+use Illuminate\Database\Eloquent\Builder;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
@@ -13,15 +15,16 @@ final class AssetManagerSpreadsheetService
 
     public function headers(string $kind): array
     {
-        return ['_id' => __('asset_manager.record_id')] + collect(AssetManagerCatalog::fields($kind))->mapWithKeys(fn ($t, $k) => [$k => AssetManagerCatalog::labels($kind)[$k]])->all() + ['created_at' => AssetManagerCatalog::labels($kind)['created_at']];
+        return ['_id' => __('asset_manager.record_id')] + collect(AssetManagerCatalog::fields($kind))->mapWithKeys(fn ($t, $k) => [$k => AssetManagerCatalog::labels($kind)[$k]])->all() + ['created_at' => AssetManagerCatalog::labels($kind)['created_at']] + ($kind === 'computers' ? ['owner_department_id' => __('asset_manager.fields.owner_department_id')] : []);
     }
 
     public function download(string $kind, iterable $records, bool $template = false)
     {
         $headers = $this->headers($kind);
+        $owners = $kind === 'computers' ? Department::business()->with('parent')->get()->mapWithKeys(fn ($d) => [$d->id => ($d->parent ? $d->parent->name.' / ' : '').$d->name])->all() : [];
         $columns = array_map(fn ($label) => ['label' => $label, 'width' => 24], array_values($headers));
 
-        return app(StreamedXlsxWriter::class)->response($kind.($template ? '-template' : '').'.xlsx', __('asset_manager.titles.'.$kind), $columns, function () use ($kind, $records, $template) {
+        return app(StreamedXlsxWriter::class)->response($kind.($template ? '-template' : '').'.xlsx', __('asset_manager.titles.'.$kind), $columns, function () use ($kind, $records, $template, $owners) {
             if ($template) {
                 return;
             }foreach ($records as $r) {
@@ -29,12 +32,15 @@ final class AssetManagerSpreadsheetService
                 foreach (AssetManagerCatalog::fields($kind) as $key => $type) {
                     $values[] = $kind === 'ipfoxy' ? ($key === 'expires_at' ? ($r->expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?? '') : (string) ($r->$key ?? '')) : $this->service->display($r, $key, $type);
                 }$values[] = $r->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?? '';
+                if ($kind === 'computers') {
+                    $values[] = $owners[$r->owner_department_id] ?? __('asset_manager.computer_unassigned');
+                }
                 yield ['cells' => array_map(fn ($value) => ['value' => (string) $value, 'type' => 'string'], $values)];
             }
         });
     }
 
-    public function preview(string $kind, $file, ?\Illuminate\Database\Eloquent\Builder $existingQuery = null): array
+    public function preview(string $kind, $file, ?Builder $existingQuery = null): array
     {
         $reader = IOFactory::createReaderForFile($file->getRealPath());
         abort_unless(in_array(get_class($reader), ['PhpOffice\\PhpSpreadsheet\\Reader\\Xlsx', 'PhpOffice\\PhpSpreadsheet\\Reader\\Csv']), 422, __('asset_manager.failed'));

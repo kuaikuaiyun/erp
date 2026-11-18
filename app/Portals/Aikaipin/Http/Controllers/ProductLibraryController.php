@@ -20,6 +20,7 @@ use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
 use App\Portals\Operation\ShopifyProductCsvImporter;
 use App\Services\AiProductListingPushService;
+use App\Support\BrowserCompatibleVideoService;
 use App\Support\PrivateVideoResponse;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -52,6 +53,7 @@ class ProductLibraryController extends Controller
         private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
         private readonly ShopifyProductCsvImporter $shopifyCsvImporter,
         private readonly AiProductListingPushService $listingPush,
+        private readonly BrowserCompatibleVideoService $browserCompatibleVideo,
         private readonly PrivateVideoResponse $privateVideoResponse,
         private readonly AikaipinHistoricalVideoImporter $historicalVideoImporter,
     ) {}
@@ -1202,13 +1204,15 @@ class ProductLibraryController extends Controller
         $typeCode = OperationAiProductReferenceVideo::fileTypeCode($data['type']);
         $fileName = $this->referenceProductCode($product).'-'.$typeCode.'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
         $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
+        $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
 
         try {
             OperationAiProductReferenceVideo::query()->create([
                 'aikaipin_product_id' => $product->getKey(), 'type' => $data['type'],
                 'sequence' => $sequence, 'file_date' => $date->toDateString(), 'disk' => 'local',
                 'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
-                'mime_type' => $file->getMimeType(), 'size' => $file->getSize(), 'department_code' => 'AI',
+                'mime_type' => mime_content_type(Storage::disk('local')->path($path)) ?: $file->getMimeType(),
+                'size' => Storage::disk('local')->size($path), 'department_code' => 'AI',
                 'source_kind' => OperationAiProductReferenceVideo::SOURCE_UPLOAD,
                 'uploaded_by' => $context['user']->getKey(),
                 'uploaded_by_name' => $context['user']->name ?: $context['user']->username,
@@ -1232,24 +1236,32 @@ class ProductLibraryController extends Controller
 
     public function previewReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
     {
-        if (! $request->hasValidSignature()) {
+        if (! $request->hasValidSignature() && ! $request->hasValidRelativeSignature()) {
             $context = $this->pageContext($request);
             if ($context instanceof Response) return $context;
             abort_unless($this->canViewProduct($context['user'], $product), 403);
         }
         $this->assertReferenceVideo($product, $video);
+        $absolutePath = Storage::disk($video->disk)->path($video->path);
+        if ($this->browserCompatibleVideo->normalize($absolutePath) === BrowserCompatibleVideoService::TRANSCODED) {
+            $video->forceFill([
+                'mime_type' => mime_content_type($absolutePath) ?: 'video/mp4',
+                'size' => filesize($absolutePath) ?: $video->size,
+            ])->save();
+        }
 
         return $this->privateVideoResponse->inline(
             (string) $video->disk,
             (string) $video->path,
             (string) $video->file_name,
             $video->mime_type,
+            $request,
         );
     }
 
     public function downloadReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
     {
-        if (! $request->hasValidSignature()) {
+        if (! $request->hasValidSignature() && ! $request->hasValidRelativeSignature()) {
             $context = $this->pageContext($request);
             if ($context instanceof Response) return $context;
             abort_unless($this->canViewProduct($context['user'], $product), 403);
@@ -1290,8 +1302,8 @@ class ProductLibraryController extends Controller
             'type' => $video->type,
             'name' => $video->file_name,
             'size' => number_format($video->size / 1048576, 2).' MB',
-            'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
-            'download_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.download', now()->addHours(12), [$product, $video]),
+            'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video], false),
+            'download_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.download', now()->addHours(12), [$product, $video], false),
         ])->values();
         $injection = view('portals.operation.ai-product-library.reference-video-injection', [
             'videos' => $videos,
@@ -2123,7 +2135,7 @@ class ProductLibraryController extends Controller
                 'name' => (string) $video->file_name,
                 'historical' => false,
                 'size' => number_format(((int) $video->size) / 1048576, 2).' MB',
-                'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
+                'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video], false),
             ])->all(),
         ];
     }
@@ -2256,11 +2268,13 @@ class ProductLibraryController extends Controller
                 $fileName = $this->referenceProductCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($type).'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
                 $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
                 $createdPaths[] = $path;
+                $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
                 OperationAiProductReferenceVideo::query()->create([
                     'aikaipin_product_id' => $product->getKey(), 'type' => $type,
                     'sequence' => $sequence, 'file_date' => $date->toDateString(), 'disk' => 'local',
                     'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
-                    'mime_type' => $file->getMimeType(), 'size' => $file->getSize(), 'department_code' => 'AI',
+                    'mime_type' => mime_content_type(Storage::disk('local')->path($path)) ?: $file->getMimeType(),
+                    'size' => Storage::disk('local')->size($path), 'department_code' => 'AI',
                     'source_kind' => OperationAiProductReferenceVideo::SOURCE_UPLOAD,
                     'uploaded_by' => $user->getKey(), 'uploaded_by_name' => $user->name ?: $user->username,
                 ]);
