@@ -1236,7 +1236,7 @@ class ProductLibraryController extends Controller
 
     public function previewReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
     {
-        if (! $request->hasValidSignature()) {
+        if (! $request->hasValidSignature() && ! $request->hasValidRelativeSignature()) {
             $context = $this->pageContext($request);
             if ($context instanceof Response) return $context;
             abort_unless($this->canViewProduct($context['user'], $product), 403);
@@ -1261,7 +1261,7 @@ class ProductLibraryController extends Controller
 
     public function downloadReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
     {
-        if (! $request->hasValidSignature()) {
+        if (! $request->hasValidSignature() && ! $request->hasValidRelativeSignature()) {
             $context = $this->pageContext($request);
             if ($context instanceof Response) return $context;
             abort_unless($this->canViewProduct($context['user'], $product), 403);
@@ -1302,8 +1302,8 @@ class ProductLibraryController extends Controller
             'type' => $video->type,
             'name' => $video->file_name,
             'size' => number_format($video->size / 1048576, 2).' MB',
-            'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
-            'download_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.download', now()->addHours(12), [$product, $video]),
+            'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video], false),
+            'download_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.download', now()->addHours(12), [$product, $video], false),
         ])->values();
         $injection = view('portals.operation.ai-product-library.reference-video-injection', [
             'videos' => $videos,
@@ -2135,7 +2135,7 @@ class ProductLibraryController extends Controller
                 'name' => (string) $video->file_name,
                 'historical' => false,
                 'size' => number_format(((int) $video->size) / 1048576, 2).' MB',
-                'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
+                'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video], false),
             ])->all(),
         ];
     }

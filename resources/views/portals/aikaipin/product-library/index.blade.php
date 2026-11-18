@@ -97,12 +97,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261117-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261118-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261118-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261118-3"></script>
 @endpush
 
 @section('content')
@@ -460,6 +460,30 @@
             </div>
             <div class="modal-footer">
                 <a class="btn btn-info" href="#" target="_blank" rel="noopener noreferrer" hidden data-aikaipin-product-view-reference><i class="fa fa-file-text-o"></i> 打开参考页</a>
+                <button type="button" class="btn btn-default" data-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="aikaipin-material-video-preview-modal" class="modal fade aikaipin-material-video-preview-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" data-aikaipin-material-video-preview-title><i class="fa fa-play-circle"></i> 素材视频</h4>
+            </div>
+            <div class="modal-body">
+                <div class="aikaipin-material-video-preview-stage">
+                    <video controls playsinline preload="none" data-aikaipin-material-video-preview-player></video>
+                    <iframe title="素材视频" loading="lazy" allow="fullscreen" data-aikaipin-material-video-preview-frame></iframe>
+                </div>
+                <div class="alert alert-danger aikaipin-material-video-preview-error" hidden data-aikaipin-material-video-preview-error>
+                    <i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请下载后查看。
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a class="btn btn-info" href="#" target="_blank" rel="noopener noreferrer" data-aikaipin-material-video-preview-open><i class="fa fa-external-link"></i> 新窗口打开</a>
                 <button type="button" class="btn btn-default" data-dismiss="modal">关闭</button>
             </div>
         </div>

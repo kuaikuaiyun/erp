@@ -45,6 +45,16 @@
         .operation-ai-detail-videos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .operation-ai-detail-video { overflow:hidden; border:1px solid #dce6ed; border-radius:7px; background:#f9fbfc; }
         .operation-ai-detail-video video { display:block; width:100%; height:190px; background:#111; object-fit:contain; }
+        .operation-ai-detail-video-trigger { display:flex; width:100%; height:190px; flex-direction:column; align-items:center; justify-content:center; gap:10px; border:0; color:#246c98; background:#edf4f7; cursor:pointer; }
+        .operation-ai-detail-video-trigger:hover,.operation-ai-detail-video-trigger:focus { color:#175a82; background:#dfeef4; outline:2px solid #246c98; outline-offset:-2px; }
+        .operation-ai-detail-video-trigger .fa { font-size:42px; }
+        .operation-ai-detail-video-trigger span { font-size:13px; font-weight:600; }
+        .operation-ai-video-preview-modal { z-index:1070; }
+        .operation-ai-video-preview-modal .modal-dialog { width:min(1120px,calc(100% - 36px))!important; }
+        .operation-ai-video-preview-modal .modal-body { padding:16px; background:#18232a; }
+        .operation-ai-video-preview-stage { display:flex; min-height:420px; align-items:center; justify-content:center; overflow:hidden; border-radius:5px; background:#111a1f; }
+        .operation-ai-video-preview-stage video { display:block; width:100%; max-height:70vh; background:#111; }
+        .operation-ai-video-preview-error { margin:12px 0 0; }
         .operation-ai-detail-video-error { display:none; margin:8px 10px 0; padding:7px 9px; border:1px solid #f1c2bd; border-radius:4px; color:#b74235; background:#fff3f2; font-size:11px; line-height:1.5; }
         .operation-ai-detail-video.is-playback-error .operation-ai-detail-video-error { display:block; }
         .operation-ai-detail-video-info { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 8px; padding:8px 10px; }
@@ -300,6 +310,17 @@
     </div>
 </div>
 
+<div class="modal fade operation-ai-video-preview-modal" id="operation-ai-video-preview-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" data-operation-ai-video-preview-title><i class="fa fa-play-circle"></i> 素材视频</h4></div>
+        <div class="modal-body">
+            <div class="operation-ai-video-preview-stage"><video controls playsinline preload="none" data-operation-ai-video-preview-player></video></div>
+            <div class="alert alert-danger operation-ai-video-preview-error" hidden data-operation-ai-video-preview-error><i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请先下载查看。</div>
+        </div>
+        <div class="modal-footer"><a class="btn btn-info" href="#" target="_blank" rel="noopener noreferrer" data-operation-ai-video-preview-open><i class="fa fa-external-link"></i> 新窗口打开</a><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
+    </div></div>
+</div>
+
 <div class="modal fade" id="operation-ai-product-publish-modal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog operation-ai-publish-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-cloud-upload"></i> 上架到 Shopify</h4></div>
@@ -343,6 +364,11 @@
     var error = modal.querySelector('[data-operation-ai-detail-error]');
     var content = modal.querySelector('[data-operation-ai-detail-content]');
     var labels = @json(__('aikaipin.operation_library'));
+    var videoPreviewModal = document.getElementById('operation-ai-video-preview-modal');
+    var videoPreviewTitle = document.querySelector('[data-operation-ai-video-preview-title]');
+    var videoPreviewPlayer = document.querySelector('[data-operation-ai-video-preview-player]');
+    var videoPreviewOpen = document.querySelector('[data-operation-ai-video-preview-open]');
+    var videoPreviewError = document.querySelector('[data-operation-ai-video-preview-error]');
 
     function escapeHtml(value) {
         return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
@@ -381,7 +407,7 @@
         return '<div class="operation-ai-detail-video-groups">' + groups.map(function (group) {
             var groupVideos = videos.filter(function (video) { return video.type === group.type; });
             var cards = groupVideos.length ? '<div class="operation-ai-detail-videos">' + groupVideos.map(function (video) {
-                return '<article class="operation-ai-detail-video"><video controls preload="metadata" playsinline src="' + escapeHtml(video.preview_url) + '"></video><div class="operation-ai-detail-video-error"><i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请先下载查看；若下载后也无法播放，说明源文件不完整。</div><div class="operation-ai-detail-video-info"><strong class="operation-ai-detail-video-code" title="' + escapeHtml(video.video_code) + '">' + escapeHtml(video.video_code) + '</strong><span class="label label-info">' + escapeHtml(video.type_label) + '</span><small>' + escapeHtml(video.size) + '</small><small>' + escapeHtml(video.uploaded_by_name) + '</small><div class="operation-ai-detail-video-actions"><span class="text-muted"><i class="fa fa-file-video-o"></i> ' + escapeHtml(video.file_name) + '</span><a class="operation-ai-detail-video-download" href="' + escapeHtml(video.download_url) + '"><i class="fa fa-download"></i> 下载</a></div></div></article>';
+                return '<article class="operation-ai-detail-video"><button type="button" class="operation-ai-detail-video-trigger" data-operation-ai-video-preview data-video-src="' + escapeHtml(video.preview_url) + '" data-video-name="' + escapeHtml(video.video_code) + '"><i class="fa fa-play-circle"></i><span>点击播放素材视频</span></button><div class="operation-ai-detail-video-info"><strong class="operation-ai-detail-video-code" title="' + escapeHtml(video.video_code) + '">' + escapeHtml(video.video_code) + '</strong><span class="label label-info">' + escapeHtml(video.type_label) + '</span><small>' + escapeHtml(video.size) + '</small><small>' + escapeHtml(video.uploaded_by_name) + '</small><div class="operation-ai-detail-video-actions"><span class="text-muted"><i class="fa fa-file-video-o"></i> ' + escapeHtml(video.file_name) + '</span><a class="operation-ai-detail-video-download" href="' + escapeHtml(video.download_url) + '"><i class="fa fa-download"></i> 下载</a></div></div></article>';
             }).join('') + '</div>' : '<div class="operation-ai-detail-video-empty"><i class="fa fa-inbox"></i> 暂无' + group.label + '</div>';
             return '<section class="operation-ai-detail-video-group"><div class="operation-ai-detail-video-group-head"><span><i class="fa ' + group.icon + '"></i> ' + group.label + '</span><span class="badge">' + groupVideos.length + '</span></div>' + cards + '</section>';
         }).join('') + '</div>';
@@ -416,13 +442,6 @@
             item(labels.package_file, packageFile) + item(labels.creator, value(data.created_by_name)) +
             item(labels.updater, value(data.updated_by_name)) + item(labels.created_at, value(data.created_at)) +
             item(labels.updated_at, value(data.updated_at));
-        Array.prototype.forEach.call(content.querySelectorAll('.operation-ai-detail-video video'), function (video) {
-            video.addEventListener('error', function () {
-                var card = video.closest('.operation-ai-detail-video');
-                if (card) card.classList.add('is-playback-error');
-            });
-            video.load();
-        });
         loading.hidden = true; error.hidden = true; content.hidden = false;
     }
     function loadDetail(url) {
@@ -433,12 +452,37 @@
             .catch(function (exception) { loading.hidden = true; error.textContent = exception.message || labels.load_failed; error.hidden = false; });
     }
     document.addEventListener('click', function (event) {
+        var videoTrigger = event.target.closest('[data-operation-ai-video-preview]');
+        if (videoTrigger && videoPreviewModal && videoPreviewPlayer && window.jQuery) {
+            event.preventDefault();
+            videoPreviewPlayer.pause();
+            videoPreviewPlayer.src = videoTrigger.getAttribute('data-video-src') || '';
+            videoPreviewPlayer.load();
+            if (videoPreviewTitle) videoPreviewTitle.textContent = videoTrigger.getAttribute('data-video-name') || '素材视频';
+            if (videoPreviewOpen) videoPreviewOpen.href = videoPreviewPlayer.src;
+            if (videoPreviewError) videoPreviewError.hidden = true;
+            window.jQuery(videoPreviewModal).modal('show');
+            return;
+        }
         var button = event.target.closest('[data-operation-ai-detail]');
         if (!button) return;
         event.preventDefault();
         window.jQuery(modal).modal('show');
         loadDetail(button.getAttribute('data-detail-url'));
     });
+    if (videoPreviewPlayer) {
+        videoPreviewPlayer.addEventListener('error', function () {
+            if (videoPreviewError) videoPreviewError.hidden = false;
+        });
+    }
+    if (videoPreviewModal && window.jQuery) {
+        window.jQuery(videoPreviewModal).on('hidden.bs.modal', function () {
+            videoPreviewPlayer.pause();
+            videoPreviewPlayer.removeAttribute('src');
+            videoPreviewPlayer.load();
+            if (document.querySelector('.modal.in')) document.body.classList.add('modal-open');
+        });
+    }
 })();
 (function () {
     var modal = document.getElementById('operation-ai-material-upload-modal');

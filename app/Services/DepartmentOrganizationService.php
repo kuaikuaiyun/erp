@@ -21,6 +21,8 @@ class DepartmentOrganizationService
 {
     private const ASSISTANT_ROOT_DEPARTMENT_CODE = 'dept-000004';
 
+    private const BOSS_ONLY_PORTAL_MENU_CODES = ['dashboard_department_scopes'];
+
     public function __construct(
         private readonly DepartmentAuthorizationService $authorization,
         private readonly PortalService $portals,
@@ -677,7 +679,12 @@ class DepartmentOrganizationService
                 $buildPortal = function (int $parentId) use (&$buildPortal, $portalByParent, $permissions): array {
                     return $portalByParent->get($parentId, collect())
                         ->map(function ($menu) use (&$buildPortal, $permissions): ?array {
-                            if (in_array($menu->code, ['home', 'backend_management', 'menu_configuration'], true)) {
+                            if (in_array($menu->code, [
+                                'home',
+                                'backend_management',
+                                'menu_configuration',
+                                ...self::BOSS_ONLY_PORTAL_MENU_CODES,
+                            ], true)) {
                                 return null;
                             }
                             $children = $buildPortal((int) $menu->id);
@@ -1321,6 +1328,7 @@ class DepartmentOrganizationService
             $permissionModel = config('admin.database.permissions_model');
             $portalSlugs = \App\Models\PortalMenu::query()
                 ->where('is_enabled', true)
+                ->whereNotIn('code', self::BOSS_ONLY_PORTAL_MENU_CODES)
                 ->whereNotNull('permission_slug')
                 ->pluck('permission_slug');
             $permissionIds = $permissionIds->merge(

@@ -35,7 +35,7 @@ class PrivateVideoResponse
         $compatibility = $this->videoCompatibility->normalize($absolutePath);
 
         $mimeType = $this->videoMimeType($absolutePath, $storedMimeType);
-        if ($disk === 'local' && config('operation_task_video.x_accel_enabled')) {
+        if ($disk === 'local' && config('aikaipin_video.x_accel_enabled', false)) {
             return $this->acceleratedResponse($absolutePath, $fileName, $mimeType, $compatibility);
         }
 
@@ -108,7 +108,7 @@ class PrivateVideoResponse
         abort_unless(str_starts_with($normalizedFile, $normalizedRoot.'/'), 404);
 
         $suffix = substr($normalizedFile, strlen($normalizedRoot) + 1);
-        $internalUri = rtrim((string) config('operation_task_video.internal_prefix'), '/').'/'.implode(
+        $internalUri = rtrim((string) config('aikaipin_video.internal_prefix', '/_aikaipin_private/'), '/').'/'.implode(
             '/',
             array_map('rawurlencode', explode('/', $suffix)),
         );
