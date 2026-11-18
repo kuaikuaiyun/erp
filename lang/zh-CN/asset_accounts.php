@@ -1,6 +1,15 @@
 <?php
 
 return [
+    'basic_information' => '基本资料', 'employment_information' => '入离职与账号状态', 'account_security' => '账号密码',
+    'change_password' => '修改密码', 'cancel_password_change' => '取消修改密码',
+    'department_search' => '输入部门名称搜索', 'no_matches' => '没有匹配的部门',
+    'choose_position' => '请选择岗位', 'position_unavailable' => '（不可用）',
+    'position_hint' => '岗位名额以保存时的实际情况为准。', 'choose_department_first' => '请先选择所属部门，再配置岗位。',
+    'duplicate_department' => '该部门已在其他任职中选择，请选择不同的部门。',
+    'membership_item' => '部门任职', 'membership_count' => '已配置 :count 个部门',
+    'memberships_hint' => '每个部门配置一条任职，选择部门后显示可用岗位。范围外任职保持不变。',
+    'retained_heading' => '保留的范围外任职',
     'id' => 'ID',
     'title' => '账号管理', 'subtitle' => '人员账号、部门任职与钉钉绑定', 'filters' => '筛选条件', 'list' => '人员列表',
     'search' => '姓名或登录账号', 'search_placeholder' => '请输入姓名或登录账号', 'department' => '所属部门', 'all' => '全部',

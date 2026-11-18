@@ -276,7 +276,7 @@ return array_replace_recursive($translations, [
         'keyword_hint'=>'搜索 ERP ID、订单号、交易号、主/加购账单、PayPal流水、收款账号、邮箱或店铺',
         'scope'=>'原始范围：:method / :type / :kind；付款日期 :from ～ :to（:timezone）；店铺：:store。',
         'scope_note'=>'弹窗筛选仅在原始范围内缩小；退款按关联订单统计，不限制退款发生日期，同一订单多次退款只算一个退款订单。',
-        'generated'=>'数据生成：:time；与页面相同统计缓存，若期间数据更新，请刷新页面后核对。',
+        'generated'=>'汇总生成：:time；明细按页读取当前数据，若期间数据更新，请重新查询或刷新页面后核对。',
         'scope_total'=>'原始范围：:orders 单 / 实收 :revenue / 退款订单 :refunded 单 / 退款金额 :amount',
         'filtered'=>'筛选结果', 'order_count'=>'订单总数', 'revenue'=>'实收金额', 'refund_orders'=>'退款订单数', 'refund_amount'=>'退款金额',
         'erp_id'=>'ERP ID', 'order'=>'订单号', 'transaction'=>'订单交易号', 'store'=>'店铺', 'method'=>'支付方式',

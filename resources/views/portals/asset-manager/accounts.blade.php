@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="{{ asset('css/dingtalk-bindings.css') }}?v=20261116-5">
 <link rel="stylesheet" href="{{ asset('css/erp-account-labels.css') }}?v=20261116-1">
 <link rel="stylesheet" href="{{ asset('css/dingtalk-companies.css') }}?v=20261116-4">
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-accounts.css') }}?v=20261118-1">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-accounts.css') }}?v=20261118-2">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_accounts.title') }} <small>{{ __('asset_accounts.subtitle') }}</small></h1></section>
@@ -108,9 +108,9 @@
         @endif
     </div>
 </section>
-<div class="modal fade hr-modal" id="hr-modal" tabindex="-1" role="dialog" aria-labelledby="hr-modal-title"><div class="modal-dialog modal-lg"><div class="modal-content"><form id="hr-form">
+<div class="modal fade hr-modal" id="hr-modal" tabindex="-1" role="dialog" aria-labelledby="hr-modal-title"><div class="modal-dialog modal-lg"><div class="modal-content"><form id="hr-form" novalidate data-loading="off">
     <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('asset_accounts.close') }}">&times;</button><h4 class="modal-title" id="hr-modal-title"></h4></div>
-    <div class="modal-body"><div class="alert alert-danger" id="hr-error" role="alert" hidden></div><div id="hr-fields"></div></div>
+    <div class="modal-body" id="hr-modal-body"><div class="alert alert-danger" id="hr-error" role="alert" hidden></div><div id="hr-fields"></div></div>
     <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('asset_accounts.close') }}</button><button type="submit" class="btn btn-primary" id="hr-save">{{ __('asset_accounts.save') }}</button></div>
 </form></div></div></div>
 @include('admin.organization.dingtalk-modals',compact('owner','options','messages'))
@@ -121,5 +121,5 @@
 <script src="{{ asset('js/erp-account-labels.js') }}?v=20261116-2"></script>
 <script src="{{ asset('js/dingtalk-directory.js') }}?v=20261116-2"></script>
 <script src="{{ asset('js/dingtalk-bindings.js') }}?v=20261116-2"></script>
-<script src="{{ asset('assets/erp/asset-accounts.js') }}?v=20261118-1"></script>
+<script src="{{ asset('assets/erp/asset-accounts.js') }}?v=20261118-2"></script>
 @endpush

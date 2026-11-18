@@ -22,7 +22,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         app()->setLocale('zh-CN');
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->increments('id');
-            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email'] as $field) $table->string($field)->nullable();
+            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email'] as $field) $table->string($field)->nullable();
             $table->decimal('paid_amount_usd', 16, 4)->default(0);
             $table->unsignedInteger('paypal_account_id')->nullable();
         });
@@ -242,7 +242,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         $filters=$this->filters();
         $service=app(PaymentRenewalAnalysisService::class);
         $before=$service->dashboard($filters);
-        DB::table('logistics_orders')->where('id',5)->update(['bill_number'=>'00001234567890123456789']);
+        DB::table('logistics_orders')->where('id',5)->update(['bill_number'=>'00001234567890123456789','transaction_id'=>'ERP-YX-5','collection_account'=>'收款账户A','collection_account_email'=>'collect@example.com']);
         foreach ([
             ['primary','00001234567890123456789','NOT-A-TRANSACTION'],
             ['upsell','ADDON-BILL-5','NOT-A-TRANSACTION'],
@@ -269,10 +269,13 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertCount(1,$detail['rows']);
         $row=$detail['rows'][0];
         self::assertSame(['TX-5','EXTRA-TRANSACTION-5'],$row['transaction_ids']);
+        self::assertSame(['00001234567890123456789'],$row['primary_bill_numbers']);
+        self::assertSame(['ADDON-BILL-5','<script>alert(1)</script>'],$row['upsell_bill_numbers']);
         self::assertSame(['00001234567890123456789','ADDON-BILL-5','<script>alert(1)</script>'],$row['bill_numbers']);
-        self::assertSame('TX-5',$row['transaction_id']);
+        self::assertSame('ERP-YX-5',$row['transaction_id']);
+        self::assertSame(['收款账户A','collect@example.com'],$row['collection_accounts']);
         self::assertSame('00001234567890123456789',$row['bill_number']);
-        foreach (['EXTRA-TRANSACTION-5','ADDON-BILL-5'] as $search) {
+        foreach (['EXTRA-TRANSACTION-5','ADDON-BILL-5','ERP-YX-5','collect@example.com','收款账户A'] as $search) {
             $filtered=$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>$search]));
             self::assertSame([5],array_column($filtered['rows'],'erp_order_id'));
         }
@@ -297,15 +300,40 @@ class PaymentRenewalAnalysisTest extends TestCase
                     if((string) $this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='5') {$target=$r;break;}
                 }
                 self::assertNotNull($target);
-                $txn=$kind==='main'?'G':'C';$bill=$kind==='main'?'H':'D';
+                $txn=$kind==='main'?'J':'F';$bill=$kind==='main'?'H':'D';
+                $upsell=$kind==='main'?'I':'E';$account=$kind==='main'?'K':'G';
                 self::assertSame("TX-5\nEXTRA-TRANSACTION-5", $this->exportedValue($sheet,$txn.$target));
-                self::assertSame("00001234567890123456789\nADDON-BILL-5\n<script>alert(1)</script>", $this->exportedValue($sheet,$bill.$target));
+                self::assertSame('00001234567890123456789', $this->exportedValue($sheet,$bill.$target));
+                self::assertSame("ADDON-BILL-5\n<script>alert(1)</script>", $this->exportedValue($sheet,$upsell.$target));
+                self::assertSame("收款账户A\ncollect@example.com", $this->exportedValue($sheet,$account.$target));
                 self::assertContains($sheet->getCell($bill.$target)->getDataType(),['s','inlineStr']);
                 self::assertTrue($sheet->getStyle($bill.$target)->getAlignment()->getWrapText());
                 if($kind==='modal') self::assertSame(2,$sheet->getHighestRow());
                 $book->disconnectWorksheets();
             } finally {unlink($path);}
         }
+    }
+
+    public function test_explicit_bill_types_and_order_collection_account_are_not_inferred_from_other_sources(): void
+    {
+        DB::table('logistics_orders')->where('id',6)->update(['bill_number'=>'UPSELL-ONLY','transaction_id'=>'ERP-CARD-6',
+            'collection_account'=>'merchant@example.com','collection_account_email'=>'merchant@example.com']);
+        DB::table('logistics_order_payment_references')->insert([
+            ['logistics_order_id'=>6,'reference_type'=>'upsell','reference_number'=>'UPSELL-ONLY'],
+            ['logistics_order_id'=>6,'reference_type'=>'primary','reference_number'=>'MAIN-BILL'],
+            ['logistics_order_id'=>6,'reference_type'=>'upsell','reference_number'=>'MAIN-BILL'],
+        ]);
+        $detail=app(PaymentRenewalAnalysisService::class)->initialOrderDetails($this->filters(),$this->detailFilters(['detail_keyword'=>'ERP-CARD-6']));
+        self::assertCount(1,$detail['rows']);
+        $row=$detail['rows'][0];
+        self::assertSame('ERP-CARD-6',$row['transaction_id']);
+        self::assertSame([],$row['transaction_ids']);
+        self::assertSame(['MAIN-BILL'],$row['primary_bill_numbers']);
+        self::assertSame(['UPSELL-ONLY'],$row['upsell_bill_numbers']);
+        self::assertSame(['merchant@example.com'],$row['collection_accounts']);
+        $html=view('portals.payment.renewal-order-details',compact('detail'))->render();
+        foreach(['订单交易号','主账单号','加购账单号','PayPal付款流水','订单收款账号','merchant@example.com'] as $label) self::assertStringContainsString($label,$html);
+        self::assertStringNotContainsString('payment.renewal_details.',$html);
     }
 
     public function test_large_exports_write_all_rows_under_a_bounded_memory_limit(): void
@@ -383,6 +411,129 @@ PHP;
         if ($value===null) return null;
         $text=(string)$value;
         return $text==='' ? null : $text;
+    }
+
+    public function test_dashboard_cache_contains_only_totals_and_detail_hydration_is_limited_to_the_page(): void
+    {
+        for($i=0;$i<35;$i++) {
+            $this->order(800+$i,'2026-11-01 13:00:00','无订阅','credit_card','','PageMemory');
+            DB::table('logistics_paypal_refunds')->insert(['logistics_order_id'=>800+$i,
+                'refund_amount_usd'=>1,'manual_reason'=>str_repeat('退款说明',500)]);
+        }
+        $queries=[];
+        DB::listen(function($event)use(&$queries):void{
+            if(str_contains($event->sql,'manual_reason'))$queries[]=$event;
+        });
+        $service=app(PaymentRenewalAnalysisService::class);
+        $filters=$this->filters(['initial_store'=>'PageMemory','renewal_store'=>'PageMemory']);
+        $dashboard=$service->dashboard($filters);
+        self::assertArrayNotHasKey('initial_rows',$dashboard);
+        self::assertArrayNotHasKey('rows',$dashboard);
+        self::assertSame(35,$dashboard['initial_refunds']['total']['orders']);
+        self::assertSame([],$queries,'Summary queries must not select verbose refund explanations');
+        $detail=$service->initialOrderDetails($filters,$this->detailFilters(['detail_per_page'=>20,'detail_page'=>2]));
+        self::assertCount(15,$detail['rows']);
+        self::assertSame(35,$detail['summary']['refund_order_count']);
+        self::assertNotEmpty($queries);
+        foreach($queries as$query)self::assertLessThanOrEqual(15,count($query->bindings),'Only the visible page may hydrate refund explanations');
+        $store=\Illuminate\Support\Facades\Cache::store()->getStore();
+        $storage=(new \ReflectionProperty($store,'storage'))->getValue($store);
+        $serialized=serialize($storage);
+        self::assertStringNotContainsString('manual_reason',$serialized);
+        self::assertStringNotContainsString('refund_details',$serialized);
+        self::assertStringNotContainsString('transaction_ids',$serialized);
+        self::assertLessThan(200000,strlen($serialized));
+        self::assertInstanceOf(\Illuminate\Support\LazyCollection::class,$service->exportData($filters)['initial_rows']);
+        self::assertInstanceOf(\Illuminate\Support\LazyCollection::class,$service->initialOrderDetails($filters,$this->detailFilters(),false)['rows']);
+    }
+
+    public function test_large_statistics_and_pages_complete_under_128mb_with_compact_serialized_cache(): void
+    {
+        $database=tempnam(sys_get_temp_dir(),'renewal-statistics-db-');
+        $script=tempnam(sys_get_temp_dir(),'renewal-statistics-process-');
+        $pdo=DB::connection()->getPdo();
+        $pdo->exec('VACUUM INTO '.$pdo->quote($database));
+        $program=<<<'PHP'
+<?php
+require getcwd().'/vendor/autoload.php';
+$app=new Illuminate\Foundation\Application(getcwd());
+$app->instance('config',new Illuminate\Config\Repository([
+    'database'=>['default'=>'sqlite'],'admin'=>['database'=>['connection'=>null]],
+    'cache'=>['default'=>'array','stores'=>['array'=>['driver'=>'array','serialize'=>true]]],
+]));
+$capsule=new Illuminate\Database\Capsule\Manager($app);
+$capsule->addConnection(['driver'=>'sqlite','database'=>$argv[1]]);
+$capsule->setAsGlobal();$capsule->bootEloquent();
+$app->instance('db',$capsule->getDatabaseManager());
+$app->instance('cache',new Illuminate\Cache\CacheManager($app));
+Illuminate\Support\Facades\Facade::setFacadeApplication($app);
+$loader=new Illuminate\Translation\FileLoader(new Illuminate\Filesystem\Filesystem,getcwd().'/lang');
+$app->instance('translator',new Illuminate\Translation\Translator($loader,'zh-CN'));
+$db=$capsule->getConnection();
+$db->statement('CREATE INDEX memory_paid ON logistics_orders(paid_at,id)');
+$db->statement('CREATE INDEX memory_origins ON logistics_orders(subscription_origin_order_id,paid_at,id)');
+$db->statement('CREATE INDEX memory_card_refunds ON logistics_credit_card_refunds(logistics_order_id)');
+$reason=str_repeat('refund-note-',180);
+$db->beginTransaction();
+for($batch=0;$batch<50;$batch++){
+    $orders=$refunds=[];
+    for($j=0;$j<400;$j++){
+        $i=$batch*400+$j;$id=100000+$i;
+        $orders[]=['id'=>$id,'paid_at'=>'2026-09-15 12:00:00','subscription_type'=>$i%2?'无订阅':'订阅首次购买',
+            'store_name'=>'StatisticsMemory','payment_method'=>'cc','paid_amount_usd'=>20,'transaction_id'=>'ERP-'.$id];
+        $refunds[]=['logistics_order_id'=>$id,'refund_amount_usd'=>1,'refund_reason'=>$reason];
+    }
+    $db->table('logistics_orders')->insert($orders);$db->table('logistics_credit_card_refunds')->insert($refunds);
+}
+$db->table('logistics_orders')->insert(['id'=>900000,'paid_at'=>'2026-01-01 12:00:00',
+    'subscription_type'=>'订阅首次购买','store_name'=>'StatisticsMemory','payment_method'=>'cc','paid_amount_usd'=>20]);
+for($batch=0;$batch<4;$batch++){
+    $history=[];
+    for($j=0;$j<300;$j++)$history[]=['id'=>910000+$batch*300+$j,'paid_at'=>'2026-02-01 12:00:00',
+        'subscription_origin_order_id'=>'900000','subscription_type'=>'订阅复购','store_name'=>'StatisticsMemory','payment_method'=>'cc','paid_amount_usd'=>20];
+    $db->table('logistics_orders')->insert($history);
+}
+$db->table('logistics_orders')->insert(['id'=>920000,'paid_at'=>'2026-11-01 12:00:00',
+    'subscription_origin_order_id'=>'900000','subscription_type'=>'订阅复购','store_name'=>'StatisticsMemory','payment_method'=>'cc','paid_amount_usd'=>20]);
+$db->commit();
+unset($orders,$refunds,$history,$reason);
+if(function_exists('memory_reset_peak_usage'))memory_reset_peak_usage();
+$before=memory_get_usage(true);
+$f=['initial_date_from'=>'2026-09-01','initial_date_to'=>'2026-11-18','initial_timezone'=>'+00:00','initial_store'=>'StatisticsMemory',
+    'renewal_date_from'=>'2026-09-01','renewal_date_to'=>'2026-11-18','renewal_timezone'=>'+00:00','renewal_store'=>'StatisticsMemory','stage'=>'','stage_page'=>1];
+$detail=['detail_group'=>'total','detail_purchase'=>'all','detail_kind'=>'orders',
+    'detail_keyword'=>'','detail_store'=>'','detail_method'=>'','detail_type'=>'','detail_refund'=>'','detail_from'=>'','detail_to'=>'','detail_per_page'=>20,'detail_page'=>2];
+$service=new App\Portals\Payment\PaymentRenewalAnalysisService;
+$data=$service->dashboard($f);
+$page=$service->initialOrderDetails($f,$detail);
+$export=$service->exportData($f);
+$first=$export['initial_rows']->take(1)->all();
+$renewals=$export['rows']->take(1)->all();
+$store=Illuminate\Support\Facades\Cache::store()->getStore();
+$storage=(new ReflectionProperty($store,'storage'))->getValue($store);
+echo json_encode(['orders'=>$data['initial_refunds']['total']['orders'],'refund_orders'=>$data['initial_refunds']['total']['refund_order_count'],
+    'page'=>count($page['rows']),'page_total'=>$page['pagination']['total'],'renewal_number'=>reset($renewals)['stage_number'],
+    'export_first'=>count($first),'cache_bytes'=>strlen(serialize($storage)),
+    'peak'=>memory_get_peak_usage(true),'growth'=>memory_get_peak_usage(true)-$before],JSON_THROW_ON_ERROR);
+PHP;
+        file_put_contents($script,$program);
+        try{
+            $process=new \Symfony\Component\Process\Process([PHP_BINARY,'-d','memory_limit=128M',$script,$database],base_path());
+            $process->setTimeout(60);
+            $process->mustRun();
+            $result=json_decode($process->getOutput(),true,512,JSON_THROW_ON_ERROR);
+            self::assertSame(20000,$result['orders']);
+            self::assertSame(20000,$result['refund_orders']);
+            self::assertSame(20,$result['page']);
+            self::assertSame(20000,$result['page_total']);
+            self::assertSame(1201,$result['renewal_number']);
+            self::assertSame(1,$result['export_first']);
+            self::assertLessThan(1024*1024,$result['cache_bytes']);
+            self::assertLessThan(128*1024*1024,$result['peak']);
+            self::assertLessThan(64*1024*1024,$result['growth']);
+        }finally{
+            unlink($script);unlink($database);
+        }
     }
 
     private function detailFilters(array $overrides = []): array
@@ -652,7 +803,7 @@ PHP;
             self::assertSame($longBill,$detail['rows'][0]['bill_number']);
             self::assertSame('buyer44@example.com',$detail['rows'][0]['buyer_email']);
             $html = view('portals.payment.renewal-order-details',compact('detail'))->render();
-            self::assertStringContainsString('账单号',$html);
+            self::assertStringContainsString('主账单号',$html);
             self::assertStringContainsString('客户邮箱',$html);
             self::assertStringContainsString('data-renewal-detail-export',$html);
             self::assertStringContainsString('buyer44@example.com',$html);
@@ -670,15 +821,15 @@ PHP;
                 self::assertSame(2,$book->getSheetCount());
                 $sheet=$book->getSheet(0);
                 self::assertSame(count($expected['rows'])+1,$sheet->getHighestRow());
-                self::assertSame('账单号', $this->exportedValue($sheet,'D1'));
-                self::assertSame('客户邮箱', $this->exportedValue($sheet,'E1'));
+                self::assertSame('主账单号', $this->exportedValue($sheet,'D1'));
+                self::assertSame('客户邮箱', $this->exportedValue($sheet,'H1'));
                 if ($index === 0) {
                     self::assertSame(48,$sheet->getHighestRow());
                     self::assertSame($longBill, $this->exportedValue($sheet,'D2'));
                     self::assertContains($sheet->getCell('D2')->getDataType(),['s','inlineStr']);
                     self::assertSame('=1+1', $this->exportedValue($sheet,'D3'));
                     self::assertContains($sheet->getCell('D3')->getDataType(),['s','inlineStr']);
-                    self::assertSame('buyer44@example.com', $this->exportedValue($sheet,'E2'));
+                    self::assertSame('buyer44@example.com', $this->exportedValue($sheet,'H2'));
                     self::assertSame('UTC+08:00',$this->exportedValue($book->getSheet(1),'B3'));
                 }
                 $book->disconnectWorksheets();
@@ -703,34 +854,34 @@ PHP;
             file_put_contents($path,$bytes);
             $book=IOFactory::load($path);
             $sheet=$book->getSheet(3);
-            self::assertSame('退款时间', $this->exportedValue($sheet,'N1'));
-            self::assertSame('争议时间', $this->exportedValue($sheet,'Q1'));
-            self::assertSame('时间所属时区', $this->exportedValue($sheet,'S1'));
-            self::assertSame('账单号', $this->exportedValue($sheet,'H1'));
-            self::assertSame('客户邮箱', $this->exportedValue($sheet,'I1'));
+            self::assertSame('退款时间', $this->exportedValue($sheet,'Q1'));
+            self::assertSame('争议时间', $this->exportedValue($sheet,'T1'));
+            self::assertSame('时间所属时区', $this->exportedValue($sheet,'V1'));
+            self::assertSame('主账单号', $this->exportedValue($sheet,'H1'));
+            self::assertSame('客户邮箱', $this->exportedValue($sheet,'L1'));
             $matched=[];
             for ($r=2;$r<=$sheet->getHighestRow();$r++) {
                 $id=(string) $this->exportedValue($sheet,'E'.$r);
                 if ($id==='5') {
                     self::assertSame('00009549574570768548249622', $this->exportedValue($sheet,'H'.$r));
                     self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
-                    self::assertSame('buyer@example.com', $this->exportedValue($sheet,'I'.$r));
-                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00", $this->exportedValue($sheet,'N'.$r));
-                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
-                    self::assertSame('UTC-05:00', $this->exportedValue($sheet,'S'.$r));
-                    self::assertTrue($sheet->getStyle('N'.$r)->getAlignment()->getWrapText());
+                    self::assertSame('buyer@example.com', $this->exportedValue($sheet,'L'.$r));
+                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00", $this->exportedValue($sheet,'Q'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'T'.$r));
+                    self::assertSame('UTC-05:00', $this->exportedValue($sheet,'V'.$r));
+                    self::assertTrue($sheet->getStyle('Q'.$r)->getAlignment()->getWrapText());
                     $matched[]=$id;
                 } elseif ($id==='3') {
                     self::assertSame('=1+1', $this->exportedValue($sheet,'H'.$r));
                     self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
-                    self::assertNull( $this->exportedValue($sheet,'I'.$r));
-                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00", $this->exportedValue($sheet,'Q'.$r));
-                    self::assertNull( $this->exportedValue($sheet,'N'.$r));
-                    self::assertSame('UTC+08:00', $this->exportedValue($sheet,'S'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'L'.$r));
+                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00", $this->exportedValue($sheet,'T'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
+                    self::assertSame('UTC+08:00', $this->exportedValue($sheet,'V'.$r));
                     $matched[]=$id;
                 } elseif ($id==='6') {
                     // A refund with no event timestamp remains blank; never invent a payment-time substitute.
-                    self::assertNull( $this->exportedValue($sheet,'N'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
                     $matched[]=$id;
                 }
             }

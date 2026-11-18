@@ -20,14 +20,15 @@ class PaymentRenewalAnalysisExportService
         $pt = static fn (string $key) => __('payment.renewal_two_sections.'.$key);
         $methodName = static fn (string $method) => $method === 'unknown' ? $dt('unknown') : $pt('method_names.'.$method);
         $f = $data['filters'];
-        $columns = ['erp_id','order','transaction','bill_number','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'];
+        $columns = ['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'];
         $rows = function () use ($data, $pt, $methodName): \Generator {
             foreach ($data['rows'] as $row) {
                 yield $this->row([
-                    (string)$row['erp_order_id'], $row['initial_order'], implode("\n", $row['transaction_ids']), implode("\n", $row['bill_numbers']),
+                    (string)$row['erp_order_id'], $row['initial_order'], $row['transaction_id'], implode("\n", $row['primary_bill_numbers']),
+                    implode("\n", $row['upsell_bill_numbers']), implode("\n", $row['transaction_ids']), implode("\n", $row['collection_accounts']),
                     $row['buyer_email'], $row['store_name'], $methodName($row['payment_method']),
                     $pt('purchase_'.$row['purchase_type']), $row['paid_at'], $row['raw_amount'], $row['refund_count'], $row['raw_refund_amount'],
-                ], [9,11], [2,3]);
+                ], [12,14], [3,4,5,6]);
             }
         };
         $metadata = [
@@ -56,7 +57,7 @@ class PaymentRenewalAnalysisExportService
             foreach (array_slice($metadata, 1) as $values) yield $this->row($values, [], [0,1]);
         };
         return $this->response(__('payment.renewal_details.export_filename',['time'=>now()->format('Ymd_His')]), [
-            [$dt('export_sheet'), $this->columns(array_map($dt,$columns), [12,22,32,32,30,24,18,22,24,18,16,18]), $rows],
+            [$dt('export_sheet'), $this->columns(array_map($dt,$columns), [12,22,30,32,32,32,32,30,24,18,22,24,18,16,18]), $rows],
             [$dt('export_scope_sheet'), $this->columns([$metadata[0][0],''], [40,70]), $scopeRows],
         ]);
     }
@@ -123,12 +124,13 @@ class PaymentRenewalAnalysisExportService
                     yield $this->row([
                         $row['stage_number']===0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
                         $channels[$row['initial_channel']],$channels[$row['actual_channel']],(string)$row['initial_order'],(string)$row['renewal_order'],
-                        $row['store_name'],implode("\n",$row['transaction_ids']),implode("\n",$row['bill_numbers']),$row['buyer_email'],
+                        $row['store_name'],$row['transaction_id'],implode("\n",$row['primary_bill_numbers']),
+                        implode("\n",$row['upsell_bill_numbers']),implode("\n",$row['transaction_ids']),implode("\n",$row['collection_accounts']),$row['buyer_email'],
                         $row['paid_at'],$row['amount'],$row['refund_count'],$row['refund_amount'],$this->eventTimes($row['refund_details']),
                         $row['dispute_count'],$row['dispute_amount'],$this->eventTimes($row['dispute_details']),
                         $row['payment_method']==='unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
                         $data[$row['stage_number']===0 ? 'initial_calculation' : 'calculation']['timezone'],
-                    ], [10,12,15], [6,7,13,16]);
+                    ], [13,15,18], [7,8,9,10,16,19]);
                 }
             }
         };
@@ -136,7 +138,7 @@ class PaymentRenewalAnalysisExportService
             [$text('first_sheet'),$this->columns([...$firstMetadata[0],'',''],[32,48,24,24]),$firstRows],
             [$text('refund_sheet'),$this->columns([__('payment.renewal_analysis.export.timezone'),$data['initial_calculation']['timezone'],'','','','','',''],[22,48,24,20,18,20,20,20]),$refundRows],
             [$text('renewal_sheet'),$this->columns([__('payment.renewal_analysis.export.timezone'),$data['calculation']['timezone'],'','','','','','','',''],[22,48,28,28,22,20,20,20,20,20]),$renewalRows],
-            [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone')],[24,18,18,24,24,24,32,32,30,24,18,16,18,24,16,18,24,20,20]),$detailRows],
+            [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone')],[24,18,18,24,24,24,30,32,32,32,32,30,24,18,16,18,24,16,18,24,20,20]),$detailRows],
         ]);
     }
 
