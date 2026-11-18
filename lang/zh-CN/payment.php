@@ -357,7 +357,7 @@ return array_replace_recursive($translations, [
         'sum_orders' => '本期当前阶段范围内订单共 :count 单，每条付款订单计 1 单。',
         'sum_money' => '本期 :count 单的美元实收逐单保留两位后求和 = :amount（未扣退款、争议及手续费）。',
         'subscription' => '分子 :a 单合格订阅首购 ÷ 分母 :b 单合格首单；统计本期付款。',
-        'subscription_scope' => '合格首单：已付款、通途订单号非空、类型为订阅首次购买或无订阅，排除刷单，加购状态不影响是否计入。PayPal 另需实际交易关联及 T00*、状态 S/V 的成功交易，按订单去重；信用卡无需该 PayPal 匹配。',
+        'subscription_scope' => '首单统计：本期有付款时间、类型为订阅首次购买或无订阅，排除刷单；加购状态不影响计入，不要求通途订单号，也不要求 PayPal 账户关联或成功交易匹配，按 ERP 订单去重。',
         'subscription_total' => '合计分子：PayPal :pa + 信用卡 :ca = :a；合计分母：PayPal :pb + 信用卡 :cb = :b。',
         'stage_scope' => '应用当前阶段筛选；翻页仅改变显示阶段，不截断指标卡与渠道风险统计。',
         'initial_stage' => '本行仅核算本期首次订阅订单及其退款；不是前推区间的续费对比分母。',
@@ -964,7 +964,7 @@ return array_replace_recursive($translations, [
             'first_renewal_rate' => '首次续费率 = 完成首次续费订阅链 ÷ 应首次续费订阅链',
             'refund_rates' => '笔数退款率 = 发生退款的订单数（去重）÷ 续费订单数；金额退款率 = 退款金额 ÷ 续费实收。退款栏保留退款记录笔数及金额。',
             'subscription_rate' => '首单订阅率 = 订阅首次购买首单 ÷ 合格首单',
-            'subscription_scope' => 'PayPal 合格首单需已关联 ERP 且已匹配成功 PayPal 真实交易；信用卡合格首单需已关联 ERP。',
+            'subscription_scope' => '以本期有付款时间的 ERP 首购订单统计，排除刷单；不要求通途订单号或 PayPal 成功交易匹配。',
         ],
         'observation_note' => '首次订阅率使用本期合格首单；第 N 次续费率使用本期第 N 次续费订单数，直接除以前推 30 天区间的第 N−1 阶段订单数。各阶段退款率仅使用本期本阶段订单。',
         'funnel' => [

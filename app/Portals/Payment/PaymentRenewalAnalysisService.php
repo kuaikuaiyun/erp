@@ -7,7 +7,6 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
-use App\Models\LogisticsPayPalTransaction;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -199,7 +198,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v16:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v17:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -533,7 +532,6 @@ class PaymentRenewalAnalysisService
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$from, $to])
             ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])
-            ->whereRaw("TRIM(COALESCE(tongtu_order_number, '')) <> ''")
             ->where(function ($query): void {
                 $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
             });
@@ -551,29 +549,12 @@ class PaymentRenewalAnalysisService
         }
 
         $orders = $query->select(['id', 'subscription_type', 'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source'])->get();
-        $paypalOrderIds = $orders->filter(fn (LogisticsOrder $order): bool => $this->channelFor($order) === 'paypal')
-            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $matchedPayPalOrders = $paypalOrderIds === [] ? [] : LogisticsPayPalTransaction::query()
-            ->whereIn('logistics_order_id', $paypalOrderIds)
-            ->where('event_code', 'like', 'T00%')
-            ->whereIn('status', ['S', 'V'])
-            ->pluck('logistics_order_id')->mapWithKeys(fn ($id): array => [(int) $id => true])->all();
-
         $counts = array_fill_keys(array_keys(self::breakdownGroups()), ['subscription_orders'=>0, 'total_orders'=>0]);
         foreach ($orders as $order) {
             $channel = $this->channelFor($order);
             if (($filters['channel'] ?? '') !== '' && $channel !== $filters['channel']) {
                 continue;
             }
-            if ($channel === 'paypal' && (
-                $order->paypal_account_id === null
-                ||
-                $order->paypal_association_source !== 'actual_transaction'
-                || !isset($matchedPayPalOrders[(int) $order->id])
-            )) {
-                continue;
-            }
-
             $row = ['actual_channel'=>$channel, 'payment_method'=>$this->methodFor($order)];
             foreach ($counts as $key => &$count) {
                 if (!$this->matchesGroup($row, $key)) continue;

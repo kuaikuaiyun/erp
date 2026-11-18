@@ -119,14 +119,45 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame(3, $rates['total']['subscription_orders']);
         $this->order(150, '2026-10-02 12:00:00', '订阅首次购买', 'credit_card', '', 'Methods', ['payment_method'=>' AP ']);
         $this->order(151, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '150', 'Methods', ['payment_method'=>' GP ']);
-        // This ap first purchase has no matched PayPal transaction and remains unqualified.
+        // An ap first purchase without a matched PayPal transaction is included.
         $this->order(152, '2026-11-01 12:00:00', '订阅首次购买', 'credit_card', '', 'Methods', ['payment_method'=>'ap']);
         \Illuminate\Support\Facades\Cache::flush();
         $updated = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters(['initial_store'=>'Methods','renewal_store'=>'Methods']));
         self::assertEquals(50, $updated['stages'][0]['by_channel']['method_ap']['rate']);
         self::assertEquals(200, $updated['stages'][0]['by_channel']['method_gp']['rate']);
-        self::assertSame(6, $updated['summary']['subscription_rate']['total']['total_orders']);
+        self::assertSame(7, $updated['summary']['subscription_rate']['total']['total_orders']);
         self::assertSame(7, $updated['initial_refunds']['total']['orders']);
+    }
+
+    public function test_first_purchase_rate_does_not_require_tongtu_or_paypal_transaction_matching(): void
+    {
+        foreach (['pp','ap','gp','cc'] as $i=>$method) {
+            foreach (['订阅首次购买','无订阅'] as $j=>$type) {
+                $id=500+$i*2+$j;
+                $this->order($id,'2026-11-01 12:00:00',$type,'credit_card','','NoMatching',[
+                    'payment_method'=>$method, 'tongtu_order_number'=>$j===0 ? null : '',
+                    'paypal_account_id'=>null, 'paypal_association_source'=>null, 'is_add_on'=>'已加购',
+                ]);
+            }
+        }
+        $this->order(520,'2026-11-01 12:00:00','订阅首次购买','credit_card','','NoMatching',['operator_name'=>'刷单']);
+        $this->order(521,'2026-11-02 12:00:00','订阅首次购买','credit_card','','NoMatching');
+        $this->order(522,'2026-11-01 12:00:00','订阅复购','credit_card','','NoMatching');
+        $this->order(523,'2026-11-01 12:00:00','订阅首次购买','credit_card','','Other');
+        DB::table('logistics_orders')->insert(['id'=>524,'subscription_type'=>'订阅首次购买','store_name'=>'NoMatching','payment_method'=>'pp']);
+        $filters=$this->filters(['initial_store'=>'NoMatching']);
+        $service=app(PaymentRenewalAnalysisService::class);
+        $data=$service->dashboard($filters);
+        $rates=$data['summary']['subscription_rate'];
+        self::assertSame(8,$rates['total']['total_orders']);
+        self::assertSame(4,$rates['total']['subscription_orders']);
+        self::assertEquals(50,$rates['total']['rate']);
+        foreach (['pp','ap','gp','cc'] as $method) {
+            self::assertSame(2,$rates['method_'.$method]['total_orders']);
+            self::assertSame(1,$rates['method_'.$method]['subscription_orders']);
+            self::assertEquals(50,$rates['method_'.$method]['rate']);
+        }
+        self::assertSame($rates,$service->exportData($filters)['summary']['subscription_rate']);
     }
 
     public function test_add_on_status_does_not_exclude_first_purchases_or_renewal_history(): void
