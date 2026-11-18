@@ -199,7 +199,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v15:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v16:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -227,9 +227,7 @@ class PaymentRenewalAnalysisService
                 $query->whereBetween('paid_at', [$from, $to])
                     ->orWhereBetween('paid_at', [$comparisonFrom, $comparisonTo]);
             })
-            ->where(function ($query): void {
-                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-            })->get();
+            ->get();
         $initials = $this->periodInitials($candidates, $filters, $to);
         $nonSubscription = $candidates->filter(fn (LogisticsOrder $order): bool =>
             $order->subscription_type === '无订阅'
@@ -252,9 +250,7 @@ class PaymentRenewalAnalysisService
             $batch = LogisticsOrder::query()->select(self::ORDER_FIELDS)
                 ->whereIn('subscription_origin_order_id', $references)
                 ->whereNotNull('paid_at')->where('paid_at', '<=', $to)
-                ->where(function ($query): void {
-                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-                })->get();
+                ->get();
             foreach ($batch as $order) $renewals->put((int) $order->id, $order);
         }
         $renewals = $renewals->sortBy([['paid_at', 'asc'], ['id', 'asc']])->values();
@@ -397,8 +393,6 @@ class PaymentRenewalAnalysisService
                     $query->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id', '');
                 })->where(function ($query): void {
                     $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
-                })->where(function ($query): void {
-                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
                 })->where(function ($query) use ($chunk, $numericIds): void {
                     $query->whereIn('transaction_id', $chunk)->orWhereIn('shopify_order_id', $chunk)
                         ->orWhereIn('shopify_order_number', $chunk)->orWhereIn('payment_gateway_order_id', $chunk)
@@ -539,9 +533,6 @@ class PaymentRenewalAnalysisService
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$from, $to])
             ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])
-            ->where(function ($query): void {
-                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-            })
             ->whereRaw("TRIM(COALESCE(tongtu_order_number, '')) <> ''")
             ->where(function ($query): void {
                 $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');

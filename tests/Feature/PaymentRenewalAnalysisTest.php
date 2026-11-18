@@ -129,6 +129,41 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame(7, $updated['initial_refunds']['total']['orders']);
     }
 
+    public function test_add_on_status_does_not_exclude_first_purchases_or_renewal_history(): void
+    {
+        $flag = ['is_add_on'=>'已加购'];
+        $this->order(400,'2026-09-02 12:00:00','订阅首次购买','credit_card','', 'AddOn', $flag);
+        $this->order(401,'2026-10-02 12:00:00','订阅复购','credit_card','400', 'AddOn', $flag);
+        $this->order(402,'2026-11-01 12:00:00','订阅复购','credit_card','400', 'AddOn', $flag);
+        $this->order(403,'2026-11-01 12:00:00','订阅首次购买','credit_card','', 'AddOn', $flag);
+        $this->order(404,'2026-11-01 12:00:00','无订阅','credit_card','', 'AddOn', $flag);
+        DB::table('logistics_credit_card_refunds')->insert([
+            ['logistics_order_id'=>402,'refund_amount_usd'=>3,'refund_reason'=>'质量问题'],
+            ['logistics_order_id'=>404,'refund_amount_usd'=>5,'refund_reason'=>'质量问题'],
+        ]);
+        $filters = $this->filters(['initial_store'=>'AddOn','renewal_store'=>'AddOn']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $data = $service->dashboard($filters);
+        self::assertSame(2, $data['summary']['subscription_rate']['total']['total_orders']);
+        self::assertSame(1, $data['summary']['subscription_rate']['total']['subscription_orders']);
+        self::assertEquals(50, $data['summary']['subscription_rate']['total']['rate']);
+        self::assertSame(2, $data['initial_refunds']['total']['orders']);
+        self::assertSame(1, $data['initial_refunds_by_type']['total']['subscription']['orders']);
+        self::assertSame(1, $data['initial_refunds_by_type']['total']['non_subscription']['orders']);
+        $stages = array_column($data['stages'],null,'key');
+        self::assertSame(1, $stages['renewal_2']['orders']);
+        self::assertSame(1, $stages['renewal_2']['previous_orders']);
+        self::assertEquals(100, $stages['renewal_2']['rate']);
+        self::assertEquals(3, $stages['renewal_2']['refund_amount']);
+        $detail = $service->initialOrderDetails($filters,$this->detailFilters());
+        self::assertSame([404,403],array_column($detail['rows'],'erp_order_id'));
+        self::assertSame(1, $detail['summary']['refund_order_count']);
+        self::assertEquals(5, $detail['summary']['refund_amount']);
+        $refunds = $service->initialOrderDetails($filters,$this->detailFilters(['detail_kind'=>'refunds']));
+        self::assertSame([404],array_column($refunds['rows'],'erp_order_id'));
+        self::assertSame(2, $service->exportData($filters)['initial_refunds']['total']['orders']);
+    }
+
     private function detailFilters(array $overrides = []): array
     {
         return array_replace([
@@ -185,8 +220,8 @@ class PaymentRenewalAnalysisTest extends TestCase
         \Illuminate\Support\Facades\Cache::flush();
         $china = $service->initialOrderDetails($this->filters(), $this->detailFilters());
         $west = $service->initialOrderDetails($this->filters(['initial_timezone'=>'-05:00']), $this->detailFilters());
-        self::assertSame(2, $china['scope']['orders']);
-        self::assertSame(3, $west['scope']['orders']);
+        self::assertSame(3, $china['scope']['orders']);
+        self::assertSame(4, $west['scope']['orders']);
         self::assertSame($china['scope'], $service->initialOrderDetails($this->filters(['stage'=>'renewal_9','renewal_store'=>'Other']), $this->detailFilters())['scope']);
     }
 
@@ -196,13 +231,13 @@ class PaymentRenewalAnalysisTest extends TestCase
         DB::table('logistics_orders')->where('id',244)->update(['shopify_order_number'=>'<script>alert(1)</script>']);
         $service = app(PaymentRenewalAnalysisService::class);
         $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_per_page'=>20,'detail_page'=>2]));
-        self::assertSame(47, $detail['pagination']['total']);
+        self::assertSame(48, $detail['pagination']['total']);
         self::assertCount(20, $detail['rows']);
-        self::assertEquals(940, $detail['summary']['revenue']);
+        self::assertEquals(960, $detail['summary']['revenue']);
         self::assertSame(21, $detail['pagination']['from']);
         $last = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_page'=>100]));
         self::assertSame(3, $last['pagination']['current_page']);
-        self::assertCount(7, $last['rows']);
+        self::assertCount(8, $last['rows']);
         $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_keyword'=>'<script>']));
         $html = view('portals.payment.renewal-order-details', compact('detail'))->render();
         self::assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $html);
@@ -242,15 +277,15 @@ class PaymentRenewalAnalysisTest extends TestCase
     {
         $data = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters());
         $groups = $data['initial_refunds_by_type'];
-        self::assertSame(2, $groups['total']['all']['orders']);
+        self::assertSame(3, $groups['total']['all']['orders']);
         self::assertSame(1, $groups['total']['subscription']['orders']);
-        self::assertSame(1, $groups['total']['non_subscription']['orders']);
+        self::assertSame(2, $groups['total']['non_subscription']['orders']);
         self::assertEquals(15, $groups['total']['all']['refund_amount']);
         foreach (['orders', 'revenue', 'refund_order_count', 'refund_amount'] as $metric) {
             self::assertEquals($groups['total']['all'][$metric], $groups['paypal']['all'][$metric] + $groups['credit_card']['all'][$metric]);
             self::assertEquals($groups['total']['all'][$metric], $groups['total']['subscription'][$metric] + $groups['total']['non_subscription'][$metric]);
         }
-        self::assertEquals(100, $groups['total']['all']['refund_count_rate']);
+        self::assertEquals(66.67, $groups['total']['all']['refund_count_rate']);
     }
 
     public function test_stage_channel_denominators_use_each_period_actual_channel_and_no_base_is_null(): void
@@ -309,8 +344,8 @@ class PaymentRenewalAnalysisTest extends TestCase
         $service = app(PaymentRenewalAnalysisService::class);
         $china = $service->dashboard($this->filters());
         $western = $service->dashboard($this->filters(['initial_timezone' => '-05:00']));
-        self::assertSame(2, $china['initial_refunds']['total']['orders']);
-        self::assertSame(3, $western['initial_refunds']['total']['orders']);
+        self::assertSame(3, $china['initial_refunds']['total']['orders']);
+        self::assertSame(4, $western['initial_refunds']['total']['orders']);
         self::assertSame($china['stages'], $western['stages']);
         self::assertContains('Other', $china['initial_stores']);
         self::assertContains('Test', $service->dashboard($this->filters(['initial_store' => 'Other']))['initial_stores']);
@@ -382,7 +417,7 @@ class PaymentRenewalAnalysisTest extends TestCase
                 self::assertSame('账单号',$sheet->getCell('D1')->getValue());
                 self::assertSame('客户邮箱',$sheet->getCell('E1')->getValue());
                 if ($index === 0) {
-                    self::assertSame(47,$sheet->getHighestRow());
+                    self::assertSame(48,$sheet->getHighestRow());
                     self::assertSame($longBill,$sheet->getCell('D2')->getValue());
                     self::assertSame('s',$sheet->getCell('D2')->getDataType());
                     self::assertSame('=1+1',$sheet->getCell('D3')->getValue());
