@@ -283,6 +283,8 @@ return array_replace_recursive($translations, [
         ],
     ],
     'renewal_two_sections' => [
+        'stage_current_period' => '本期：:from ～ :to',
+        'stage_comparison_period' => '对比：:from ～ :to · 上一阶段：:previous',
         'payment_method' => '支付方式',
         'method_names' => ['ap'=>'苹果支付', 'gp'=>'谷歌支付', 'pp'=>'PayPal支付', 'cc'=>'信用卡支付'],
         'method_all' => '全部方式',

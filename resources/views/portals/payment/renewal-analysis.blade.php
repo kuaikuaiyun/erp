@@ -40,7 +40,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-1">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-2">
 @endpush
 
 @section('content')
@@ -141,25 +141,33 @@
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}</p>
 
         <p class="payment-renewal-scope-note">{{ $text('stage_note') }}</p>
-        <div class="table-responsive"><table class="table payment-data-table"><thead>
-            <tr class="payment-column-groups"><th colspan="2">{{ $text('renewal_stage') }}</th><th colspan="3">{{ $text('renewal_group') }}</th><th>{{ $text('payment_group') }}</th><th colspan="4">{{ $text('refund_group') }}</th></tr>
-            <tr><th>{{ $text('renewal_stage') }}</th><th>{{ $text('payment_method') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th></tr>
-        </thead><tbody>
+        <div class="payment-renewal-stage-list">
         @forelse($dashboard['stages'] as $stage)
+            <section class="payment-renewal-stage-card" aria-labelledby="renewal-stage-{{ $stage['number'] }}">
+                <header class="payment-renewal-stage-heading">
+                    <h3 id="renewal-stage-{{ $stage['number'] }}">{{ $stageName($stage['number']) }}</h3>
+                    <div class="payment-renewal-stage-periods">
+                        <span>{{ $text('stage_current_period',['from'=>substr($calc['period_from'],0,10),'to'=>substr($calc['period_to'],0,10)]) }}</span>
+                        <span>{{ $text('stage_comparison_period',['from'=>substr($calc['comparison_from'],0,10),'to'=>substr($calc['comparison_to'],0,10),'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1)]) }}</span>
+                    </div>
+                </header>
+                <div class="table-responsive"><table class="table payment-data-table payment-renewal-stage-table">
+                    <thead><tr><th>{{ $text('payment_method') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th></tr></thead>
+                    <tbody>
             @foreach($groups as $key=>$group)
                 @php $part = $key === 'total' ? $stage : $stage['by_channel'][$key]; @endphp
                 <tr class="payment-level-{{ $group['level'] }} {{ $key === 'total' ? 'payment-stage-start' : '' }}" @if($key === 'total') data-payment-renewal-number="{{ $stage['number'] }}" @endif data-payment-method="{{ $group['method'] }}">
-                    <td>{{ $stageName($stage['number']) }}</td>
                     <td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td>
-                    <td>{{ number_format($part['previous_orders']) }}@if($key === 'total')<small class="payment-inline-formula payment-period-note">{{ $inlinePeriod($stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),$calc['comparison_from'],$calc['comparison_to']) }}</small>@endif</td>
-                    <td>{{ number_format($part['orders']) }}@if($key === 'total')<small class="payment-inline-formula payment-period-note">{{ $inlinePeriod($stageName($stage['number']),$calc['period_from'],$calc['period_to']) }}</small>@endif</td>
+                    <td>{{ number_format($part['previous_orders']) }}</td>
+                    <td>{{ number_format($part['orders']) }}</td>
                     <td class="payment-rate-cell"><strong>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['orders'],$part['previous_orders']) }}</small></td>
                     <td>{{ $money($part['revenue']) }}</td><td>{{ number_format($part['refund_order_count']) }}</td><td>{{ $money($part['refund_amount']) }}</td>
                     <td class="payment-refund-rate">{{ number_format($part['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_order_count'],$part['orders']) }}</small></td>
                     <td class="payment-refund-rate">{{ number_format($part['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_amount'],$part['revenue'],true) }}</small></td>
                 </tr>
             @endforeach
-            <tr class="payment-calculation-row"><td colspan="10">
+                    </tbody></table></div>
+            <div class="payment-renewal-stage-calculation">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
                     {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['previous_orders']]),
                         $audit('completed',['number'=>$stage['number'],'count'=>$stage['orders']]),$period,$comparison]) }}
@@ -174,9 +182,10 @@
                     {{ $notes($ratio($stage['refund_amount'],$stage['revenue'],$stage['refund_amount_rate'],4)) }}
                     {{ $notes([$stage['paid_from'] === null ? $audit('no_payments') : $audit('actual_period',['from'=>$stage['paid_from'],'to'=>$stage['paid_to']]),$audit('stage_number',['number'=>$stage['number']])]) }}
                 </details>
-            </td></tr>
-        @empty<tr><td colspan="10" class="payment-product-empty">{{ __($t.'.funnel.empty') }}</td></tr>@endforelse
-        </tbody></table></div>
+            </div>
+            </section>
+        @empty<div class="payment-product-empty">{{ __($t.'.funnel.empty') }}</div>@endforelse
+        </div>
         @php
             $p = $dashboard['stage_pagination'];
             $stageQuery = array_diff_key($filters, ['stage_page'=>true, 'risk_date_mode'=>true]);
