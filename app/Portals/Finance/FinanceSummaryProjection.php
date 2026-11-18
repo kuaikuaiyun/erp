@@ -56,7 +56,8 @@ class FinanceSummaryProjection
                 $rows->where('payload->subscription', FinanceSettlementService::subscriptionLabel($filters['subscription']));
             }
 
-            return $rows->lazyById(500, 'position')->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))
+            return $rows->select('position', 'payload')->lazyById(2000, 'position')
+                ->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))
                 ->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['_summary_team'] === $filters['team'])
                 && (! filled($filters['subscription'] ?? null) || $row['subscription'] === FinanceSettlementService::subscriptionLabel($filters['subscription'])))
                 ->map(function (array $row): array {

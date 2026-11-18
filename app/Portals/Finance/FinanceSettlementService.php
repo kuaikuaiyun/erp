@@ -170,6 +170,9 @@ class FinanceSettlementService
         if (($filters['card_channel'] ?? null) === 'ye' && in_array($filters['card_match'] ?? null, ['matched', 'waiting'], true)) {
             app(FinanceConfluxSettlement::class)->filterOrderMatch($query, $filters['card_match'] === 'matched');
         }
+        if (($filters['card_channel'] ?? null) === 'ye' && ! empty($filters['card_wallet'])) {
+            app(FinanceConfluxSettlement::class)->filterWalletCandidates($query);
+        }
         if (! empty($filters['export_record_ids'])) {
             $query->whereIntegerInRaw('finance_records.id', $filters['export_record_ids']);
         }
@@ -251,7 +254,7 @@ class FinanceSettlementService
         return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'uniqueDomains', 'brushStores', 'locks');
     }
 
-    public function rowBatches(string $channel, array $filters, bool $businessMatchesOnly = false): iterable
+    public function rowBatches(string $channel, array $filters, bool $businessMatchesOnly = false, bool $walletMatchesOnly = false): iterable
     {
         $context = $this->rowContext($channel);
         $context['conflux_report_fees'] = new \ArrayObject;
@@ -261,6 +264,7 @@ class FinanceSettlementService
             // Read each keyset batch in date order instead of sorting the entire matching ledger again.
             $query->forceIndex('finance_records_occurred_at_index');
         }
+        $batchSize = $walletMatchesOnly ? 1000 : 500;
         $last = null;
         do {
             $page = clone $query;
@@ -269,16 +273,16 @@ class FinanceSettlementService
                 $page->where(fn ($scope) => $scope->where('occurred_at', '<', $lastOccurredAt)
                     ->orWhere(fn ($tie) => $tie->where('occurred_at', $lastOccurredAt)->where('id', '<', $last->id)));
             }
-            $records = $page->limit(500)->get();
+            $records = $page->limit($batchSize)->get();
             if ($records->isEmpty()) {
                 break;
             }
             $last = $records->last();
-            yield $this->rows($channel, $filters, $records, $context, $businessMatchesOnly);
-        } while ($records->count() === 500);
+            yield $this->rows($channel, $filters, $records, $context, $businessMatchesOnly, $walletMatchesOnly);
+        } while ($records->count() === $batchSize);
     }
 
-    public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null, bool $businessMatchesOnly = false): Collection
+    public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null, bool $businessMatchesOnly = false, bool $walletMatchesOnly = false): Collection
     {
         $db = $this->workbooks->database();
         $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
@@ -310,6 +314,27 @@ class FinanceSettlementService
         }
         if ($records->isEmpty()) {
             return collect();
+        }
+        $conflux = $channel === 'credit_card' && $ye ? app(FinanceConfluxSettlement::class) : null;
+        $ledger = $businessMatchesOnly ? null : $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
+        if ($conflux && ! empty($filters['card_wallet'])) {
+            $records = $records->filter(function (FinanceRecord $record) use ($conflux, $ledger, $supplements): bool {
+                $saved = isset($supplements[$record->id])
+                    ? json_decode($supplements[$record->id]->payload, true, 512, JSON_THROW_ON_ERROR) : [];
+                $website = FinanceCreditSettlementLayout::confluxWebsiteName(
+                    $record->payload, [...$saved, ...($saved['_edited_fields'] ?? [])],
+                );
+
+                return $conflux->isWallet($website, $ledger->get($record->id, collect()));
+            });
+            if ($records->isEmpty()) {
+                return collect();
+            }
+            if ($walletMatchesOnly && ! filled($filters['team'] ?? null)
+                && ! filled($filters['subscription'] ?? null) && ! filled($filters['domain'] ?? null)
+                && empty($filters['card_match'])) {
+                return $records->map(fn ($record) => ['id' => $record->id, 'subscription' => null])->values();
+            }
         }
         $owners = $businessMatchesOnly ? collect() : $db->table('finance_payment_transactions')
             ->whereIntegerInRaw('finance_record_id', $records->modelKeys())->pluck('payment_account_id', 'finance_record_id');
@@ -359,17 +384,14 @@ class FinanceSettlementService
             ? $this->operationDepartmentMembers() : collect();
         $membersById = $departmentMembers->keyBy('id');
         $membersByName = $departmentMembers->groupBy(fn ($member) => array_unique(array_filter([$member->name, $member->username])));
-        $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
-            ? app(FinanceConfluxSettlement::class) : null;
-        $ledger = $businessMatchesOnly ? null : $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
         $confluxFees = null;
-        $reportFees = $context['conflux_report_fees'] ?? null;
+        $reportFees = $context['conflux_report_fees'] ?? new \ArrayObject;
         $usdRates = app(FinanceCreditUsdRates::class);
         $confluxOrders = $conflux ? $records : ($channel === 'credit_card' && empty($filters['card_channel']) && empty($filters['summary_only'])
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
-        $creditUsdRates = $businessMatchesOnly ? [] : $usdRates->forOrders($confluxOrders);
-        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, &$confluxFees, $reportFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye, $businessMatchesOnly): ?array {
+        $creditUsdRates = $businessMatchesOnly || $walletMatchesOnly ? [] : $usdRates->forOrders($confluxOrders);
+        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, &$confluxFees, $reportFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye, $businessMatchesOnly, $walletMatchesOnly): ?array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -563,7 +585,7 @@ class FinanceSettlementService
                 ];
             }
 
-            if ($confluxOrderIds->has($record->id) && $row['gross'] !== null && filled($row['currency']) && ! isset($p['_manual_import_month'])) {
+            if (! $walletMatchesOnly && $confluxOrderIds->has($record->id) && $row['gross'] !== null && filled($row['currency']) && ! isset($p['_manual_import_month'])) {
                 $tradeDate = $beijingDate->toDateString();
                 $row['source_settlement_usd'] = $saved['_edited_fields']['source_settlement_usd'] ?? $saved['source_settlement_usd']
                     ?? ($ye ? $this->number($p['结算-美元'] ?? null) : null)
@@ -599,10 +621,20 @@ class FinanceSettlementService
                     $row['card_layout']['source_settlement_usd'] = $row['source_settlement_usd'];
                     $row['card_layout']['calendar_date'] = $tradeDate;
                 }
+                $entries = $conflux ? $ledger->get($record->id, collect()) : null;
+                $wallet = $conflux?->isWallet($row['card_layout']['website_name'] ?? null, $entries);
+                if (! empty($filters['card_wallet']) && $conflux && ! $wallet) {
+                    return null;
+                }
+                if ($walletMatchesOnly) {
+                    return array_intersect_key($row, ['id' => true, 'team' => true, 'domain' => true, 'subscription' => true])
+                        + ['ledger_wallet' => $wallet, 'ledger_matched' => $ledger->has($record->id)];
+                }
                 if ($ledger?->has($record->id)) {
-                    $entries = $ledger->get($record->id);
-                    $confluxFees ??= $conflux->feesFor($ledger, $reportFees);
-                    $details = $conflux->details($entries, $confluxFees);
+                    $fees = ! empty($filters['card_wallet'])
+                        ? $conflux->feesFor(collect([$entries]), $reportFees)
+                        : ($confluxFees ??= $conflux->feesFor($ledger, $reportFees));
+                    $details = $conflux->details($entries, $fees);
                     $existingFees = array_intersect_key(array_filter($row['card_layout'], fn ($value) => filled($value)),
                         array_flip(['hold', 'fee', 'per_order_fee', 'refund_fee', 'chargeback_fee', 'ethoca_fee', 'rdr_fee']));
                     $row['card_layout'] = array_replace($row['card_layout'], array_diff_key($details['values'], $manual, $existingFees), [
@@ -625,8 +657,7 @@ class FinanceSettlementService
                             $layout[$field] = $value;
                         }
                     }
-                    $entries = $ledger->get($record->id, collect());
-                    $row['ledger_wallet'] = $conflux->isWallet($layout['website_name'] ?? null, $entries);
+                    $row['ledger_wallet'] = $wallet;
                     $row['card_layout'] = array_replace($layout, $conflux->exceptionColumns($layout, $entries, $row['ledger_wallet']));
                     $row['ledger_matched'] = $ledger->has($record->id);
                     $row['card_layout']['ledger_status'] = $row['ledger_matched'] ? '已匹配账单' : '待匹配账单';
@@ -1315,8 +1346,12 @@ class FinanceSettlementService
         return in_array(strtolower(FinanceCatalog::simplified(trim((string) $value))), ['1', 'true', 'yes', '是', '加购', '已加购'], true);
     }
 
-    public function subscriptionOptions(Collection $rows): Collection
+    public function subscriptionOptions(Collection $rows, bool $includeSourceOptions = true): Collection
     {
+        if (! $includeSourceOptions) {
+            return $rows->pluck('subscription')->map(self::subscriptionLabel(...))
+                ->filter(fn ($value) => $value !== '')->unique()->sort()->values();
+        }
         $db = $this->workbooks->database();
         $key = 'finance:subscription-options:v1:'.hash('sha256', $db->getName().'|'.$db->getDatabaseName());
         $default = config('cache.default');

@@ -25,6 +25,13 @@
 @push('scripts')
 <script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=4"></script>
 <script>
+// Retain browser navigation timings in the DOM for repeatable finance performance checks.
+document.addEventListener('DOMContentLoaded', function () {
+    document.documentElement.dataset.financeDomReadyMs = Math.round(performance.now());
+}, {once: true});
+window.addEventListener('load', function () {
+    document.documentElement.dataset.financeLoadMs = Math.round(performance.now());
+}, {once: true});
 document.addEventListener('change', function (event) {
     var select = event.target;
     if (!select.matches('select[data-finance-page-size]')) return;

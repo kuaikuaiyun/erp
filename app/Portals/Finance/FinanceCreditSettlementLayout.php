@@ -161,6 +161,10 @@ class FinanceCreditSettlementLayout
         ];
         $values = [];
         foreach (self::columns($channel) as $field => $label) {
+            if ($channel === 'ye' && $field === 'website_name') {
+                $values[$field] = self::confluxWebsiteName($payload, $saved);
+                continue;
+            }
             $fallback = array_key_exists($field, $aliases) ? $aliases[$field] : ($row[$field] ?? null);
             $raw = match ($field) {
                 // The flat payload's refund amount is the settlement value.
@@ -193,6 +197,16 @@ class FinanceCreditSettlementLayout
         }
 
         return $values;
+    }
+
+    public static function confluxWebsiteName(array $payload, array $saved): mixed
+    {
+        if (array_key_exists('website_name', $saved)) {
+            return $saved['website_name'];
+        }
+        $website = $payload[self::columns('ye')['website_name']] ?? null;
+
+        return filled($website) ? $website : ($payload['商户名称'] ?? $payload['店铺名称'] ?? null);
     }
 
     public static function reportTimestamp(mixed $value, string $sourceTimezone, string $timezone): mixed

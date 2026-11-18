@@ -40,6 +40,10 @@ class RefreshFinanceSummaries extends Command
         if (! $acquired) {
             return self::SUCCESS;
         }
+        $executionLimit = (int) ini_get('max_execution_time');
+        if ($executionLimit === 0 || $executionLimit > 900) {
+            set_time_limit(900);
+        }
         $memoryLimit = (string) ini_get('memory_limit');
         $memoryBytes = ini_parse_quantity($memoryLimit);
         $raisedLimit = $memoryBytes > 0 && $memoryBytes < 256 * 1024 ** 2
@@ -79,6 +83,7 @@ class RefreshFinanceSummaries extends Command
             if ($raisedLimit && memory_get_usage(true) < $memoryBytes) {
                 ini_set('memory_limit', $memoryLimit);
             }
+            set_time_limit($executionLimit);
         }
     }
 }

@@ -24,7 +24,7 @@
     <input type="hidden" name="channel" value="{{ $tab }}">
     <div class="form-group"><label for="report-currency">货币</label><input id="report-currency" name="currency" list="report-currencies" value="{{ $filters['currency'] ?? '' }}" class="form-control" placeholder="全部货币，可输入或选择" maxlength="3" pattern="[A-Z]{3}"><datalist id="report-currencies">@foreach($currencyOptions as $currency)<option value="{{ $currency }}">@endforeach</datalist></div>
     <div class="form-group"><label for="report-team">区域</label><input id="report-team" list="report-teams" name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" placeholder="全部区域，可输入或选择" maxlength="100"><datalist id="report-teams">@foreach($teamOptions as $team)<option value="{{ $team }}">@endforeach</datalist></div>
-    <div class="form-group"><label>订阅类型</label><input list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
+    <div class="form-group"><label for="report-subscription">订阅类型</label><input id="report-subscription" list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions" data-options-url="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'subscription_options' => 1]) }}">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
     @include('portals.finance.partials.filter-conditions')
     <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button>
         @if($reportStatus['state'] === 'ready' || $reportSnapshot !== null)
@@ -73,3 +73,28 @@
 </div>
 </div>
 @endsection
+@push('scripts')
+<script>
+(function () {
+    var input = document.getElementById('report-subscription');
+    var options = document.getElementById('report-subscriptions');
+    var requested = false;
+    input.addEventListener('focus', function () {
+        if (requested) return;
+        requested = true;
+        fetch(options.dataset.optionsUrl, {headers: {Accept: 'application/json'}})
+            .then(function (response) {
+                if (!response.ok) throw new Error('Subscription options unavailable');
+                return response.json();
+            })
+            .then(function (values) {
+                var known = new Set(Array.from(options.options, function (option) { return option.value; }));
+                values.forEach(function (value) {
+                    if (!known.has(value)) options.appendChild(new Option(value, value));
+                });
+            })
+            .catch(function () { requested = false; });
+    });
+})();
+</script>
+@endpush

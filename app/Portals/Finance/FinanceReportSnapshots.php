@@ -89,7 +89,7 @@ class FinanceReportSnapshots
         return $controller->buildSettlementOverviewMonth($scope->month, $scope->report, $filters, $filters['_include_options'], reuse: true);
     }
 
-    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null, bool $statusOnly = false, bool $live = false): array
+    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null, bool $statusOnly = false, bool $live = false, bool $reusePublishedRevision = false): array
     {
         $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
         if (isset($filters['payment_account_id'])) {
@@ -120,9 +120,26 @@ class FinanceReportSnapshots
             return [$payload, $id, ['state' => 'ready', 'updated_at' => $saved->created_at]];
         }
         if (! $background) {
+            $revision = null;
+            // The caller enables reuse only after every source projection is published at its current revision.
+            if ($reusePublishedRevision && ! $db->table('finance_summary_changes')->exists()) {
+                $db->table('finance_report_scopes')->upsert([
+                    compact('scope', 'month', 'report') + ['filters' => json_encode($filters, JSON_THROW_ON_ERROR), 'used_at' => now()],
+                ], ['scope'], ['used_at']);
+                $revision = $this->revision($db, $report, $month, $filters, true);
+                $saved = $db->table('finance_report_snapshots')->where(compact('scope', 'revision'))
+                    ->latest('created_at')->first(['id', 'created_at']);
+                if ($saved) {
+                    return [$this->payload($db, $saved->id), $saved->id, ['state' => 'ready', 'updated_at' => $saved->created_at]];
+                }
+            }
             $result = $build();
+            if ($revision !== null && ($db->table('finance_summary_changes')->exists()
+                || $revision !== $this->revision($db, $report, $month, $filters, true))) {
+                $revision = null;
+            }
 
-            return [$result, $this->publish($db, $scope, hash('sha256', Str::uuid()), $result), ['state' => 'ready']];
+            return [$result, $this->publish($db, $scope, $revision ?? hash('sha256', Str::uuid()), $result), ['state' => 'ready']];
         }
 
         $db->table('finance_report_scopes')->upsert([

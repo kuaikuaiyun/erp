@@ -106,7 +106,7 @@ foreach (OperationProjectCatalog::all() as $operationPortalCode => $operationPro
     });
 }
 
-Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::class)->controller(FinanceController::class)->group(function (): void {
+Route::prefix('finance')->name('finance.')->middleware([RedirectFinanceDomain::class, \App\Http\Middleware\MonitorFinancePerformance::class])->controller(FinanceController::class)->group(function (): void {
     Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
@@ -151,7 +151,7 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.import');
 });
 
-Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPaymentPerformance::class)->name('portal.root');
+Route::get('/', [PortalEntryController::class, 'root'])->middleware([MonitorPaymentPerformance::class, \App\Http\Middleware\MonitorFinancePerformance::class])->name('portal.root');
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
 Route::get('/internal-messages', [InternalMessageController::class, 'index'])->name('internal-messages.index');

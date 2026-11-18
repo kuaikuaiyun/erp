@@ -25,10 +25,11 @@ class FinanceLogisticsCreditOrders
         bool $includeReplaced = false,
         bool $indexOnly = false,
         bool $includeSystemOrders = false,
+        ?array $merchantNumbers = null,
     ): Builder
     {
         if ($xuzongReport && ! $includeSystemOrders) {
-            return FinanceRecord::query()->fromSub($this->storedOrders($ids, $searchReference, $indexOnly), 'finance_records');
+            return FinanceRecord::query()->fromSub($this->storedOrders($ids, $searchReference, $indexOnly, $merchantNumbers), 'finance_records');
         }
 
         $db = app(FinanceWorkbookService::class)->database();
@@ -133,11 +134,26 @@ class FinanceLogisticsCreditOrders
         return FinanceRecord::query()->fromSub($source, 'finance_records');
     }
 
-    private function storedOrders(?array $ids, ?string $searchReference, bool $indexOnly = false): QueryBuilder
+    private function storedOrders(?array $ids, ?string $searchReference, bool $indexOnly = false, ?array $merchantNumbers = null): QueryBuilder
     {
         $db = app(FinanceWorkbookService::class)->database();
         // Negative report keys avoid collisions with logistics IDs while supporting the same export selection.
         $orders = $db->table('finance_records as f')->where('f.dataset', self::IMPORTED_DATASET);
+        if ($merchantNumbers !== null) {
+            $indexed = $db->getSchemaBuilder()->hasColumns('finance_records', [
+                'finance_xuzong_merchant_number', 'finance_xuzong_legacy_number',
+            ]);
+            if ($indexed) {
+                $merchant = $db->table('finance_records')->select('id')->where('dataset', self::IMPORTED_DATASET)
+                    ->whereIn('finance_xuzong_merchant_number', $merchantNumbers);
+                $legacy = $db->table('finance_records')->select('id')->where('dataset', self::IMPORTED_DATASET)
+                    ->whereIn('finance_xuzong_legacy_number', $merchantNumbers);
+                $orders->whereIn('f.id', $db->query()->fromSub($merchant->union($legacy), 'merchant_orders')->select('id'));
+            } else {
+                $orders->where(fn ($query) => $query->whereIn('f.payload->商户订单号', $merchantNumbers)
+                    ->orWhereIn('f.payload->_legacy_order_id', $merchantNumbers));
+            }
+        }
         if ($ids !== null) {
             $orders->whereIntegerInRaw('f.id', array_map('abs', array_filter($ids, fn ($id) => $id < 0)));
         }

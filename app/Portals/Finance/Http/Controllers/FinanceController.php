@@ -683,6 +683,10 @@ class FinanceController extends Controller
             return $context;
         }
         $xuzongReport = $request->routeIs('finance.reports.xuzong-credit');
+        $orderDataset = in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true);
+        if ($orderDataset && $request->boolean('logistics_filter_options')) {
+            return response()->json($this->logisticsFilterOptions())->header('Cache-Control', 'no-store');
+        }
         if (in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) && $request->has('order_detail')) {
             $detail = $request->validate([
                 'order_detail' => $xuzongReport ? 'required|integer|not_in:0' : 'required|integer|min:1',
@@ -830,40 +834,29 @@ class FinanceController extends Controller
             ? \App\Models\LogisticsOrderItem::query()->whereIn('logistics_order_id', $orderIds)->orderBy('id')->get()->groupBy('logistics_order_id')
             : collect();
         $fixedFilterOptions = [];
-        if (in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true)) {
+        $logisticsOptionFields = [];
+        if ($orderDataset) {
             $fixed = ['shopify_sku_status' => ['empty' => '为空', 'filled' => '不为空'], 'pcl_runnable' => ['yes' => '可跑', 'no' => '不可跑'],
                 'store_assignment_status' => ['assigned' => '已归属', 'unmatched' => '未归属'], 'is_add_on' => ['已加购' => '已加购', '未加购' => '未加购']];
             foreach ($fixed as $field => $options) {
                 $fixedFilterOptions[$field] = collect($options)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values();
             }
-            $db = $this->workbooks->database();
-            $logisticsChoices = Cache::remember($this->filterCacheKey('logistics'), 60, function () use ($db): array {
-                $result = [];
-                $fields = array_values(array_intersect(
-                    ['store_name', 'assigned_owner_name', 'group_names', 'staff_status', 'source_shop_domain', 'subscription_type', 'payment_method', 'logistics_status', 'data_status'],
-                    $db->getSchemaBuilder()->getColumnListing('logistics_orders')
-                ));
-                if ($fields === []) {
-                    return $result;
+            if (str_contains((string) $request->header('Accept'), 'text/html')) {
+                $logisticsOptionFields = $this->logisticsOptionFields();
+                foreach ($logisticsOptionFields as $field) {
+                    $selected = $filters['order_fields'][$field] ?? '';
+                    $fixedFilterOptions[$field] = filled($selected)
+                        ? [['value' => $selected, 'label' => FinanceCatalog::simplified($selected)]] : [];
                 }
-                // Fetch a narrow projection once instead of scanning logistics history for each dropdown.
-                $options = $db->table('logistics_orders')->distinct()->get($fields);
-                foreach ($fields as $field) {
-                    $result[$field] = $options->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')
-                        ->uniqueStrict()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values()
-                        ->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]);
-                }
-                return $result;
-            });
-            $fixedFilterOptions = array_merge($fixedFilterOptions, $logisticsChoices);
+            } else {
+                $fixedFilterOptions += $this->logisticsFilterOptions();
+            }
         }
 
         return response()->view('portals.finance.records', [
-            ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups', 'xuzongReport'),
+            ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups', 'xuzongReport', 'logisticsOptionFields'),
             'xuzongRows' => $xuzongReport ? app(FinanceXuzongCreditReport::class)->rows($records->getCollection(), $filters['timezone']) : collect(),
-            'xuzongStatementNotices' => $xuzongReport ? FinanceRecord::query()
-                ->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
-                ->whereNotNull('payload->_xuzong_statement_import->notice')
+            'xuzongStatementNotices' => $xuzongReport ? $this->xuzongStatementNoticeQuery()
                 ->latest('updated_at')->orderByDesc('id')->paginate(in_array($request->integer('statement_notice_per_page'), [10, 20, 50, 100], true) ? $request->integer('statement_notice_per_page') : 10,
                     ['id', 'account', 'reference', 'payload'], 'statement_notice_page')
                 ->withQueryString() : null,
@@ -959,8 +952,7 @@ class FinanceController extends Controller
             if ($handled) {
                 $pageSize = $request->integer('notice_per_page', 10);
                 $pageSize = in_array($pageSize, [10, 20, 50, 100], true) ? $pageSize : 10;
-                $total = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
-                    ->whereNotNull('payload->_xuzong_statement_import->notice')->count();
+                $total = $this->xuzongStatementNoticeQuery()->count();
                 $page = max(1, min($request->integer('notice_page', 1), (int) ceil($total / $pageSize)));
             }
 
@@ -1603,6 +1595,9 @@ class FinanceController extends Controller
         $month = CarbonImmutable::parse($filters['month'].'-01', 'Asia/Shanghai');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
+        if ($request->boolean('subscription_options')) {
+            return response()->json($service->subscriptionOptions(collect()))->header('Cache-Control', 'no-store');
+        }
         if ($request->boolean('download_missing')) {
             return $this->downloadMissingDetails($service, $month, $filters['missing_format'] ?? 'xlsx');
         }
@@ -1630,6 +1625,7 @@ class FinanceController extends Controller
         $snapshotScope = [...$scope, 'channel' => $tab];
         $db = $this->workbooks->database();
         $live = true;
+        $reusePublishedRevision = false;
         if (in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
             && $db->getSchemaBuilder()->hasTable('finance_report_scopes')) {
             $channels = match ($tab) {
@@ -1643,10 +1639,12 @@ class FinanceController extends Controller
                 && $db->table('finance_summary_periods')->where('month', $filters['month'])
                     ->whereIn('channel', $channels)->where('published', '>', 0)
                     ->whereColumn('published', 'revision')->count() === count($channels);
+            $reusePublishedRevision = $live;
         }
         try {
             [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
                 'transactions', $filters['month'], $snapshotScope, $build, $snapshotId, statusOnly: $statusOnly, live: $live,
+                reusePublishedRevision: $reusePublishedRevision,
             );
         } catch (\Illuminate\Validation\ValidationException $exception) {
             if ($snapshotId === null || $request->boolean('download') || ! isset($exception->errors()['report_snapshot'])) {
@@ -1654,6 +1652,7 @@ class FinanceController extends Controller
             }
             [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
                 'transactions', $filters['month'], $snapshotScope, $build, live: $live,
+                reusePublishedRevision: $reusePublishedRevision,
             );
         }
         if ($statusOnly) {
@@ -1692,8 +1691,9 @@ class FinanceController extends Controller
             'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
             'creditMonths' => $creditMonths,
             'currencyOptions' => Cache::remember($this->filterCacheKey('transaction-summary:currencies'), 60, fn () =>
-                FinanceRecord::query()->whereIn('dataset', ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
-                ->whereNotNull('currency')->distinct()->pluck('currency')
+                collect(['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
+                    ->flatMap(fn ($dataset) => FinanceRecord::query()->where('dataset', $dataset)
+                        ->whereNotNull('currency')->distinct()->get(['dataset', 'currency'])->pluck('currency'))
                 ->map(fn ($currency) => strtoupper(trim($currency)))
                 ->filter(fn ($currency) => preg_match('/^[A-Z]{3}$/D', $currency))->unique()->sort()->values()),
             'subscriptionOptions' => $subscriptionOptions,
@@ -1790,9 +1790,9 @@ class FinanceController extends Controller
             'finance-missing-details-'.$month->format('Y-m').'.xlsx', sheetTitle: 'PayPal结算明细', additionalSheets: $sheets, omitEmptyCells: true);
     }
 
-    private function settlementDetailBatches(FinanceSettlementService $service, string $channel, array $filters): iterable
+    private function settlementDetailBatches(FinanceSettlementService $service, string $channel, array $filters, bool $walletMatchesOnly = false): iterable
     {
-        yield from $service->rowBatches($channel, $filters);
+        yield from $service->rowBatches($channel, $filters, walletMatchesOnly: $walletMatchesOnly);
         if (empty($filters['export_record_ids'])) {
             yield from collect()->lazy()->concat(app(FinanceConfluxSettlement::class)->unmatchedRows($filters))->chunk(500);
         }
@@ -1823,7 +1823,7 @@ class FinanceController extends Controller
             unset($item);
         }
 
-        return [$items, $service->subscriptionOptions(collect($subscriptions))->all()];
+        return [$items, $service->subscriptionOptions(collect($subscriptions), includeSourceOptions: false)->all()];
     }
 
     private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse, bool $includePayPalAmounts = true, bool $settlementTimezones = false): \Illuminate\Support\LazyCollection
@@ -2012,34 +2012,41 @@ class FinanceController extends Controller
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
         $deferredTotalUrl = null;
-        $firstPage = max(1, (int) $request->query('page', 1)) === 1;
-        if ($canPaginate && $firstPage && ($filters['card_channel'] ?? null) === 'ye'
-            && ! filled($filters['from'] ?? null) && ! filled($filters['to'] ?? null)
-            && empty($filters['card_match'])
-            && ($request->boolean('settlement_total') || $request->header('Sec-Fetch-Dest') === 'document')) {
+        $requestedPage = max(1, (int) $request->query('page', 1));
+        $hasConfluxStatements = ($filters['card_channel'] ?? null) === 'ye';
+        $totalOnly = $request->boolean('settlement_total');
+        $html = str_contains((string) $request->header('Accept'), 'text/html');
+        $noDateRange = ! filled($filters['from'] ?? null) && ! filled($filters['to'] ?? null);
+        $canDeferTotal = $noDateRange && ($totalOnly || $html);
+        if ($canPaginate && ($hasConfluxStatements || $fixedCardChannel === 'worldpay')
+            && $canDeferTotal) {
             $perPage = (int) ($filters['per_page'] ?? 10);
             $query = $service->query($channel, $filters);
             $queryParams = $request->except('settlement_total');
             $paginationOptions = ['path' => $request->url(), 'query' => $queryParams];
-            if ($request->boolean('settlement_total')) {
-                [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
-                $total = $query->count() + $statementTotal;
-                $pagination = new \Illuminate\Pagination\LengthAwarePaginator(
-                    array_fill(0, min($perPage, $total), null), $total, $perPage, 1, $paginationOptions,
-                );
-
-                return response()->json(['total' => $total, 'pagination' => view('portals.finance.pagination', ['paginator' => $pagination])->render()])
-                    ->header('Cache-Control', 'no-store');
+            if ($totalOnly) {
+                $total = $query->count();
+                if ($hasConfluxStatements) {
+                    [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
+                    $total += $statementTotal;
+                }
+                return $this->settlementTotalResponse($total, $perPage, $paginationOptions, $requestedPage);
             }
-            $records = $query->orderByDesc('occurred_at')->orderByDesc('id')->limit($perPage + 1)->get();
+            $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
+                ->offset(($requestedPage - 1) * $perPage)->limit($perPage + 1)->get();
             if ($records->count() > $perPage) {
-                $rows = $service->rows($channel, $filters, $records->take($perPage));
-                $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $perPage + 1, $perPage, 1, $paginationOptions);
-                $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                $firstRows = $service->rows($channel, $filters, $records);
+                if ($firstRows->count() > $perPage) {
+                    $rows = $firstRows->take($perPage);
+                    $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
+                        $rows, $requestedPage * $perPage + 1, $perPage, $requestedPage, $paginationOptions,
+                    );
+                    $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                }
             }
         }
         if ($paginator !== null) {
-            // The first page already has enough orders without counting the rest of the ledger.
+            // This page has enough orders without counting the rest of the ledger.
         } elseif ($orderView) {
             $pageSize = (int) ($filters['per_page'] ?? 10);
             $paypalOrders = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class);
@@ -2047,9 +2054,24 @@ class FinanceController extends Controller
                 $rows = collect();
             } else {
                 $page = max(1, (int) $request->query('page', 1));
-                [$rows, $total, $subscriptions] = $paypalOrders->page($filters, ($page - 1) * $pageSize, $pageSize);
+                $deferPayPal = $canDeferTotal && filled($filters['order_status'] ?? null);
+                $paginationOptions = ['path' => $request->url(), 'query' => $request->except('settlement_total')];
+                if ($deferPayPal && $totalOnly) {
+                    [, $total] = $paypalOrders->page($filters, 0, 0);
+
+                    return $this->settlementTotalResponse($total, $pageSize, $paginationOptions, $requestedPage);
+                }
+                [$rows, $total, $subscriptions, $exactTotal] = $paypalOrders->page(
+                    $filters, ($page - 1) * $pageSize, $deferPayPal ? $pageSize + 1 : $pageSize, stopAtLimit: $deferPayPal,
+                );
+                if ($deferPayPal && $rows->count() > $pageSize) {
+                    $rows = $rows->take($pageSize);
+                    if (! $exactTotal) {
+                        $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                    }
+                }
                 $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $pageSize, $page,
-                    ['path' => $request->url(), 'query' => $request->query()]);
+                    $paginationOptions);
             }
         } elseif ($canPaginate) {
             $paginator = $service->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')
@@ -2078,7 +2100,11 @@ class FinanceController extends Controller
                 && empty($filters['card_wallet']) && empty($filters['card_exceptions'])
                 && empty($filters['ledger_settlement_type']) && empty($filters['card_match']) && empty($filters['conditions'])
                 && (filled($filters['team'] ?? null) || filled($filters['subscription'] ?? null) || filled($filters['domain'] ?? null));
-            $batches = $businessMatchesOnly ? $service->rowBatches($channel, $filters, businessMatchesOnly: true) : $resultBatches();
+            $walletMatchesOnly = ($filters['card_channel'] ?? null) === 'ye' && ! empty($filters['card_wallet'])
+                && empty($filters['card_exceptions']) && empty($filters['ledger_settlement_type']) && empty($filters['conditions']);
+            $batches = $businessMatchesOnly
+                ? $service->rowBatches($channel, $filters, businessMatchesOnly: true)
+                : $this->settlementDetailBatches($service, $channel, $filters, walletMatchesOnly: $walletMatchesOnly);
             foreach ($batches as $batch) {
                 foreach ($batch as $row) {
                     $subscriptions[(string) ($row['subscription'] ?? '')] = ['subscription' => $row['subscription'] ?? null];
@@ -2088,10 +2114,11 @@ class FinanceController extends Controller
                     $total++;
                 }
             }
-            if ($businessMatchesOnly && $rows->isNotEmpty()) {
-                $records = $service->query($channel, $filters)->whereIntegerInRaw('id', $rows->pluck('id')->all())
+            if (($businessMatchesOnly || $walletMatchesOnly) && ($pageIds = $rows->pluck('id')->filter()->all())) {
+                $records = $service->query($channel, $filters)->whereIntegerInRaw('id', $pageIds)
                     ->orderByDesc('occurred_at')->orderByDesc('id')->get();
-                $rows = $service->rows($channel, $filters, $records);
+                $details = $service->rows($channel, $filters, $records)->keyBy('id');
+                $rows = $rows->map(fn ($row) => ! empty($row['statement_only']) ? $row : $details->get($row['id']))->filter()->values();
             }
             $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $perPage, $page,
                 ['path' => $request->url(), 'query' => $request->query()]);
@@ -2196,6 +2223,17 @@ class FinanceController extends Controller
             'teams' => ($orderView ? $service->operationDepartments()->pluck('name') : $this->workbooks->domainGroups()->pluck('team'))
                 ->filter()->unique()->sort()->values(),
         ]);
+    }
+
+    private function settlementTotalResponse(int $total, int $perPage, array $paginationOptions, int $page): JsonResponse
+    {
+        $count = min($perPage, max(0, $total - ($page - 1) * $perPage));
+        $pagination = new \Illuminate\Pagination\LengthAwarePaginator(
+            array_fill(0, $count, null), $total, $perPage, $page, $paginationOptions,
+        );
+
+        return response()->json(['total' => $total, 'pagination' => view('portals.finance.pagination', ['paginator' => $pagination])->render()])
+            ->header('Cache-Control', 'no-store');
     }
 
     public function previewExportTemplate(Request $request, string $report): Response
@@ -2982,16 +3020,19 @@ class FinanceController extends Controller
                 FinancePaymentAccount::query()->whereKey($accountId)->select('activity_account')))
             ->when(filled($account), fn ($query) => $query->where('account', $account));
 
-        if (in_array($records->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)
-            && config('app.timezone') === 'UTC') {
-            return $records->whereNotNull('occurred_at')
-                ->selectRaw("DISTINCT DATE_FORMAT(DATE_ADD(occurred_at, INTERVAL 8 HOUR), '%Y-%m') AS report_month")
-                ->orderByDesc('report_month')->pluck('report_month')->all();
+        $months = [];
+        foreach (['xuzong2-details', 'xuzong1-details'] as $dataset) {
+            $source = (clone $records)->where('dataset', $dataset)->whereNotNull('occurred_at');
+            // Seek to the last row of each month through the dataset/date index.
+            while ($last = (clone $source)->orderByDesc('occurred_at')->first(['occurred_at'])) {
+                $month = $last->occurred_at->setTimezone('Asia/Shanghai')->startOfMonth();
+                $months[$month->format('Y-m')] = true;
+                $source->where('occurred_at', '<', $month->utc());
+            }
         }
+        krsort($months);
 
-        return $records->select('occurred_at')->orderByDesc('occurred_at')->cursor()
-            ->map(fn ($record) => $record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'))
-            ->unique()->values()->all();
+        return array_keys($months);
     }
 
     private function settlementOverview(Request $request, string $report): Response
@@ -3407,13 +3448,61 @@ class FinanceController extends Controller
         return 'finance:filter-options:v1:'.hash('sha256', $db->getName().'|'.$db->getDatabaseName()).':'.$scope;
     }
 
+    private function xuzongStatementNoticeQuery(): Builder
+    {
+        $query = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+
+        return $query->getConnection()->getSchemaBuilder()->hasColumn('finance_records', 'finance_has_statement_notice')
+            ? $query->where('finance_has_statement_notice', true)
+            : $query->whereNotNull('payload->_xuzong_statement_import->notice');
+    }
+
+    private function logisticsOptionFields(): array
+    {
+        return array_values(array_intersect(
+            ['store_name', 'assigned_owner_name', 'group_names', 'staff_status', 'source_shop_domain', 'subscription_type', 'payment_method', 'logistics_status', 'data_status'],
+            $this->workbooks->database()->getSchemaBuilder()->getColumnListing('logistics_orders'),
+        ));
+    }
+
+    private function logisticsFilterOptions(): array
+    {
+        return Cache::remember($this->filterCacheKey('logistics'), 60, function (): array {
+            $fields = $this->logisticsOptionFields();
+            if ($fields === []) {
+                return [];
+            }
+            $options = $this->workbooks->database()->table('logistics_orders')->distinct()->get($fields);
+
+            return collect($fields)->mapWithKeys(fn ($field) => [
+                $field => $options->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')
+                    ->uniqueStrict()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values()
+                    ->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]),
+            ])->all();
+        });
+    }
+
     private function conditionChoices(string $dataset, bool $xuzongReport): array
     {
+        if ($xuzongReport) {
+            return Cache::remember($this->filterCacheKey('xuzong-credit:imported-choices'), 60, function (): array {
+                $options = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+                    ->distinct()->toBase()->get(['account', 'currency']);
+                $choices = fn ($values) => collect($values)->filter()->uniqueStrict()->sort()->values()
+                    ->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)])->all();
+
+                return [
+                    'account' => $choices($options->pluck('account')),
+                    'currency' => $choices($options->pluck('currency')),
+                    'status' => collect(['成功', '失败', '待确认', '退款'])->map(fn ($status) => ['value' => $status, 'label' => $status])->all(),
+                ];
+            });
+        }
         $definition = FinanceCatalog::dataset($dataset);
         $choices = [];
         $creditOptions = $dataset === 'xuzong2-orders'
-            ? Cache::remember($this->filterCacheKey(($xuzongReport ? 'xuzong-credit-imported' : $dataset).':order-options'), 60, fn () =>
-                app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, xuzongReport: $xuzongReport, withPayments: false)
+            ? Cache::remember($this->filterCacheKey($dataset.':order-options'), 60, fn () =>
+                app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, withPayments: false)
                     ->distinct()->toBase()->get(['account', 'currency', 'status']))
             : null;
         $choices['account'] = FinancePaymentAccount::query()
@@ -3426,17 +3515,6 @@ class FinanceController extends Controller
                 ->map(fn ($value) => ['value' => $value, 'label' => FinanceCatalog::simplified($value)])->all();
         }
         $fields = ['currency', 'status'];
-        $reportCurrencies = $xuzongReport
-            ? Cache::remember($this->filterCacheKey('xuzong-credit:payment-currencies'), 60, function (): array {
-                $orders = app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, xuzongReport: true);
-
-                $matches = app(FinanceXuzongCreditMatches::class);
-
-                return $orders->select(['id', 'dataset', 'account', 'reference', 'status', 'currency', 'payment_transactions'])->cursor()->chunk(500)
-                    ->flatMap(fn ($batch) => $matches->paymentCurrencies(collect($batch->all()))->values())
-                    ->filter()->unique()->sort()->values()->all();
-            })
-            : null;
         if ($definition['channel'] === 'paypal') {
             $fields = [...$fields, 'raw_type', 'balance_impact'];
             $choices['category'] = $this->workbooks->database()->table('finance_transaction_types')
@@ -3458,14 +3536,11 @@ class FinanceController extends Controller
             })
             : [];
         foreach ($fields as $field) {
-            $values = $field === 'currency' && $reportCurrencies !== null ? collect($reportCurrencies) : ($creditOptions !== null
+            $values = $creditOptions !== null
                 ? $creditOptions->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')->uniqueStrict()->sort()
-                : collect($recordOptions[$field]));
+                : collect($recordOptions[$field]);
             if ($field === 'raw_type') {
                 $values = $values->merge($this->workbooks->database()->table('finance_transaction_types')->pluck('raw_type'))->unique();
-            }
-            if ($xuzongReport && $field === 'status') {
-                $values = collect(['成功', '失败', '待确认', '退款']);
             }
             $choices[$field] = $values->map(fn ($value) => [
                 'value' => (string) $value,

@@ -14,6 +14,7 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class FinanceConfluxSettlement
 {
+    private ?bool $hasOrderMatchIndex = null;
     public const TABLE = 'finance_credit_settlement_entries';
     public const EXCEPTION_COLUMNS = ['ledger_dates' => '账单日期', 'ledger_exception_dates' => '新增异常账单日期', 'ledger_exceptions' => '异常原因'];
 
@@ -339,6 +340,37 @@ class FinanceConfluxSettlement
         }
 
         return $entries;
+    }
+
+    public function filterWalletCandidates(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        // Retain every possible website source; the row resolver applies overrides and uniqueness.
+        $query->where(function ($wallet): void {
+            $this->walletValues($wallet, ['finance_records.payload->网站名称', 'finance_records.payload->商户名称', 'finance_records.payload->店铺名称']);
+            $wallet->orWhereExists(function ($saved): void {
+                $saved->selectRaw('1')->from('finance_settlement_supplements as wallet_saved')
+                    ->whereColumn('wallet_saved.finance_record_id', 'finance_records.id')
+                    ->where(fn ($values) => $this->walletValues($values, [
+                        'wallet_saved.payload->website_name', 'wallet_saved.payload->_edited_fields->website_name',
+                    ]));
+            });
+            $wallet->orWhereExists(function ($entries): void {
+                $entries->selectRaw('1')->from(self::TABLE.' as wallet_entry')
+                    ->join('finance_payment_accounts as wallet_account', 'wallet_account.id', '=', 'wallet_entry.payment_account_id')
+                    ->where('wallet_entry.platform', 'ye')->whereNull('wallet_account.deleted_at')
+                    ->whereColumn('wallet_account.activity_account', 'finance_records.account')
+                    ->whereColumn('wallet_entry.reference', 'finance_records.reference')
+                    ->where(fn ($values) => $this->walletValues($values, ['wallet_entry.payload->账单描述符']));
+            });
+        });
+    }
+
+    private function walletValues($query, array $columns): void
+    {
+        $grammar = $query->getConnection()->getQueryGrammar();
+        foreach ($columns as $column) {
+            $query->orWhereRaw('LOWER('.$grammar->wrap($column).') LIKE ?', ['%wallet%']);
+        }
     }
 
     public function filterOrderMatch(\Illuminate\Database\Eloquent\Builder $query, bool $matched): void
@@ -675,12 +707,21 @@ class FinanceConfluxSettlement
             ->whereColumn('finance_records.account', 'merchant.activity_account')
             ->whereColumn('finance_records.reference', 'entry.reference');
         if (in_array($matches->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
-            $matches->forceIndex('finance_records_dataset_account_ref_idx');
+            $matches->forceIndex($this->hasOrderMatchIndex() ? 'finance_conflux_order_match_idx' : 'finance_records_dataset_account_ref_idx');
         }
         return $this->workbooks->database()->table(self::TABLE.' as entry')
             ->join('finance_payment_accounts as merchant', 'merchant.id', '=', 'entry.payment_account_id')
             ->where('entry.platform', 'ye')->whereNull('merchant.deleted_at')->whereNotNull('entry.reference')
             ->where($matches->toBase(), '!=', 1)
+            ->when(! empty($filters['card_wallet']), fn ($query) => $query->whereExists(function ($wallet): void {
+                $wallet->selectRaw('1')->from(self::TABLE.' as wallet_entry')
+                    ->where('wallet_entry.platform', 'ye')
+                    ->whereColumn('wallet_entry.payment_account_id', 'entry.payment_account_id')
+                    ->whereColumn('wallet_entry.reference', 'entry.reference')
+                    ->where(fn ($values) => $this->walletValues($values, [
+                        'wallet_entry.payload->网站名称', 'wallet_entry.payload->账单描述符',
+                    ]));
+            }))
             ->when(filled($filters['account'] ?? null), fn ($query) => $query->where('merchant.activity_account', $filters['account']))
             ->when(filled($filters['card_group'] ?? null), fn ($query) => $query->where('merchant.card_group_id', $filters['card_group']))
             ->when(filled($filters['reference'] ?? null), fn ($query) => $query->where('entry.reference', $filters['reference']))
@@ -813,12 +854,24 @@ class FinanceConfluxSettlement
 
     private function orders(?string $account = null, string $table = 'finance_records')
     {
-        return FinanceRecord::query()->from($table === 'finance_records' ? $table : 'finance_records as '.$table)
-            ->where($table.'.dataset', 'xuzong2-details')->when($account !== null, fn ($query) => $query->where($table.'.account', $account))
-            ->where($table.'.payload->_card_channel', 'ye')->whereNotIn($table.'.id', function ($deleted): void {
+        $query = FinanceRecord::query()->from($table === 'finance_records' ? $table : 'finance_records as '.$table)
+            ->when($account !== null, fn ($query) => $query->where($table.'.account', $account));
+        if ($this->hasOrderMatchIndex()) {
+            $query->where($table.'.finance_is_conflux_order', true);
+        } else {
+            $query->where($table.'.dataset', 'xuzong2-details')->where($table.'.payload->_card_channel', 'ye');
+        }
+
+        return $query->whereNotIn($table.'.id', function ($deleted): void {
                 $deleted->select('finance_record_id')->from('finance_settlement_supplements')
                     ->whereNotNull('finance_record_id')->whereNotNull('payload->_deleted_at');
             });
+    }
+
+    private function hasOrderMatchIndex(): bool
+    {
+        return $this->hasOrderMatchIndex ??= $this->workbooks->database()->getSchemaBuilder()
+            ->hasIndex('finance_records', 'finance_conflux_order_match_idx');
     }
 
     private function date(string $value): ?string
