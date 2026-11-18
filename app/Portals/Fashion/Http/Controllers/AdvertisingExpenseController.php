@@ -190,7 +190,7 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.agency' => ['required', 'string', 'max:100'],
             'advertising.*.media' => ['required', 'string', 'max:100'],
             'advertising.*.account_name' => ['required', 'string', 'max:191'],
-            'advertising.*.account_number' => ['required', 'string', 'max:191'],
+            'advertising.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+$/'],
             'advertising.*.assistant_domain_store_id' => ['nullable', 'integer'],
             'advertising.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'advertising.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
@@ -204,6 +204,7 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.agency.required' => '请填写广告代理。',
             'advertising.*.account_name.required' => '请填写广告账户。',
             'advertising.*.account_number.required' => '请填写广告账户编号。',
+            'advertising.*.account_number.regex' => '广告账户编号只能填写数字。',
             '*.screenshot.max' => '截图不能超过 5MB。',
         ]);
         foreach ($data['advertising'] as $index => &$row) {
