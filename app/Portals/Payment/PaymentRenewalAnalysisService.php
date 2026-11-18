@@ -20,7 +20,7 @@ class PaymentRenewalAnalysisService
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
         'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
-        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email', 'collection_account', 'collection_account_email',
+        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status',
     ];
 
     /** Ordered groups shared by the page and Excel export. */
@@ -87,7 +87,7 @@ class PaymentRenewalAnalysisService
         $module=$this->moduleFilters($filters,'initial');
         $cacheFilters=$detail;
         unset($cacheFilters['detail_page'],$cacheFilters['detail_per_page']);
-        $key='payment:renewal-detail-summary:v22:'.sha1(json_encode([$module,$cacheFilters]));
+        $key='payment:renewal-detail-summary:v23:'.sha1(json_encode([$module,$cacheFilters]));
         $stats=Cache::remember($key,now()->addMinutes(5),function () use ($module,$detail): array {
             $scope=$summary=$this->emptyRiskTotal();
             $stores=[];
@@ -126,6 +126,7 @@ class PaymentRenewalAnalysisService
         foreach (['detail_store'=>'store_name','detail_method'=>'payment_method','detail_type'=>'purchase_type'] as $filter=>$field) {
             if (($detail[$filter] ?? '')!=='' && $row[$field]!==$detail[$filter]) return false;
         }
+        if (($detail['detail_delivery'] ?? '')!=='' && $row['delivery_status']!==$detail['detail_delivery']) return false;
         if (($detail['detail_refund'] ?? '')==='yes' && $row['refund_count']===0) return false;
         if (($detail['detail_refund'] ?? '')==='no' && $row['refund_count']>0) return false;
         $date=substr($row['paid_at'],0,10);
@@ -196,6 +197,7 @@ class PaymentRenewalAnalysisService
         return ['summary'=>[...$this->finishTotal($summary),'subscription_rate'=>$initial['subscription_rate']],
             'stages'=>$stages,'stage_options'=>array_column(array_filter($renewal['stages'],static fn ($s)=>$s['number']>0),'key'),
             'initial_refunds'=>$initial['initial_refunds'],'initial_refunds_by_type'=>$initial['initial_refunds_by_type'],
+            'initial_delivery_by_type'=>$initial['initial_delivery_by_type'],
             'calculation'=>$renewal['calculation'],'initial_calculation'=>$initial['calculation'],
             'initial_stores'=>$initial['stores'],'renewal_stores'=>$renewal['stores'],'stores'=>$renewal['stores'],
             'risk_by_channel'=>$channels,'upsell'=>$renewal['upsell']];
@@ -205,7 +207,7 @@ class PaymentRenewalAnalysisService
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
-        return Cache::remember('payment:renewal-summary:v21:'.sha1(json_encode($cache)),now()->addMinutes(5),
+        return Cache::remember('payment:renewal-summary:v23:'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
 
@@ -391,11 +393,16 @@ class PaymentRenewalAnalysisService
         $groups=array_keys(self::breakdownGroups());
         $first=[];
         foreach ($groups as $key) $first[$key]=array_fill_keys(['all','subscription','non_subscription'],$this->emptyRiskTotal());
+        $firstDelivery=[];
         if ($filters['first_only']) {
+            foreach ($groups as $key) $firstDelivery[$key]=array_fill_keys(['all','subscription','non_subscription'],
+                array_fill_keys(['delivered','undelivered'],$this->emptyRiskTotal()));
             foreach ($this->firstRows($filters,false,false) as $row) {
                 foreach ($groups as $key) if ($this->matchesGroup($row,$key)) {
                     $this->addTotal($first[$key]['all'],$row,true);
                     $this->addTotal($first[$key][$row['purchase_type']],$row,true);
+                    $this->addTotal($firstDelivery[$key]['all'][$row['delivery_status']],$row,true);
+                    $this->addTotal($firstDelivery[$key][$row['purchase_type']][$row['delivery_status']],$row,true);
                 }
             }
         }
@@ -478,8 +485,19 @@ class PaymentRenewalAnalysisService
             $initial[$key]=$types['all'];
         }
         unset($types);
+        foreach ($firstDelivery as $key=>&$types) {
+            foreach ($types as $type=>&$states) {
+                foreach ($states as &$total) {
+                    $total=$this->finishTotal($total);
+                    $total['order_share']=$this->rate($total['orders'],$first[$key][$type]['orders']);
+                }
+                unset($total);
+            }
+            unset($states);
+        }
+        unset($types);
         return ['calculation'=>$w['calculation'],'subscription_rate'=>$filters['first_only'] ? $this->subscriptionRate($w['from'],$w['to'],$filters) : [],
-            'initial_refunds'=>$initial,'initial_refunds_by_type'=>$first,'stages'=>$stages,'stores'=>$index['stores'],'upsell'=>$upsell];
+            'initial_refunds'=>$initial,'initial_refunds_by_type'=>$first,'initial_delivery_by_type'=>$firstDelivery,'stages'=>$stages,'stores'=>$index['stores'],'upsell'=>$upsell];
     }
 
     /** @return array<string,mixed> */
@@ -501,6 +519,7 @@ class PaymentRenewalAnalysisService
         if ($collectionAccount==='') $collectionAccount=trim((string)($identifiers['collection_alias'] ?? ''));
         return [
             'erp_order_id' => (int) $order->id,
+            'delivery_status' => (string)$order->logistics_status===LogisticsOrder::LOGISTICS_DELIVERED ? 'delivered' : 'undelivered',
             'stage_key' => $number === 0 ? 'initial' : 'renewal_'.$number, 'stage_number' => $number, 'purchase_type' => $purchaseType,
             'initial_channel' => $this->channelFor($initial), 'actual_channel' => $this->channelFor($order), 'payment_method' => $this->methodFor($order),
             'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),

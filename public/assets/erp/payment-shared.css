@@ -1303,3 +1303,9 @@
 .payment-renewal-detail-identifier + .payment-renewal-detail-identifier { margin-top: 5px; padding-top: 5px; border-top: 1px dashed #d8e3ed; }
 
 .payment-renewal-detail-table { min-width: 2000px; }
+
+.payment-renewal-two-sections .payment-subscription-refunds { min-width: 1850px; }
+.payment-renewal-two-sections .payment-delivery-distribution { min-width: 185px; font-weight: 400; }
+.payment-renewal-two-sections .payment-delivery-distribution > div + div { margin-top: 9px; padding-top: 7px; border-top: 1px dashed #d5e2ed; }
+.payment-renewal-two-sections .payment-delivery-delivered > span { color: #08684c; }
+.payment-renewal-two-sections .payment-delivery-undelivered > span { color: #526c81; }

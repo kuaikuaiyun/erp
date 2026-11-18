@@ -258,6 +258,7 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_details' => [
+        'delivery_state'=>'签收状态', 'delivery_delivered'=>'已签收', 'delivery_undelivered'=>'未签收',
         'page_exporting'=>'正在导出…', 'page_export_error'=>'导出失败，请重试。',
         'page_export_done'=>'文件已生成，下载已开始。',
         'upsell_bill_number'=>'加购账单号', 'paypal_transactions'=>'PayPal付款流水', 'collection_account'=>'订单收款账号',
@@ -291,11 +292,19 @@ return array_replace_recursive($translations, [
         'fields'=>[
             'detail_group'=>'原始支付方式分组', 'detail_purchase'=>'原始订单类型', 'detail_kind'=>'明细类型',
             'detail_keyword'=>'搜索内容', 'detail_store'=>'店铺', 'detail_method'=>'支付方式', 'detail_type'=>'订单类型',
-            'detail_refund'=>'退款状态', 'detail_from'=>'付款开始日期', 'detail_to'=>'付款结束日期',
+            'detail_refund'=>'退款状态', 'detail_delivery'=>'签收状态', 'detail_from'=>'付款开始日期', 'detail_to'=>'付款结束日期',
             'detail_per_page'=>'每页条数', 'detail_page'=>'页码',
         ],
     ],
     'renewal_two_sections' => [
+        'delivery_distribution'=>'签收分布',
+        'delivery_delivered'=>'已签收', 'delivery_undelivered'=>'未签收',
+        'delivery_note'=>'签收分布取自当前行已有订单：当前物流状态为“已签收”的归已签收，其余（含未发货、运输中、异常及空状态）均归未签收。占比分母为当前行订单总数；签收退款率仅以其中已签收订单为基数，不限制签收及退款发生日期。',
+        'delivered_orders'=>'已签收订单数', 'delivered_share'=>'已签收占比',
+        'undelivered_orders'=>'未签收订单数', 'undelivered_share'=>'未签收占比',
+        'delivered_revenue'=>'已签收订单实收',
+        'delivered_refund_orders'=>'已签收退款订单数', 'delivered_refund_amount'=>'已签收退款金额',
+        'delivered_refund_count_rate'=>'已签收笔数退款率', 'delivered_refund_amount_rate'=>'已签收金额退款率',
         'stage_current_period' => '本期：:from ～ :to',
         'stage_comparison_period' => '对比：:from ～ :to · 上一阶段：:previous',
         'payment_method' => '支付方式',

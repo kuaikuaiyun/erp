@@ -20,14 +20,14 @@ class PaymentRenewalAnalysisExportService
         $pt = static fn (string $key) => __('payment.renewal_two_sections.'.$key);
         $methodName = static fn (string $method) => $method === 'unknown' ? $dt('unknown') : $pt('method_names.'.$method);
         $f = $data['filters'];
-        $columns = ['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'];
-        $rows = function () use ($data, $pt, $methodName): \Generator {
+        $columns = ['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount','delivery_state'];
+        $rows = function () use ($data, $dt, $pt, $methodName): \Generator {
             foreach ($data['rows'] as $row) {
                 yield $this->row([
                     (string)$row['erp_order_id'], $row['initial_order'], $row['transaction_id'], implode("\n", $row['primary_bill_numbers']),
                     implode("\n", $row['upsell_bill_numbers']), implode("\n", $row['transaction_ids']), implode("\n", $row['collection_accounts']),
                     $row['buyer_email'], $row['store_name'], $methodName($row['payment_method']),
-                    $pt('purchase_'.$row['purchase_type']), $row['paid_at'], $row['raw_amount'], $row['refund_count'], $row['raw_refund_amount'],
+                    $pt('purchase_'.$row['purchase_type']), $row['paid_at'], $row['raw_amount'], $row['refund_count'], $row['raw_refund_amount'], $dt('delivery_'.$row['delivery_status']),
                 ], [12,14], [3,4,5,6]);
             }
         };
@@ -41,10 +41,11 @@ class PaymentRenewalAnalysisExportService
             [$dt('export_kind'), $dt($f['detail_kind'])],
             [$dt('export_generated'), $data['calculation']['generated_at']],
         ];
-        foreach (['detail_keyword','detail_store','detail_method','detail_type','detail_refund','detail_from','detail_to'] as $key) {
+        foreach (['detail_keyword','detail_store','detail_method','detail_type','detail_refund','detail_from','detail_to','detail_delivery'] as $key) {
             $value = $f[$key] ?? '';
             if ($key === 'detail_method' && $value !== '') $value = $methodName($value);
             if ($key === 'detail_type' && $value !== '') $value = $pt('purchase_'.$value);
+            if ($key === 'detail_delivery' && $value !== '') $value = $dt('delivery_'.$value);
             if ($key === 'detail_refund' && $value !== '') $value = $dt($value === 'yes' ? 'refund_yes' : 'refund_no');
             $metadata[] = [__('payment.renewal_details.fields.'.$key), $value === '' ? $dt('all') : $value];
         }
@@ -57,7 +58,7 @@ class PaymentRenewalAnalysisExportService
             foreach (array_slice($metadata, 1) as $values) yield $this->row($values, [], [0,1]);
         };
         return $this->response(__('payment.renewal_details.export_filename',['time'=>now()->format('Ymd_His')]), [
-            [$dt('export_sheet'), $this->columns(array_map($dt,$columns), [12,22,30,32,32,32,32,30,24,18,22,24,18,16,18]), $rows],
+            [$dt('export_sheet'), $this->columns(array_map($dt,$columns), [12,22,30,32,32,32,32,30,24,18,22,24,18,16,18,18]), $rows],
             [$dt('export_scope_sheet'), $this->columns([$metadata[0][0],''], [40,70]), $scopeRows],
         ]);
     }
@@ -91,13 +92,21 @@ class PaymentRenewalAnalysisExportService
         $refundRows = function () use ($data,$text,$groups,$methodLabel,$filters): \Generator {
             yield $this->row([__('payment.renewal_analysis.export.period'),$data['initial_calculation']['period_from'].' ~ '.$data['initial_calculation']['period_to']], [], [1]);
             yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['initial_store'] ?? $filters['store'] ?? '']);
-            yield $this->row([]);
-            yield $this->row(array_map($text,['payment_method','purchase_type','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate']), [], [], true);
+            $note=$this->row([$text('delivery_note')],[],[0]);
+            $note['mergeAcross']=[0=>17];
+            $note['height']=34;
+            yield $note;
+            yield $this->row(array_map($text,['payment_method','purchase_type','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate','delivered_orders','delivered_share','undelivered_orders','undelivered_share','delivered_revenue','delivered_refund_orders','delivered_refund_amount','delivered_refund_count_rate','delivered_refund_amount_rate']), [], [], true);
             foreach ($groups as $key=>$group) {
                 foreach (['all','subscription','non_subscription'] as $type) {
                     $refund=$data['initial_refunds_by_type'][$key][$type];
+                    $delivered=$data['initial_delivery_by_type'][$key][$type]['delivered'];
+                    $undelivered=$data['initial_delivery_by_type'][$key][$type]['undelivered'];
                     yield $this->row([$methodLabel($group),$text('purchase_'.$type),$refund['orders'],$refund['revenue'],
-                        $refund['refund_order_count'],$refund['refund_amount'],$refund['refund_count_rate'].'%',$refund['refund_amount_rate'].'%'], [3,5]);
+                        $refund['refund_order_count'],$refund['refund_amount'],$refund['refund_count_rate'].'%',$refund['refund_amount_rate'].'%',
+                        $delivered['orders'],$delivered['order_share'].'%',$undelivered['orders'],$undelivered['order_share'].'%',
+                        $delivered['revenue'],$delivered['refund_order_count'],$delivered['refund_amount'],
+                        $delivered['refund_count_rate'].'%',$delivered['refund_amount_rate'].'%'], [3,5,12,14]);
                 }
             }
         };
@@ -130,15 +139,16 @@ class PaymentRenewalAnalysisExportService
                         $row['dispute_count'],$row['dispute_amount'],$this->eventTimes($row['dispute_details']),
                         $row['payment_method']==='unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
                         $data[$row['stage_number']===0 ? 'initial_calculation' : 'calculation']['timezone'],
+                        __('payment.renewal_details.delivery_'.$row['delivery_status']),
                     ], [13,15,18], [7,8,9,10,16,19]);
                 }
             }
         };
         return $this->response(__('payment.renewal_analysis.export.filename',['time'=>now()->format('Ymd_His')]), [
             [$text('first_sheet'),$this->columns([...$firstMetadata[0],'',''],[32,48,24,24]),$firstRows],
-            [$text('refund_sheet'),$this->columns([__('payment.renewal_analysis.export.timezone'),$data['initial_calculation']['timezone'],'','','','','',''],[22,48,24,20,18,20,20,20]),$refundRows],
+            [$text('refund_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['initial_calculation']['timezone']],17,''),[22,48,24,20,18,20,20,20,18,18,18,18,22,22,22,22,22]),$refundRows],
             [$text('renewal_sheet'),$this->columns([__('payment.renewal_analysis.export.timezone'),$data['calculation']['timezone'],'','','','','','','',''],[22,48,28,28,22,20,20,20,20,20]),$renewalRows],
-            [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone')],[24,18,18,24,24,24,30,32,32,32,32,30,24,18,16,18,24,16,18,24,20,20]),$detailRows],
+            [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone'),__('payment.renewal_details.delivery_state')],[24,18,18,24,24,24,30,32,32,32,32,30,24,18,16,18,24,16,18,24,20,20,18]),$detailRows],
         ]);
     }
 

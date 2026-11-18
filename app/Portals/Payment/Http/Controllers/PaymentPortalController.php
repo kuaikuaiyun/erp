@@ -484,6 +484,7 @@ class PaymentPortalController extends Controller
             'detail_method' => ['nullable', Rule::in(['pp','cc','gp','ap','unknown'])],
             'detail_type' => ['nullable', Rule::in(['subscription','non_subscription'])],
             'detail_refund' => ['nullable', Rule::in(['yes','no'])],
+            'detail_delivery' => ['nullable', Rule::in(['delivered','undelivered'])],
             'detail_from' => ['nullable','date_format:Y-m-d'],
             'detail_to' => ['nullable','date_format:Y-m-d','after_or_equal:detail_from'],
             'detail_per_page' => ['nullable','integer', Rule::in([20,50,100])],
@@ -493,7 +494,7 @@ class PaymentPortalController extends Controller
         foreach (array_keys($rules) as $key) $labels[$key] = __('payment.renewal_details.fields.'.$key);
         $data = $request->validate($rules, [], $labels);
         return array_replace([
-            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'',
+            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'', 'detail_delivery'=>'',
             'detail_from'=>'', 'detail_to'=>'', 'detail_per_page'=>20, 'detail_page'=>1,
         ], array_filter($data, static fn ($value) => $value !== null));
     }

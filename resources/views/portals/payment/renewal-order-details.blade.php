@@ -20,6 +20,7 @@
         <label>{{ $dt('method') }}<select name="detail_method" class="form-control"><option value="">{{ $dt('all') }}</option>@foreach(['pp','cc','gp','ap','unknown'] as $method)<option value="{{ $method }}" @selected($f['detail_method']===$method)>{{ $methodName($method) }}</option>@endforeach</select></label>
         <label>{{ $dt('type') }}<select name="detail_type" class="form-control"><option value="">{{ $dt('all') }}</option>@foreach(['subscription','non_subscription'] as $type)<option value="{{ $type }}" @selected($f['detail_type']===$type)>{{ $pt('purchase_'.$type) }}</option>@endforeach</select></label>
         <label>{{ $dt('refund_state') }}<select name="detail_refund" class="form-control"><option value="">{{ $dt('all') }}</option><option value="yes" @selected($f['detail_refund']==='yes')>{{ $dt('refund_yes') }}</option><option value="no" @selected($f['detail_refund']==='no')>{{ $dt('refund_no') }}</option></select></label>
+        <label>{{ $dt('delivery_state') }}<select name="detail_delivery" class="form-control"><option value="">{{ $dt('all') }}</option>@foreach(['delivered','undelivered'] as $state)<option value="{{ $state }}" @selected(($f['detail_delivery'] ?? '')===$state)>{{ $dt('delivery_'.$state) }}</option>@endforeach</select></label>
         <label>{{ $dt('paid_from') }}<input class="form-control" type="date" name="detail_from" value="{{ $f['detail_from'] }}" min="{{ substr($c['period_from'],0,10) }}" max="{{ substr($c['period_to'],0,10) }}"></label>
         <label>{{ $dt('paid_to') }}<input class="form-control" type="date" name="detail_to" value="{{ $f['detail_to'] }}" min="{{ substr($c['period_from'],0,10) }}" max="{{ substr($c['period_to'],0,10) }}"></label>
         <div class="payment-renewal-detail-filter-actions"><button class="btn btn-success" type="button" data-renewal-detail-export title="{{ $dt('export_all_note') }}">{{ $dt('export') }}</button><button class="btn btn-primary" type="submit">{{ $dt('query') }}</button><button class="btn btn-default" type="button" data-renewal-detail-reset>{{ $dt('reset') }}</button></div>
@@ -32,7 +33,7 @@
     </div>
     <div class="payment-renewal-detail-scroll" tabindex="0" aria-label="{{ $dt('title') }}">
         <table class="payment-renewal-detail-table">
-            <thead><tr>@foreach(['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
+            <thead><tr>@foreach(['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount','delivery_state'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
             <tbody>
             @forelse($detail['rows'] as $row)
                 <tr data-renewal-detail-order="{{ $row['erp_order_id'] }}">
@@ -52,10 +53,10 @@
                             @endforeach
                         </details>
                         @endif
-                    </td><td class="payment-renewal-detail-number">{{ $money($row['raw_refund_amount']) }}</td>
+                    </td><td class="payment-renewal-detail-number">{{ $money($row['raw_refund_amount']) }}</td><td>{{ $dt('delivery_'.$row['delivery_status']) }}</td>
                 </tr>
             @empty
-                <tr><td colspan="15" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
+                <tr><td colspan="16" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
             @endforelse
             </tbody>
         </table>

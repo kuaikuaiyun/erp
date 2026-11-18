@@ -22,7 +22,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         app()->setLocale('zh-CN');
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->increments('id');
-            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email'] as $field) $table->string($field)->nullable();
+            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status'] as $field) $table->string($field)->nullable();
             $table->decimal('paid_amount_usd', 16, 4)->default(0);
             $table->text('shopify_payload')->nullable();
             $table->unsignedInteger('paypal_account_id')->nullable();
@@ -587,11 +587,96 @@ PHP;
         }
     }
 
+    public function test_delivery_distribution_reuses_each_existing_first_purchase_population(): void
+    {
+        $statuses=['已签收','运输中','物流异常',null,''];
+        foreach($statuses as$i=>$status){
+            $this->order(4000+$i,'2026-11-01 12:00:00',$i%2?'无订阅':'订阅首次购买','credit_card','','Signing',[
+                'logistics_status'=>$status,'paid_amount_usd'=>20,
+            ]);
+        }
+        $this->order(4005,'2026-11-01 12:00:00','无订阅','paypal','','Signing',['logistics_status'=>'已签收','paid_amount_usd'=>40]);
+        DB::table('logistics_credit_card_refunds')->insert([
+            ['logistics_order_id'=>4000,'refund_amount_usd'=>2,'refund_reason'=>'Ethoca'],
+            ['logistics_order_id'=>4000,'refund_amount_usd'=>3,'refund_reason'=>'争议（其他）'],
+            ['logistics_order_id'=>4003,'refund_amount_usd'=>4,'refund_reason'=>'未知原因'],
+        ]);
+        DB::table('logistics_paypal_refunds')->insert(['logistics_order_id'=>4005,'refund_amount_usd'=>10]);
+        $filters=$this->filters(['initial_store'=>'Signing','renewal_store'=>'Signing']);
+        $service=app(PaymentRenewalAnalysisService::class);
+        $data=$service->dashboard($filters);
+        foreach($data['initial_refunds_by_type']as$group=>$types){
+            foreach($types as$type=>$total){
+                $states=$data['initial_delivery_by_type'][$group][$type];
+                foreach(['orders','revenue','refund_order_count','refund_count','refund_amount']as$metric)
+                    self::assertEquals($total[$metric],$states['delivered'][$metric]+$states['undelivered'][$metric]);
+            }
+        }
+        $source=str_replace("@extends('portal.layout')",'',file_get_contents(resource_path('views/portals/payment/renewal-analysis.blade.php')));
+        $html=\Illuminate\Support\Facades\Blade::render($source.'@yield("content")',['dashboard'=>$data,'errors'=>new \Illuminate\Support\ViewErrorBag()]);
+        self::assertStringContainsString('签收分布',$html);
+        self::assertStringContainsString('已签收笔数退款率',$html);
+        self::assertStringContainsString('2 ÷ 6 × 100%',$html);
+        self::assertStringContainsString('15 ÷ 60 × 100%',$html);
+        self::assertStringNotContainsString('payment.renewal_two_sections.',$html);
+        $all=$data['initial_delivery_by_type']['total']['all'];
+        self::assertSame(2,$all['delivered']['orders']);
+        self::assertSame(4,$all['undelivered']['orders']);
+        self::assertEquals(33.33,$all['delivered']['order_share']);
+        self::assertEquals(66.67,$all['undelivered']['order_share']);
+        self::assertSame(2,$all['delivered']['refund_order_count']);
+        self::assertEquals(15,$all['delivered']['refund_amount']);
+        self::assertEquals(100,$all['delivered']['refund_count_rate']);
+        self::assertEquals(25,$all['delivered']['refund_amount_rate']);
+        $cc=$data['initial_delivery_by_type']['method_cc']['subscription']['delivered'];
+        self::assertSame(1,$cc['orders']);
+        self::assertSame(1,$cc['refund_order_count']);
+        self::assertSame(2,$cc['refund_count']);
+        self::assertEquals(5,$cc['refund_amount']);
+        $signed=$service->initialOrderDetails($filters,$this->detailFilters(['detail_delivery'=>'delivered']));
+        self::assertSame([4005,4000],array_column($signed['rows'],'erp_order_id'));
+        self::assertSame(2,$signed['summary']['orders']);
+        self::assertEquals(60,$signed['summary']['revenue']);
+        $unsigned=$service->initialOrderDetails($filters,$this->detailFilters(['detail_delivery'=>'undelivered']));
+        self::assertSame([4004,4003,4002,4001],array_column($unsigned['rows'],'erp_order_id'));
+        self::assertSame(4,$unsigned['summary']['orders']);
+        self::assertSame(1,$unsigned['summary']['refund_order_count']);
+        $none=$service->initialOrderDetails($filters,$this->detailFilters(['detail_delivery'=>'delivered','detail_group'=>'method_gp']));
+        self::assertSame(0,$none['summary']['orders']);
+        self::assertEquals(0,$data['initial_delivery_by_type']['method_gp']['all']['delivered']['refund_count_rate']);
+        self::assertEquals(0,$data['initial_delivery_by_type']['method_gp']['all']['delivered']['refund_amount_rate']);
+        foreach(['main','detail']as$kind){
+            $export=app(PaymentRenewalAnalysisExportService::class);
+            $response=$kind==='main'?$export->download($filters):$export->downloadOrderDetails($filters,$this->detailFilters(['detail_delivery'=>'delivered']));
+            ob_start();$response->sendContent();$bytes=ob_get_clean();
+            $path=tempnam(sys_get_temp_dir(),'renewal-signing-');
+            try{
+                file_put_contents($path,$bytes);$book=IOFactory::load($path);
+                if($kind==='main'){
+                    $sheet=$book->getSheet(1);
+                    self::assertSame('已签收订单数',$this->exportedValue($sheet,'I5'));
+                    self::assertSame('2',$this->exportedValue($sheet,'I6'));
+                    self::assertSame('33.33%',$this->exportedValue($sheet,'J6'));
+                    self::assertSame('4',$this->exportedValue($sheet,'K6'));
+                    self::assertSame('100%',$this->exportedValue($sheet,'P6'));
+                    self::assertSame('25%',$this->exportedValue($sheet,'Q6'));
+                    self::assertSame('签收状态',$this->exportedValue($book->getSheet(3),'W1'));
+                }else{
+                    $sheet=$book->getSheet(0);
+                    self::assertSame(3,$sheet->getHighestRow());
+                    self::assertSame('签收状态',$this->exportedValue($sheet,'P1'));
+                    self::assertSame('已签收',$this->exportedValue($sheet,'P2'));
+                }
+                $book->disconnectWorksheets();
+            }finally{unlink($path);}
+        }
+    }
+
     private function detailFilters(array $overrides = []): array
     {
         return array_replace([
             'detail_group'=>'total', 'detail_purchase'=>'all', 'detail_kind'=>'orders',
-            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'',
+            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'', 'detail_delivery'=>'',
             'detail_from'=>'', 'detail_to'=>'', 'detail_per_page'=>20, 'detail_page'=>1,
         ], $overrides);
     }
@@ -682,7 +767,7 @@ PHP;
         $controller = (new \ReflectionClass(PaymentPortalController::class))->newInstanceWithoutConstructor();
         foreach ([
             ['detail_group'=>'paypal'], ['detail_kind'=>'invalid'], ['detail_purchase'=>'invalid'],
-            ['detail_per_page'=>10000], ['detail_page'=>0], ['detail_keyword'=>str_repeat('a',101)],
+            ['detail_per_page'=>10000], ['detail_delivery'=>'invalid'], ['detail_page'=>0], ['detail_keyword'=>str_repeat('a',101)],
             ['detail_from'=>'2026-11-02','detail_to'=>'2026-11-01'],
         ] as $invalid) {
             try {

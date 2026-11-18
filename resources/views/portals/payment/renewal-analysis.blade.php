@@ -40,7 +40,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-5">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-6">
 @endpush
 
 @section('content')
@@ -92,13 +92,27 @@
         </div>
         <p class="payment-renewal-scope-note">{{ $text('method_rule') }}</p>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
+        <p class="payment-renewal-scope-note">{{ $text('delivery_note') }}</p>
         <div class="table-responsive"><table class="table payment-data-table payment-subscription-refunds"><caption>{{ $text('first_refunds') }}</caption><thead><tr>
-            <th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th><th>{{ __('payment.renewal_details.actions') }}</th>
+            <th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th><th>{{ $text('delivery_distribution') }}</th><th>{{ $text('delivered_refund_count_rate') }}</th><th>{{ $text('delivered_refund_amount_rate') }}</th><th>{{ __('payment.renewal_details.actions') }}</th>
         </tr></thead><tbody>
         @foreach($groups as $channel=>$group)
             @foreach(['all','subscription','non_subscription'] as $type)
-                @php $refund = $dashboard['initial_refunds_by_type'][$channel][$type]; @endphp
-                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td><td class="payment-renewal-detail-actions">
+                @php
+                    $refund = $dashboard['initial_refunds_by_type'][$channel][$type];
+                    $delivery = $dashboard['initial_delivery_by_type'][$channel][$type];
+                    $signed = $delivery['delivered'];
+                @endphp
+                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td><td class="payment-delivery-distribution">
+                    @foreach(['delivered','undelivered'] as $state)
+                        <div class="payment-delivery-{{ $state }}"><span>{{ $text('delivery_'.$state) }}</span> <b>{{ number_format($delivery[$state]['orders']) }}</b> / {{ number_format($delivery[$state]['order_share'],2) }}%
+                            <small class="payment-inline-formula">{{ $inlineRatio($delivery[$state]['orders'],$refund['orders']) }}</small>
+                        </div>
+                    @endforeach
+                </td>
+                <td><strong>{{ number_format($signed['refund_count_rate'],2) }}%</strong><small class="payment-inline-formula">{{ $inlineRatio($signed['refund_order_count'],$signed['orders']) }}</small></td>
+                <td><strong>{{ number_format($signed['refund_amount_rate'],2) }}%</strong><small class="payment-inline-formula">{{ $inlineRatio($signed['refund_amount'],$signed['revenue'],true) }}</small></td>
+                <td class="payment-renewal-detail-actions">
                     @foreach(['orders','refunds'] as $kind)
                         <button type="button" class="btn btn-default btn-sm" data-renewal-detail-open data-group="{{ $channel }}" data-purchase="{{ $type }}" data-kind="{{ $kind }}" data-title="{{ $methodLabel($group).' / '.$text('purchase_'.$type).' / '.__('payment.renewal_details.'.$kind) }}">{{ __('payment.renewal_details.'.$kind) }}</button>
                     @endforeach
