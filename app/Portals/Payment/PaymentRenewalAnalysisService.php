@@ -7,7 +7,6 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
-use App\Models\LogisticsPayPalTransaction;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -20,7 +19,7 @@ class PaymentRenewalAnalysisService
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
         'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
-        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source',
+        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email',
     ];
 
     /** Ordered groups shared by the page and Excel export. */
@@ -86,7 +85,7 @@ class PaymentRenewalAnalysisService
     }
 
     /** Drill into the same cached first-purchase population used by the summary. */
-    public function initialOrderDetails(array $filters, array $detail): array
+    public function initialOrderDetails(array $filters, array $detail, bool $paginate = true): array
     {
         $module = $this->moduleFilters($filters, 'initial');
         $dataset = $this->filterStages($this->dataset($module), $module);
@@ -100,7 +99,7 @@ class PaymentRenewalAnalysisService
         $keyword = trim((string) ($detail['detail_keyword'] ?? ''));
         $rows = array_values(array_filter($scopeRows, static function (array $row) use ($detail, $keyword): bool {
             if ($keyword !== '' && !str_contains(mb_strtolower(implode(' ', [
-                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'],
+                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'], $row['bill_number'], $row['buyer_email'],
             ])), mb_strtolower($keyword))) return false;
             if (($detail['detail_store'] ?? '') !== '' && $row['store_name'] !== $detail['detail_store']) return false;
             if (($detail['detail_method'] ?? '') !== '' && $row['payment_method'] !== $detail['detail_method']) return false;
@@ -120,7 +119,7 @@ class PaymentRenewalAnalysisService
         return [
             'scope' => $this->riskTotal($scopeRows, true),
             'summary' => $this->riskTotal($rows, true),
-            'rows' => array_slice($rows, ($page - 1) * $perPage, $perPage),
+            'rows' => $paginate ? array_slice($rows, ($page - 1) * $perPage, $perPage) : $rows,
             'stores' => $stores, 'parent_store' => $module['store'], 'calculation' => $dataset['calculation'],
             'filters' => $detail,
             'pagination' => ['current_page'=>$page, 'last_page'=>$lastPage, 'total'=>$total, 'per_page'=>$perPage,
@@ -133,7 +132,7 @@ class PaymentRenewalAnalysisService
         $timezone = $filters[$module.'_timezone'] ?? $filters['timezone'] ?? '+08:00';
         $today = now($timezone);
         return [
-            'date_from' => $filters[$module.'_date_from'] ?? $filters['date_from'] ?? $today->copy()->subDays(89)->toDateString(),
+            'date_from' => $filters[$module.'_date_from'] ?? $filters['date_from'] ?? $today->copy()->subDays(6)->toDateString(),
             'date_to' => $filters[$module.'_date_to'] ?? $filters['date_to'] ?? $today->toDateString(),
             'timezone' => $timezone, 'store' => $filters[$module.'_store'] ?? $filters['store'] ?? '',
             'channel' => '', 'risk_date_mode' => 'payment',
@@ -199,7 +198,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v14:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v17:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -227,9 +226,7 @@ class PaymentRenewalAnalysisService
                 $query->whereBetween('paid_at', [$from, $to])
                     ->orWhereBetween('paid_at', [$comparisonFrom, $comparisonTo]);
             })
-            ->where(function ($query): void {
-                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-            })->get();
+            ->get();
         $initials = $this->periodInitials($candidates, $filters, $to);
         $nonSubscription = $candidates->filter(fn (LogisticsOrder $order): bool =>
             $order->subscription_type === '无订阅'
@@ -252,9 +249,7 @@ class PaymentRenewalAnalysisService
             $batch = LogisticsOrder::query()->select(self::ORDER_FIELDS)
                 ->whereIn('subscription_origin_order_id', $references)
                 ->whereNotNull('paid_at')->where('paid_at', '<=', $to)
-                ->where(function ($query): void {
-                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-                })->get();
+                ->get();
             foreach ($batch as $order) $renewals->put((int) $order->id, $order);
         }
         $renewals = $renewals->sortBy([['paid_at', 'asc'], ['id', 'asc']])->values();
@@ -372,6 +367,7 @@ class PaymentRenewalAnalysisService
             'renewal_order' => (string) ($order->shopify_order_number ?: $order->id),
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
             'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
+            'bill_number' => (string) $order->bill_number, 'buyer_email' => (string) $order->buyer_email,
             'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
             'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
             'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
@@ -396,8 +392,6 @@ class PaymentRenewalAnalysisService
                     $query->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id', '');
                 })->where(function ($query): void {
                     $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
-                })->where(function ($query): void {
-                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
                 })->where(function ($query) use ($chunk, $numericIds): void {
                     $query->whereIn('transaction_id', $chunk)->orWhereIn('shopify_order_id', $chunk)
                         ->orWhereIn('shopify_order_number', $chunk)->orWhereIn('payment_gateway_order_id', $chunk)
@@ -539,10 +533,6 @@ class PaymentRenewalAnalysisService
             ->whereBetween('paid_at', [$from, $to])
             ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])
             ->where(function ($query): void {
-                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-            })
-            ->whereRaw("TRIM(COALESCE(tongtu_order_number, '')) <> ''")
-            ->where(function ($query): void {
                 $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
             });
 
@@ -559,29 +549,12 @@ class PaymentRenewalAnalysisService
         }
 
         $orders = $query->select(['id', 'subscription_type', 'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source'])->get();
-        $paypalOrderIds = $orders->filter(fn (LogisticsOrder $order): bool => $this->channelFor($order) === 'paypal')
-            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $matchedPayPalOrders = $paypalOrderIds === [] ? [] : LogisticsPayPalTransaction::query()
-            ->whereIn('logistics_order_id', $paypalOrderIds)
-            ->where('event_code', 'like', 'T00%')
-            ->whereIn('status', ['S', 'V'])
-            ->pluck('logistics_order_id')->mapWithKeys(fn ($id): array => [(int) $id => true])->all();
-
         $counts = array_fill_keys(array_keys(self::breakdownGroups()), ['subscription_orders'=>0, 'total_orders'=>0]);
         foreach ($orders as $order) {
             $channel = $this->channelFor($order);
             if (($filters['channel'] ?? '') !== '' && $channel !== $filters['channel']) {
                 continue;
             }
-            if ($channel === 'paypal' && (
-                $order->paypal_account_id === null
-                ||
-                $order->paypal_association_source !== 'actual_transaction'
-                || !isset($matchedPayPalOrders[(int) $order->id])
-            )) {
-                continue;
-            }
-
             $row = ['actual_channel'=>$channel, 'payment_method'=>$this->methodFor($order)];
             foreach ($counts as $key => &$count) {
                 if (!$this->matchesGroup($row, $key)) continue;

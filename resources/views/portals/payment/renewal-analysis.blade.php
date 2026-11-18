@@ -40,7 +40,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-2">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261118-3">
 @endpush
 
 @section('content')
@@ -212,9 +212,10 @@
     </article>
 </section>
 <div class="modal fade payment-renewal-detail-modal" id="payment-renewal-detail-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="payment-renewal-detail-title"
+    data-export-endpoint="{{ route('payment.renewal-analysis.order-details.export') }}"
     data-endpoint="{{ route('payment.renewal-analysis.order-details') }}"
     data-parent-filters="{{ json_encode(array_intersect_key($filters,array_flip(['initial_date_from','initial_date_to','initial_timezone','initial_store'])),JSON_UNESCAPED_UNICODE) }}"
-    data-messages="{{ json_encode(['loading'=>__('payment.renewal_details.loading'),'error'=>__('payment.renewal_details.error'),'retry'=>__('payment.renewal_details.retry')],JSON_UNESCAPED_UNICODE) }}">
+    data-messages="{{ json_encode(['loading'=>__('payment.renewal_details.loading'),'error'=>__('payment.renewal_details.error'),'retry'=>__('payment.renewal_details.retry'),'exporting'=>__('payment.renewal_details.exporting'),'exportError'=>__('payment.renewal_details.export_error'),'exportFilename'=>__('payment.renewal_details.export_default_filename')],JSON_UNESCAPED_UNICODE) }}">
     <div class="modal-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('payment.renewal_details.close') }}"><span aria-hidden="true">&times;</span></button><h3 class="modal-title" id="payment-renewal-detail-title">{{ __('payment.renewal_details.title') }}</h3></div>
         <div class="modal-body"><p data-renewal-detail-feedback role="status" aria-live="polite"></p><div data-renewal-detail-content></div></div>
@@ -224,7 +225,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261118-1"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261118-2"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 <script>
 (function () {

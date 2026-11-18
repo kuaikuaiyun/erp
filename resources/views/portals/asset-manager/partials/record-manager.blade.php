@@ -1,5 +1,5 @@
 @push('styles')
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261117-1">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261118-1">
 @endpush
 <div class="am-workspace" id="asset-manager">
 <h2>{{ __('asset_manager.titles.'.$kind) }}</h2><p class="text-muted">{{ __('asset_manager.expired_hint') }}</p>
@@ -8,7 +8,7 @@
 <div class="am-toolbar">@if($canManage)<button class="btn btn-primary" id="am-add-account">{{ __('asset_manager.add') }}</button><button class="btn btn-default" id="am-sync-all">{{ __('asset_manager.sync_all') }}</button>
 @endif
 </div>
-<div class="am-cards">@forelse($accounts as $account)<section class="am-card"><strong>{{ $account->label }}</strong><p>{{ __('asset_manager.last_sync') }}: {{ $account->last_synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?? __('asset_manager.never_synced') }}</p><p>{{ $account->last_status==='failed'?__('asset_manager.sync_failed'):($account->last_status==='success'?__('asset_manager.ready'):__('asset_manager.never_synced')) }}</p><div class="am-sync-status" data-account-status="{{ $account->id }}"></div><button class="btn btn-default btn-sm" data-account-view="{{ $account->id }}">{{ __('asset_manager.view') }}</button>@if($canManage)<button class="btn btn-default btn-sm" data-account-edit="{{ $account->id }}">{{ __('asset_manager.edit') }}</button><button class="btn btn-primary btn-sm" data-sync="{{ $account->id }}">{{ __('asset_manager.sync') }}</button><button class="btn btn-danger btn-sm" data-account-delete="{{ $account->id }}">{{ __('asset_manager.delete') }}</button>
+<div class="am-cards">@forelse($accounts as $account)<section class="am-card"><strong>{{ $account->label }}</strong><p>{{ __('asset_manager.fields.owner_department_id') }}: {{ $ownerDepartments[$account->owner_department_id] ?? '—' }}</p><p>{{ __('asset_manager.last_sync') }}: {{ $account->last_synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?? __('asset_manager.never_synced') }}</p><p>{{ $account->last_status==='failed'?__('asset_manager.sync_failed'):($account->last_status==='success'?__('asset_manager.ready'):__('asset_manager.never_synced')) }}</p><div class="am-sync-status" data-account-status="{{ $account->id }}"></div><button class="btn btn-default btn-sm" data-account-view="{{ $account->id }}">{{ __('asset_manager.view') }}</button>@if($canManage)<button class="btn btn-default btn-sm" data-account-edit="{{ $account->id }}">{{ __('asset_manager.edit') }}</button><button class="btn btn-primary btn-sm" data-sync="{{ $account->id }}">{{ __('asset_manager.sync') }}</button><button class="btn btn-danger btn-sm" data-account-delete="{{ $account->id }}">{{ __('asset_manager.delete') }}</button>
 @endif
 </section>
 @empty
@@ -29,7 +29,7 @@
 
 <form method="get" id="am-filters" class="am-panel"><div class="am-grid">
 @foreach($fields as $key=>$type)<label>{{ $labels[$key] }}
-@if(in_array($type,['user','department']))<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}"><select class="form-control" name="filter[{{ $key }}]"><option value="">{{ __('asset_manager.all') }}</option>@foreach($type==='user'?$users:$departments as $id=>$label)<option value="{{ $id }}" @selected((string)request('filter.'.$key)===(string)$id)>{{ $label }}</option>
+@if(in_array($type,['user','department']))<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}"><select class="form-control" name="filter[{{ $key }}]"><option value="">{{ __('asset_manager.all') }}</option>@foreach($key==='owner_department_id'?$ownerDepartments:($type==='user'?$users:$departments) as $id=>$label)<option value="{{ $id }}" @selected((string)request('filter.'.$key)===(string)$id)>{{ $label }}</option>
 @endforeach
 </select>
 
@@ -55,10 +55,10 @@
 
 <label>{{ __('asset_manager.per_page') }}<select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option @selected($rows->perPage()===$size)>{{ $size }}</option>
 @endforeach
-</select></label></div><button class="btn btn-primary">{{ __('asset_manager.search') }}</button> <a class="btn btn-default" href="{{ route('asset-manager.index',$kind) }}">{{ __('asset_manager.reset') }}</a></form>
+</select></label></div><button class="btn btn-primary">{{ __('asset_manager.search') }}</button> <a class="btn btn-default" href="{{ route($routePrefix.'.index',$kind) }}">{{ __('asset_manager.reset') }}</a></form>
 <div class="am-toolbar">@if($canManage && $kind!=='ipfoxy')<button class="btn btn-primary" id="am-add">{{ __('asset_manager.add') }}</button><button class="btn btn-default" id="am-import">{{ __('asset_manager.import') }}</button>
 @endif
- @if($kind!=='ipfoxy')<a class="btn btn-default" href="{{ route('asset-manager.export',['kind'=>$kind,'template'=>1]) }}">{{ __('asset_manager.template') }}</a>
+ @if($kind!=='ipfoxy')<a class="btn btn-default" href="{{ route($routePrefix.'.export',['kind'=>$kind,'template'=>1]) }}">{{ __('asset_manager.template') }}</a>
 @endif
 <button class="btn btn-default" id="am-export">{{ __('asset_manager.export') }}</button><button class="btn btn-default" id="am-export-selected">{{ __('asset_manager.export_selected') }}</button></div>
 <div class="am-panel am-table-wrap"><table class="table table-bordered table-hover"><thead><tr><th><input type="checkbox" id="am-select-all" aria-label="{{ __('asset_manager.all') }}"></th>@foreach($fields as $key=>$type)<th>{{ $labels[$key] }}</th>
@@ -68,7 +68,7 @@
  @if($kind==='codex-renewals')<th>{{ __('asset_manager.remaining') }}</th>
 @endif
 <th>{{ __('asset_manager.actions') }}</th></tr></thead><tbody>
-@forelse($rows as $row)<tr><td><input type="checkbox" class="am-selected" value="{{ $row->id }}" aria-label="{{ __('asset_manager.record_id') }} {{ $row->id }}"></td>@foreach($fields as $key=>$type)<td>{{ $kind==='ipfoxy' ? ($key==='expires_at'?($row->expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')??'—'):($row->$key??'—')) : ($service->display($row,$key,$type) !== '' ? $service->display($row,$key,$type) : '—') }}</td>
+@forelse($rows as $row)<tr><td><input type="checkbox" class="am-selected" value="{{ $row->id }}" aria-label="{{ __('asset_manager.record_id') }} {{ $row->id }}"></td>@foreach($fields as $key=>$type)<td>{{ $key==='owner_department_id' ? ($ownerDepartments[$row->owner_department_id] ?? '—') : ($kind==='ipfoxy' ? ($key==='expires_at'?($row->expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')??'—'):($row->$key??'—')) : ($service->display($row,$key,$type) !== '' ? $service->display($row,$key,$type) : '—')) }}</td>
 @endforeach
 
 @if($kind!=='ipfoxy')<td>{{ $row->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</td>
@@ -99,12 +99,18 @@ $days=(int) \Carbon\CarbonImmutable::now('Asia/Shanghai')->startOfDay()->diffInD
 @endif
 </div>
 <div class="modal fade" id="am-modal" tabindex="-1" role="dialog" aria-labelledby="am-modal-title"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button class="close" data-dismiss="modal" aria-label="{{ __('asset_manager.cancel') }}">×</button><h4 id="am-modal-title"></h4></div><form id="am-form"><div class="modal-body"><div id="am-errors" role="alert"></div><div class="am-grid" id="am-fields"></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-primary" id="am-save">{{ __('asset_manager.save') }}</button></div></form></div></div></div>
-<div class="modal fade" id="am-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h4>{{ __('asset_manager.import') }}</h4></div><div class="modal-body"><p>{{ __('asset_manager.import_help') }}</p><input type="file" id="am-file" accept=".xlsx,.csv"><div id="am-import-result" role="status"></div></div><div class="modal-footer"><button class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-default" id="am-preview">{{ __('asset_manager.preview') }}</button><button class="btn btn-primary" id="am-import-confirm" disabled>{{ __('asset_manager.confirm_import') }}</button></div></div></div></div>
+<div class="modal fade" id="am-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h4>{{ __('asset_manager.import') }}</h4></div><div class="modal-body"><p>{{ __('asset_manager.import_help') }}</p>@if($kind!=='computers')
+<label>{{ __('asset_manager.fields.owner_department_id') }}<select class="form-control" id="am-import-owner">
+<option value="">{{ __('asset_manager.choose_owner') }}</option>
+@foreach($ownerDepartments as $id=>$label)<option value="{{ $id }}" @selected(count($ownerDepartments)===1)>{{ $label }}</option>@endforeach
+</select></label><p>{{ __('asset_manager.import_owner_help') }}</p>
+@endif
+<input type="file" id="am-file" accept=".xlsx,.csv"><div id="am-import-result" role="status"></div></div><div class="modal-footer"><button class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-default" id="am-preview">{{ __('asset_manager.preview') }}</button><button class="btn btn-primary" id="am-import-confirm" disabled>{{ __('asset_manager.confirm_import') }}</button></div></div></div></div>
 </div>
 @push('scripts')
 @php
-$clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>$departments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>url('/asset-manager'),'csrf'=>csrf_token()];
+$clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>$departments,'ownerDepartments'=>$ownerDepartments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>$assetBase,'csrf'=>csrf_token()];
 @endphp
 <script>window.AssetManagerConfig=@json($clientConfig);</script>
-<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261117-1"></script>
+<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-1"></script>
 @endpush

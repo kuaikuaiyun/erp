@@ -9,6 +9,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -33,8 +34,10 @@ class OperationDashboardDepartmentScopeController extends Controller
             : (int) $context['user']->getKey();
         abort_if($selectedUserId > 0 && ! $users->contains(fn (AdminUser $user): bool => (int) $user->getKey() === $selectedUserId), 403);
 
-        $departments = Department::business()->whereIn('id', $this->scopes->allDepartmentIds())
-            ->with('parent:id,name')->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
+        $departments = $this->orderDepartmentsByHierarchy(
+            Department::business()->whereIn('id', $this->scopes->allDepartmentIds())
+                ->get(['id', 'parent_id', 'name', 'sort'])
+        );
 
         return view('portals.operation-dashboard.department-scopes.index', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -74,5 +77,51 @@ class OperationDashboardDepartmentScopeController extends Controller
         abort_unless((string) $context['portal']->code === 'yunying-kanban', 404);
 
         return $context;
+    }
+
+    private function orderDepartmentsByHierarchy(Collection $departments): Collection
+    {
+        $departments = $departments->sort(function (Department $left, Department $right): int {
+            return [(int) $left->sort, (string) $left->name, (int) $left->getKey()]
+                <=> [(int) $right->sort, (string) $right->name, (int) $right->getKey()];
+        })->values();
+        $departmentIds = $departments->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $departmentLookup = array_fill_keys($departmentIds, true);
+        $children = $departments->groupBy(fn (Department $department): int => (int) ($department->parent_id ?? 0));
+        $ordered = collect();
+        $visited = [];
+
+        $append = function (Department $department, int $depth, array $parentNames = [], ?int $rootId = null, ?string $rootName = null) use (&$append, &$visited, $children, $ordered): void {
+            $id = (int) $department->getKey();
+            if (isset($visited[$id])) return;
+
+            $rootId ??= $id;
+            $rootName ??= (string) $department->name;
+            $visited[$id] = true;
+            $department->setAttribute('hierarchy_depth', $depth);
+            $department->setAttribute('hierarchy_parent_names', $parentNames);
+            $department->setAttribute('hierarchy_root_id', $rootId);
+            $department->setAttribute('hierarchy_root_name', $rootName);
+            $ordered->push($department);
+
+            $nextParentNames = [...$parentNames, (string) $department->name];
+            foreach ($children->get($id, collect()) as $child) {
+                $append($child, $depth + 1, $nextParentNames, $rootId, $rootName);
+            }
+        };
+
+        foreach ($departments as $department) {
+            $parentId = (int) ($department->parent_id ?? 0);
+            if ($parentId === 0 || ! isset($departmentLookup[$parentId])) {
+                $append($department, 0);
+            }
+        }
+
+        // Preserve any malformed/cyclic legacy departments instead of hiding them.
+        foreach ($departments as $department) {
+            $append($department, 0);
+        }
+
+        return $ordered;
     }
 }

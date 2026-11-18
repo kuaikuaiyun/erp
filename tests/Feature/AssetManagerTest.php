@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\AdminUser;
 use App\Models\AssetCodexRenewal;
+use App\Models\AssetResource;
+use App\Portals\Assistant\AssistantDailySubmissionPendingCountService;
+use App\Portals\Assistant\AssistantAdvertisingReviewPendingCountService;
 use App\Models\AssetComputerEquipment;
 use App\Models\AssetIpfoxyAccount;
 use App\Models\AssetIpfoxyProxy;
@@ -33,6 +36,10 @@ class AssetManagerTest extends TestCase
     private AdminUser $actor;
 
     private Portal $portal;
+
+    private Portal $assistant;
+
+    private ?Portal $forcedPortal = null;
 
     protected function setUp(): void
     {
@@ -82,25 +89,39 @@ class AssetManagerTest extends TestCase
         });
         $this->portal = Portal::create(['code' => 'asset-manager', 'name' => 'Assets', 'status' => 'enabled']);
         (require base_path('database/migrations/2026_11_17_000200_install_asset_manager.php'))->up();
+        $this->assistant = Portal::create(['code' => 'zhuli', 'name' => 'Assistant', 'status' => 'enabled']);
+        (require base_path('database/migrations/2026_11_18_000100_move_asset_pages_to_assistant.php'))->up();
+        Schema::create('admin_role_users', function (Blueprint $t) {
+            $t->unsignedBigInteger('role_id');
+            $t->unsignedBigInteger('user_id');
+            $t->string('position')->default('member');
+            $t->string('position_slot')->nullable();
+            $t->boolean('is_primary')->default(false);
+            $t->timestamps();
+        });
         $this->actor = new class extends AdminUser
         {
             public bool $manage = true;
+            public bool $view = true;
+            public bool $administrator = true;
 
             public function isAdministrator(): bool
             {
-                return true;
+                return $this->administrator;
             }
 
             public function can($ability, $arguments = []): bool
             {
-                return ! str_ends_with($ability, '.manage') || $this->manage;
+                return str_ends_with($ability, '.manage') ? $this->manage : $this->view;
             }
         };
         $this->actor->id = 1;
         $this->actor->name = 'Tester';
         $entries = \Mockery::mock(PortalEntryController::class);
-        $entries->shouldReceive('portalContext')->andReturnUsing(fn () => ['portal' => $this->portal->unsetRelation('menus')->load('menus'), 'user' => $this->actor]);
+        $entries->shouldReceive('portalContext')->andReturnUsing(fn (Request $request) => ['portal' => ($this->forcedPortal ?? (str_starts_with($request->path(), 'assistant/assets') ? $this->assistant : $this->portal))->unsetRelation('menus')->load('menus'), 'user' => $this->actor]);
         $this->app->instance(PortalEntryController::class, $entries);
+        $this->mock(AssistantDailySubmissionPendingCountService::class)->shouldReceive('forUser')->andReturn([]);
+        $this->mock(AssistantAdvertisingReviewPendingCountService::class)->shouldReceive('forUser')->andReturn([]);
         $this->mock(AdminWatermarkService::class)->shouldReceive('scriptForAdministrator')->andReturn(null);
         $this->mock(SystemSettingService::class)->shouldReceive('footer')->andReturn(['copyright_text' => '', 'contact_information' => '']);
     }
@@ -108,8 +129,8 @@ class AssetManagerTest extends TestCase
     public function test_four_pages_render_and_only_ipfoxy_has_no_import(): void
     {
         foreach (['computers', 'resources', 'codex-renewals', 'ipfoxy'] as $kind) {
-            $this->get('/asset-manager/'.$kind)->assertOk()->assertSee('asset-manager.js');
-        }$this->postJson('/asset-manager/ipfoxy/import')->assertStatus(405);
+            $this->get(($kind === 'computers' ? '/asset-manager/' : '/assistant/assets/').$kind)->assertOk()->assertSee('asset-manager.js');
+        }$this->postJson('/assistant/assets/ipfoxy/import')->assertStatus(405);
     }
 
     public function test_crud_and_write_permission_and_disabled_menu(): void
@@ -229,7 +250,7 @@ class AssetManagerTest extends TestCase
     public function test_bad_money_and_dates_are_rejected_without_writes(): void
     {
         $this->postJson('/asset-manager/computers', ['monthly_rent' => '-1'])->assertUnprocessable();
-        $this->postJson('/asset-manager/codex-renewals', ['renewal_date' => '2026-02-30'])->assertUnprocessable();
+        $this->postJson('/assistant/assets/codex-renewals', ['renewal_date' => '2026-02-30'])->assertUnprocessable();
         $this->assertSame(0, AssetComputerEquipment::count());
     }
 
@@ -265,5 +286,205 @@ class AssetManagerTest extends TestCase
         $this->assertCount(1,$response->json('errors'));
         $this->postJson('/asset-manager/computers/import',['token' => $response->json('token')])->assertUnprocessable();
         $this->assertSame(0,AssetComputerEquipment::count());
+    }
+
+    private function departmentsForIsolation(): array
+    {
+        $root = Department::create(['name' => 'Assistant', 'slug' => 'dept-000004']);
+        $a = Department::create(['name' => 'Team A', 'slug' => 'assistant-a', 'parent_id' => $root->id]);
+        $b = Department::create(['name' => 'Team B', 'slug' => 'assistant-b', 'parent_id' => $root->id]);
+
+        return [$root, $a, $b];
+    }
+
+    private function joinDepartment(Department $department, string $position = 'member'): void
+    {
+        $this->actor->administrator = false;
+        DB::table('admin_role_users')->where('user_id', $this->actor->id)->delete();
+        DB::table('admin_role_users')->insert(['role_id' => $department->id, 'user_id' => $this->actor->id, 'position' => $position]);
+        $this->actor->unsetRelation('roles')->unsetRelation('departments');
+    }
+
+    public function test_migration_moves_only_three_menus_and_is_repeatable(): void
+    {
+        $this->assertSame(['asset_manager_computers'], $this->portal->menus()->pluck('code')->all());
+        $this->assertCount(3, $this->assistant->menus);
+        $migration = require base_path('database/migrations/2026_11_18_000100_move_asset_pages_to_assistant.php');
+        $sorts = $this->assistant->menus()->pluck('sort', 'id')->all();
+        $migration->up();
+        $this->assertSame($sorts, $this->assistant->menus()->pluck('sort', 'id')->all());
+        $this->assertSame(3, $this->assistant->menus()->count());
+        foreach (['asset_resources', 'asset_codex_renewals', 'asset_ipfoxy_accounts'] as $table) {
+            $this->assertTrue(Schema::hasColumn($table, 'owner_department_id'));
+        }
+        $migration->down();
+        $this->assertSame(4, $this->portal->menus()->count());
+        $this->assertTrue(Schema::hasColumn('asset_resources', 'owner_department_id'));
+        $migration->up();
+        $this->assertSame(3, $this->assistant->menus()->count());
+    }
+
+    public function test_old_pages_and_interfaces_are_retired(): void
+    {
+        foreach (['resources', 'codex-renewals', 'ipfoxy'] as $kind) {
+            $this->get('/asset-manager/'.$kind)->assertNotFound();
+            $this->get('/asset-manager/'.$kind.'/export')->assertNotFound();
+        }
+        $this->postJson('/asset-manager/resources', [])->assertNotFound();
+        $this->putJson('/asset-manager/codex-renewals/1', [])->assertNotFound();
+        $this->postJson('/asset-manager/ipfoxy/accounts/1/sync', [])->assertNotFound();
+        $this->get('/asset-manager/computers')->assertOk();
+    }
+
+    public function test_resource_and_codex_crud_statistics_and_exports_are_department_scoped(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $this->joinDepartment($a);
+        foreach (['resources' => AssetResource::class, 'codex-renewals' => AssetCodexRenewal::class] as $kind => $class) {
+            $mine = $class::create(['project' => 'visible-A', 'owner_department_id' => $a->id]);
+            $other = $class::create(['project' => 'secret-B', 'owner_department_id' => $b->id]);
+            $class::create(['project' => 'unassigned']);
+            $url = '/assistant/assets/'.$kind;
+            $this->get($url)->assertOk()->assertSee('visible-A')->assertDontSee('secret-B')->assertDontSee('unassigned')
+                ->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+            if ($kind === 'codex-renewals') {
+                $this->get($url)->assertViewHas('cards', fn ($cards) => $cards['total_assets'] === 1 && $cards['unset'] === 1);
+            }
+            $this->getJson($url.'/'.$other->id)->assertNotFound();
+            $this->putJson($url.'/'.$other->id, ['project' => 'changed'])->assertNotFound();
+            $this->deleteJson($url.'/'.$other->id)->assertNotFound();
+            $this->putJson($url.'/'.$mine->id, ['owner_department_id' => $b->id])->assertUnprocessable();
+            $this->postJson($url, ['owner_department_id' => $b->id])->assertUnprocessable();
+            $this->postJson($url, ['project' => 'new-A', 'department_id' => $b->id])->assertOk();
+            $created = $class::orderByDesc('id')->first();
+            $this->assertSame($a->id, (int) $created->owner_department_id);
+            $this->assertSame($b->id, (int) $created->department_id);
+            $this->get($url.'?filter[owner_department_id]='.$b->id)->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+            $export = $this->get($url.'/export?selected[]='.$other->id.'&selected[]='.$mine->id)->assertOk();
+            $file = tempnam(sys_get_temp_dir(), 'asset-scope-');
+            try {
+                file_put_contents($file, $export->streamedContent());
+                $book = IOFactory::load($file);
+                $values = json_encode($book->getSheet(0)->toArray());
+                $this->assertStringContainsString('visible-A', $values);
+                $this->assertStringNotContainsString('secret-B', $values);
+                $book->disconnectWorksheets();
+            } finally {
+                unlink($file);
+            }
+            $this->putJson($url.'/'.$mine->id, ['project' => 'updated-A'])->assertOk();
+            $this->deleteJson($url.'/'.$mine->id)->assertOk();
+        }
+    }
+
+    public function test_management_visibility_requires_existing_assistant_role(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        AssetResource::create(['project' => 'visible-to-manager', 'owner_department_id' => $b->id]);
+        AssetResource::create(['project' => 'unassigned-to-manager']);
+        foreach (['manager', 'deputy'] as $position) {
+            $this->joinDepartment($root, $position);
+            $this->get('/assistant/assets/resources')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 2);
+            $this->postJson('/assistant/assets/resources', ['project' => 'missing-owner'])->assertUnprocessable();
+        }
+        $this->joinDepartment($root, 'member');
+        $this->get('/assistant/assets/resources')->assertForbidden();
+        $outside = Department::create(['name' => 'Other', 'slug' => 'outside']);
+        $this->joinDepartment($outside);
+        $this->get('/assistant/assets/resources')->assertForbidden();
+        $this->joinDepartment($a);
+        $this->actor->manage = false;
+        $this->get('/assistant/assets/resources')->assertOk();
+        $this->postJson('/assistant/assets/resources', [])->assertForbidden();
+        DB::table('portal_menus')->where('code', 'asset_manager_resources')->update(['is_enabled' => false]);
+        $this->get('/assistant/assets/resources')->assertForbidden();
+    }
+
+    public function test_import_ownership_is_cached_and_rechecked_after_department_changes(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $this->joinDepartment($a);
+        $foreign = AssetResource::create(['owner_department_id' => $b->id, 'project' => 'foreign']);
+        $headers = app(AssetManagerSpreadsheetService::class)->headers('resources');
+        $csv = fopen('php://temp', 'r+');
+        fputcsv($csv, array_values($headers));
+        fputcsv($csv, [$foreign->id, 'import-project', '', 'import-resource', '', '', '', '', '', '']);
+        rewind($csv);
+        $content = stream_get_contents($csv);
+        fclose($csv);
+        $url = '/assistant/assets/resources';
+        $this->postJson($url.'/import/preview', ['owner_department_id' => $b->id, 'file' => UploadedFile::fake()->createWithContent('resources.csv', $content)])->assertUnprocessable();
+        $preview = $this->postJson($url.'/import/preview', ['file' => UploadedFile::fake()->createWithContent('resources.csv', $content)])
+            ->assertOk()->assertJsonPath('valid', 1)->assertJsonPath('skipped', 0);
+        $token = $preview->json('token');
+        $this->joinDepartment($b);
+        $this->postJson($url.'/import', ['token' => $token])->assertUnprocessable();
+        $this->joinDepartment($a);
+        $this->postJson($url.'/import', ['token' => $token, 'owner_department_id' => $b->id])->assertOk();
+        $created = AssetResource::orderByDesc('id')->first();
+        $this->assertSame($a->id, (int) $created->owner_department_id);
+        $this->assertSame('import-project', $created->project);
+        $this->postJson($url.'/import', ['token' => $token])->assertUnprocessable();
+    }
+
+    public function test_ipfoxy_accounts_proxies_exports_and_each_sync_step_are_scoped(): void
+    {
+        Http::preventStrayRequests();
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $mine = AssetIpfoxyAccount::create(['owner_department_id' => $a->id, 'label' => 'A-account', 'api_id' => 'a-api', 'api_token' => 'secret-a']);
+        $other = AssetIpfoxyAccount::create(['owner_department_id' => $b->id, 'label' => 'B-secret-account', 'api_id' => 'b-api', 'api_token' => 'secret-b']);
+        foreach ([$mine, $other] as $account) {
+            AssetIpfoxyProxy::create(['account_id' => $account->id, 'proxy_id' => 'proxy-'.$account->id, 'host' => $account === $mine ? 'A-host' : 'B-secret-host']);
+        }
+        $this->joinDepartment($a);
+        $url = '/assistant/assets/ipfoxy';
+        $this->get($url)->assertOk()->assertSee('A-account')->assertDontSee('B-secret-account')->assertDontSee('B-secret-host')->assertDontSee('secret-a')
+            ->assertViewHas('rows', fn ($rows) => $rows->total() === 1)->assertViewHas('accounts', fn ($accounts) => $accounts->count() === 1);
+        $this->putJson($url.'/accounts/'.$other->id, [])->assertNotFound();
+        $this->deleteJson($url.'/accounts/'.$other->id)->assertNotFound();
+        $this->postJson($url.'/accounts/'.$other->id.'/sync', [])->assertNotFound();
+        $this->putJson($url.'/accounts/'.$mine->id, ['owner_department_id' => $b->id])->assertUnprocessable();
+        $this->postJson($url.'/accounts', ['label' => 'new-A', 'api_id' => 'new-api', 'api_token' => 'new-secret'])->assertOk();
+        $this->assertSame($a->id, (int) AssetIpfoxyAccount::orderByDesc('id')->first()->owner_department_id);
+        $run = $this->postJson($url.'/accounts/'.$mine->id.'/sync', [])->assertOk()->json('id');
+        $this->joinDepartment($b);
+        $this->postJson($url.'/sync/'.$run, [])->assertNotFound();
+        Http::assertNothingSent();
+        $this->joinDepartment($a);
+        Http::fake(['apis.ipfoxy.com/*' => Http::response(['code' => 0, 'data' => ['list' => [], 'total' => 0]])]);
+        $this->postJson($url.'/sync/'.$run, [])->assertOk()->assertJsonPath('done', true);
+        $this->putJson($url.'/accounts/'.$mine->id, ['label' => 'A-account-edited', 'api_id' => 'a-api', 'api_token' => ''])->assertOk();
+        $this->assertSame('secret-a', $mine->fresh()->api_token);
+        $export = $this->get($url.'/export')->assertOk();
+        $file = tempnam(sys_get_temp_dir(), 'proxy-export-');
+        try {
+            file_put_contents($file, $export->streamedContent());
+            $book = IOFactory::load($file);
+            $this->assertStringNotContainsString('B-secret', json_encode($book->getSheet(0)->toArray()));
+            $book->disconnectWorksheets();
+        } finally {
+            unlink($file);
+        }
+        $this->deleteJson($url.'/accounts/'.$mine->id)->assertOk();
+        $this->assertSame(0, AssetIpfoxyProxy::where('account_id', $mine->id)->count());
+        $this->assertNotNull($other->fresh());
+    }
+
+    public function test_portal_origin_and_view_permissions_cannot_be_bypassed(): void
+    {
+        $this->forcedPortal = $this->portal;
+        $this->get('/assistant/assets/resources')->assertNotFound();
+        $this->forcedPortal = $this->assistant;
+        $this->get('/asset-manager/computers')->assertNotFound();
+        $this->forcedPortal = null;
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $this->joinDepartment($a);
+        $this->actor->view = false;
+        $this->get('/assistant/assets/resources')->assertForbidden();
+        $this->get('/assistant/assets/resources/export')->assertForbidden();
+        $this->postJson('/assistant/assets/resources', [])->assertForbidden();
+        $this->actor->view = true;
+        DB::table('admin_role_users')->insert(['role_id' => $b->id, 'user_id' => $this->actor->id, 'position' => 'member']);
+        $this->get('/assistant/assets/resources')->assertForbidden();
     }
 }

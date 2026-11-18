@@ -33,11 +33,6 @@
 <section class="content-header"><h1>Shopify订阅报表 <small>查看已绑定运营部门的完整报表数据</small></h1></section>
 <section class="content">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
-    @if($canManageDashboardScope)
-        <div class="text-right" style="margin-bottom:12px">
-            <a class="btn btn-info" href="{{ route('operation-dashboard.department-scopes.index') }}"><i class="fa fa-shield"></i> 账号部门查看权限</a>
-        </div>
-    @endif
     <div class="box assistant-report-filter"><div class="box-body">
         <form method="get" action="{{ $reportIndexUrl }}" class="report-toolbar" id="assistant-report-filter">
             @if($sortBy)<input type="hidden" name="sort_by" value="{{ $sortBy }}"><input type="hidden" name="sort_direction" value="{{ $sortDirection }}">@endif

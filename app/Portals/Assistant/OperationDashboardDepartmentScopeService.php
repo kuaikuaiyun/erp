@@ -3,20 +3,17 @@
 namespace App\Portals\Assistant;
 
 use App\Models\AdminUser;
+use App\Models\Department;
 use App\Models\OperationDashboardDepartmentScope;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class OperationDashboardDepartmentScopeService
 {
-    public function __construct(private readonly AssistantStoreOwnerService $storeOwners)
-    {
-    }
-
     /** @return list<int> */
     public function allDepartmentIds(): array
     {
-        return $this->storeOwners->operationDepartments()->pluck('id')
+        return Department::business()->pluck('id')
             ->map(fn ($id): int => (int) $id)->unique()->values()->all();
     }
 
