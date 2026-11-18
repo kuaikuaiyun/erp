@@ -11,6 +11,7 @@ use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
@@ -27,6 +28,7 @@ class AppLovinPerformanceReportController extends Controller
         private readonly AssistantStoreOwnerService $storeOwners,
         private readonly OperationReportMetricsService $metrics,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -51,7 +53,7 @@ class AppLovinPerformanceReportController extends Controller
             ->intersect($this->storeOwners->operationDepartments()->pluck('id'))->map(fn ($id) => (int) $id)->values()->all();
         $operatorOnly = $isOperationPortal && ! $canSeeAll && $managedIds === [];
         $visibleIds = $isDashboard
-            ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : ($isOperationPortal
             ? ($canSeeAll ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all() : $managedIds)
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']));

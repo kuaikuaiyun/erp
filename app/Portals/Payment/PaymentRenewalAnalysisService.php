@@ -85,6 +85,49 @@ class PaymentRenewalAnalysisService
         return $this->combinedData($filters);
     }
 
+    /** Drill into the same cached first-purchase population used by the summary. */
+    public function initialOrderDetails(array $filters, array $detail): array
+    {
+        $module = $this->moduleFilters($filters, 'initial');
+        $dataset = $this->filterStages($this->dataset($module), $module);
+        $scopeRows = array_values(array_filter($dataset['initial_rows'], fn (array $row): bool =>
+            $this->matchesGroup($row, $detail['detail_group'])
+            && ($detail['detail_purchase'] === 'all' || $row['purchase_type'] === $detail['detail_purchase'])
+            && ($detail['detail_kind'] !== 'refunds' || $row['refund_count'] > 0)
+        ));
+        $stores = array_values(array_unique(array_column($scopeRows, 'store_name')));
+        sort($stores, SORT_NATURAL | SORT_FLAG_CASE);
+        $keyword = trim((string) ($detail['detail_keyword'] ?? ''));
+        $rows = array_values(array_filter($scopeRows, static function (array $row) use ($detail, $keyword): bool {
+            if ($keyword !== '' && !str_contains(mb_strtolower(implode(' ', [
+                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'],
+            ])), mb_strtolower($keyword))) return false;
+            if (($detail['detail_store'] ?? '') !== '' && $row['store_name'] !== $detail['detail_store']) return false;
+            if (($detail['detail_method'] ?? '') !== '' && $row['payment_method'] !== $detail['detail_method']) return false;
+            if (($detail['detail_type'] ?? '') !== '' && $row['purchase_type'] !== $detail['detail_type']) return false;
+            if (($detail['detail_refund'] ?? '') === 'yes' && $row['refund_count'] === 0) return false;
+            if (($detail['detail_refund'] ?? '') === 'no' && $row['refund_count'] > 0) return false;
+            $paidDate = substr($row['paid_at'], 0, 10);
+            if (($detail['detail_from'] ?? '') !== '' && $paidDate < $detail['detail_from']) return false;
+            if (($detail['detail_to'] ?? '') !== '' && $paidDate > $detail['detail_to']) return false;
+            return true;
+        }));
+        usort($rows, static fn (array $a, array $b): int => strcmp($b['paid_at'], $a['paid_at']) ?: $b['erp_order_id'] <=> $a['erp_order_id']);
+        $total = count($rows);
+        $perPage = (int) ($detail['detail_per_page'] ?? 20);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($lastPage, max(1, (int) ($detail['detail_page'] ?? 1)));
+        return [
+            'scope' => $this->riskTotal($scopeRows, true),
+            'summary' => $this->riskTotal($rows, true),
+            'rows' => array_slice($rows, ($page - 1) * $perPage, $perPage),
+            'stores' => $stores, 'parent_store' => $module['store'], 'calculation' => $dataset['calculation'],
+            'filters' => $detail,
+            'pagination' => ['current_page'=>$page, 'last_page'=>$lastPage, 'total'=>$total, 'per_page'=>$perPage,
+                'from'=>$total ? ($page - 1) * $perPage + 1 : 0, 'to'=>min($page * $perPage, $total)],
+        ];
+    }
+
     private function moduleFilters(array $filters, string $module): array
     {
         $timezone = $filters[$module.'_timezone'] ?? $filters['timezone'] ?? '+08:00';
@@ -156,7 +199,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v13:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v14:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -322,6 +365,7 @@ class PaymentRenewalAnalysisService
         $dispute = $risk['disputes'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
         $paid = $order->paid_at->copy()->setTimezone($timezone)->format('Y-m-d H:i:s');
         return [
+            'erp_order_id' => (int) $order->id,
             'stage_key' => $number === 0 ? 'initial' : 'renewal_'.$number, 'stage_number' => $number, 'purchase_type' => $purchaseType,
             'initial_channel' => $this->channelFor($initial), 'actual_channel' => $this->channelFor($order), 'payment_method' => $this->methodFor($order),
             'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),

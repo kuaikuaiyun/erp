@@ -129,6 +129,115 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame(7, $updated['initial_refunds']['total']['orders']);
     }
 
+    private function detailFilters(array $overrides = []): array
+    {
+        return array_replace([
+            'detail_group'=>'total', 'detail_purchase'=>'all', 'detail_kind'=>'orders',
+            'detail_keyword'=>'', 'detail_store'=>'', 'detail_method'=>'', 'detail_type'=>'', 'detail_refund'=>'',
+            'detail_from'=>'', 'detail_to'=>'', 'detail_per_page'=>20, 'detail_page'=>1,
+        ], $overrides);
+    }
+
+    public function test_detail_populations_reconcile_with_every_summary_row_and_deduplicate_refunded_orders(): void
+    {
+        DB::table('logistics_paypal_refunds')->insert(['logistics_order_id'=>5,'refund_amount_usd'=>7,'manual_reason'=>'部分退款']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $dashboard = $service->dashboard($this->filters());
+        foreach (['total','method_pp','method_cc','method_gp','method_ap'] as $group) {
+            foreach (['all','subscription','non_subscription'] as $type) {
+                $expected = $dashboard['initial_refunds_by_type'][$group][$type];
+                $base = ['detail_group'=>$group,'detail_purchase'=>$type];
+                $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters($base));
+                foreach (['orders','revenue','refund_order_count','refund_amount'] as $metric) self::assertEquals($expected[$metric], $detail['scope'][$metric]);
+                self::assertSame($expected['orders'], $detail['pagination']['total']);
+                $refunds = $service->initialOrderDetails($this->filters(), $this->detailFilters([...$base,'detail_kind'=>'refunds']));
+                self::assertSame($expected['refund_order_count'], $refunds['pagination']['total']);
+                self::assertEquals($expected['refund_amount'], $refunds['summary']['refund_amount']);
+            }
+        }
+        $refunds = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_kind'=>'refunds','detail_group'=>'method_pp']));
+        self::assertCount(1, $refunds['rows']);
+        self::assertSame(5, $refunds['rows'][0]['erp_order_id']);
+        self::assertSame(2, $refunds['rows'][0]['refund_count']);
+        self::assertEquals(17, $refunds['summary']['refund_amount']);
+    }
+
+    public function test_detail_search_and_filters_only_narrow_the_selected_population(): void
+    {
+        $service = app(PaymentRenewalAnalysisService::class);
+        $base = ['detail_group'=>'method_pp','detail_purchase'=>'subscription'];
+        foreach ([
+            ['detail_method'=>'cc'], ['detail_type'=>'non_subscription'], ['detail_store'=>'Other'],
+            ['detail_refund'=>'no'], ['detail_from'=>'2026-11-02'],
+            ['detail_to'=>'2026-10-31'], ['detail_keyword'=>'TX-6'],
+        ] as $filter) {
+            $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters([...$base,...$filter]));
+            self::assertSame(0, $detail['pagination']['total']);
+            self::assertSame(1, $detail['scope']['orders']);
+        }
+        foreach (['5','TX-5','Test'] as $keyword) {
+            $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters([...$base,'detail_keyword'=>$keyword]));
+            self::assertSame([5], array_column($detail['rows'],'erp_order_id'));
+        }
+        $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_kind'=>'refunds','detail_refund'=>'no']));
+        self::assertSame(0, $detail['pagination']['total']);
+        $this->order(21,'2026-11-01 18:30:00','无订阅','credit_card');
+        \Illuminate\Support\Facades\Cache::flush();
+        $china = $service->initialOrderDetails($this->filters(), $this->detailFilters());
+        $west = $service->initialOrderDetails($this->filters(['initial_timezone'=>'-05:00']), $this->detailFilters());
+        self::assertSame(2, $china['scope']['orders']);
+        self::assertSame(3, $west['scope']['orders']);
+        self::assertSame($china['scope'], $service->initialOrderDetails($this->filters(['stage'=>'renewal_9','renewal_store'=>'Other']), $this->detailFilters())['scope']);
+    }
+
+    public function test_detail_pagination_renders_escaped_rows_refund_records_and_filter_state(): void
+    {
+        for ($i=0;$i<45;$i++) $this->order(200+$i,'2026-11-01 13:00:00','无订阅','credit_card');
+        DB::table('logistics_orders')->where('id',244)->update(['shopify_order_number'=>'<script>alert(1)</script>']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_per_page'=>20,'detail_page'=>2]));
+        self::assertSame(47, $detail['pagination']['total']);
+        self::assertCount(20, $detail['rows']);
+        self::assertEquals(940, $detail['summary']['revenue']);
+        self::assertSame(21, $detail['pagination']['from']);
+        $last = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_page'=>100]));
+        self::assertSame(3, $last['pagination']['current_page']);
+        self::assertCount(7, $last['rows']);
+        $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_keyword'=>'<script>']));
+        $html = view('portals.payment.renewal-order-details', compact('detail'))->render();
+        self::assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $html);
+        self::assertStringNotContainsString('<script>alert(1)</script>', $html);
+        self::assertStringContainsString('data-renewal-detail-filter', $html);
+        self::assertStringContainsString('data-renewal-detail-fragment', $html);
+        self::assertStringNotContainsString('payment.renewal_details.', $html);
+        $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_kind'=>'refunds']));
+        $html = view('portals.payment.renewal-order-details', compact('detail'))->render();
+        self::assertStringContainsString('查看退款记录', $html);
+        self::assertStringContainsString('测试退款', $html);
+        $detail = $service->initialOrderDetails($this->filters(), $this->detailFilters(['detail_keyword'=>'not-found']));
+        self::assertStringContainsString('当前筛选条件下没有订单', view('portals.payment.renewal-order-details', compact('detail'))->render());
+    }
+
+    public function test_detail_request_validation_rejects_invalid_scope_and_unbounded_pages(): void
+    {
+        $method = new \ReflectionMethod(PaymentPortalController::class,'renewalOrderDetailFilters');
+        $controller = (new \ReflectionClass(PaymentPortalController::class))->newInstanceWithoutConstructor();
+        foreach ([
+            ['detail_group'=>'paypal'], ['detail_kind'=>'invalid'], ['detail_purchase'=>'invalid'],
+            ['detail_per_page'=>10000], ['detail_page'=>0], ['detail_keyword'=>str_repeat('a',101)],
+            ['detail_from'=>'2026-11-02','detail_to'=>'2026-11-01'],
+        ] as $invalid) {
+            try {
+                $method->invoke($controller, Request::create('/','GET',$this->detailFilters($invalid)));
+                self::fail('Invalid detail filters accepted');
+            } catch (\Illuminate\Validation\ValidationException $e) {
+                self::assertNotEmpty($e->errors());
+            }
+        }
+        $valid = $method->invoke($controller, Request::create('/','GET',$this->detailFilters(['detail_per_page'=>50])));
+        self::assertSame(50,$valid['detail_per_page']);
+    }
+
     public function test_refunds_include_non_subscription_first_orders_and_all_channel_totals_reconcile(): void
     {
         $data = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters());
@@ -221,6 +330,10 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertStringContainsString('payment-stage-start', $html);
         self::assertStringContainsString('payment-method-rate-grid', $html);
         self::assertStringContainsString('支付方式', $html);
+        self::assertSame(30, substr_count($html,'data-renewal-detail-open'));
+        self::assertStringContainsString('data-renewal-detail-content', $html);
+        self::assertStringContainsString('分母订单明细', $html);
+        self::assertStringContainsString('退款订单明细', $html);
         self::assertStringNotContainsString('data-payment-method="unknown"', $html);
         preg_match_all('/class="payment-method-rate" data-payment-method="([^"]+)"/', $html, $methods);
         self::assertSame(['pp','cc','gp','ap'], $methods[1]);

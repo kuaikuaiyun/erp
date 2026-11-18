@@ -34,24 +34,8 @@
 <section class="content">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if($canManageDashboardScope)
-        <div class="box dashboard-scope-box">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-shield"></i> 账号部门查看权限</h3></div>
-            <div class="box-body dashboard-scope-body">
-                <form method="get" action="{{ $reportIndexUrl }}" class="dashboard-scope-account">
-                    <div class="form-group"><label>设置账号</label><select class="form-control" name="scope_user_id" onchange="this.form.submit()">@foreach($dashboardScopeUsers as $scopeUser)<option value="{{ $scopeUser->id }}" @selected($scopeSelectedUserId === (int)$scopeUser->id)>{{ $scopeUser->name ?: $scopeUser->username }}（{{ $scopeUser->username }}）</option>@endforeach</select></div>
-                    <noscript><button class="btn btn-default" type="submit">切换账号</button></noscript>
-                </form>
-                @if($scopeSelectedUserId)
-                    <form method="post" action="{{ $dashboardScopeUpdateUrl }}">
-                        @csrf
-                        <input type="hidden" name="user_id" value="{{ $scopeSelectedUserId }}">
-                        <div class="dashboard-scope-departments">@foreach($departments as $department)<label class="dashboard-scope-option"><input type="checkbox" name="department_ids[]" value="{{ $department->id }}" @checked(in_array((int)$department->id,$scopeSelectedDepartmentIds,true))><span>{{ $department->name }}</span></label>@endforeach</div>
-                        <div class="dashboard-scope-footer"><span class="dashboard-scope-help"><i class="fa fa-info-circle"></i> 勾选后，该账号只能查看所选部门；不勾选表示不限制，可查看全部运营部门。</span><button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存查看权限</button></div>
-                    </form>
-                @else
-                    <div class="text-muted">暂无可配置的启用账号。</div>
-                @endif
-            </div>
+        <div class="text-right" style="margin-bottom:12px">
+            <a class="btn btn-info" href="{{ route('operation-dashboard.department-scopes.index') }}"><i class="fa fa-shield"></i> 账号部门查看权限</a>
         </div>
     @endif
     <div class="box assistant-report-filter"><div class="box-body">
