@@ -17,6 +17,7 @@ use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Operation\AiProductShopifyPublisher;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use App\Services\AiProductListingPushService;
+use App\Services\OperatorMaterialVideoNotificationService;
 use App\Support\PrivateVideoResponse;
 use Encore\Admin\Facades\Admin;
 use Illuminate\Database\Eloquent\Builder;
@@ -40,6 +41,7 @@ class OperationAiProductLibraryController extends Controller
         private readonly ProductRequestAccessService $access,
         private readonly AiProductShopifyPublisher $shopifyPublisher,
         private readonly AiProductListingPushService $listingPush,
+        private readonly OperatorMaterialVideoNotificationService $materialVideoNotifications,
         private readonly PrivateVideoResponse $privateVideoResponse,
     ) {}
 
@@ -623,6 +625,12 @@ class OperationAiProductLibraryController extends Controller
         } catch (Throwable $exception) {
             if ($path) Storage::disk('local')->delete($path);
             throw $exception;
+        }
+
+        try {
+            $this->materialVideoNotifications->notifyManagers($product, $video, $context['user']);
+        } catch (Throwable $exception) {
+            report($exception);
         }
 
         if ($request->expectsJson()) {
