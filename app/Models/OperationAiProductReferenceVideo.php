@@ -41,6 +41,14 @@ class OperationAiProductReferenceVideo extends Model
         return 'op'.max(1, $userId);
     }
 
+    public static function isOperatorMaterialFile(?string $fileName): bool
+    {
+        $code = strtolower(pathinfo((string) $fileName, PATHINFO_FILENAME));
+
+        return preg_match('/(?:^|-)op\d+-min-\d{6}-\d+(?:$|-)/', $code) === 1
+            || preg_match('/-\d{6}-placement-[a-z0-9]+$/', $code) === 1;
+    }
+
     public static function operatorFileName(
         string $productCode,
         int $userId,

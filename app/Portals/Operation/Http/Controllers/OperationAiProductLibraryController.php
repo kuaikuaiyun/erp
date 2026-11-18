@@ -106,7 +106,6 @@ class OperationAiProductLibraryController extends Controller
 
         $evaluations = AikaipinPlacementEvaluation::query()->with('records')
             ->where('product_id', $product->getKey())
-            ->where('created_by', $context['user']->getKey())
             ->latest('updated_at')->get();
 
         return response()->json([
@@ -122,6 +121,8 @@ class OperationAiProductLibraryController extends Controller
                     'material_name' => $record->material_name,
                     'video_code' => $record->video_name ? pathinfo((string) $record->video_name, PATHINFO_FILENAME) : null,
                     'video_url' => $record->video_path
+                        && (! OperationAiProductReferenceVideo::isOperatorMaterialFile($record->video_name)
+                            || (int) $evaluation->created_by === (int) $context['user']->getKey())
                         ? route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) : null,
                 ])->values(),
             ])->values(),
@@ -468,8 +469,12 @@ class OperationAiProductLibraryController extends Controller
             ->whereKey($evaluation->product_id)
             ->where('is_published', true)
             ->exists(), 404);
-        abort_unless((int) $evaluation->created_by === (int) $context['user']->getKey(), 404);
         abort_unless((int) $record->evaluation_id === (int) $evaluation->getKey(), 404);
+        abort_if(
+            OperationAiProductReferenceVideo::isOperatorMaterialFile($record->video_name)
+                && (int) $evaluation->created_by !== (int) $context['user']->getKey(),
+            404,
+        );
         abort_unless($record->video_path && Storage::disk($record->video_disk ?: 'local')->exists($record->video_path), 404);
 
         return response()->file(Storage::disk($record->video_disk ?: 'local')->path($record->video_path), [

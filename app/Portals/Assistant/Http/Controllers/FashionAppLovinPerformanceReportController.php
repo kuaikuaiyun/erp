@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
+use App\Support\AppLovinGiftConsumption;
 use App\Models\AssistantDomainStore;
 use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
@@ -227,7 +228,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 $deductedConsumption = round((float) $accountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
                     $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
 
-                    return max(0, $consumption - ($giftScreenshots->has($key) ? 5000 : 0));
+                    return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
                 }), 2);
                 $historicalRevenue = round((float) ($historicalRevenueByGroup[(int) $first['operator_id'].'|'.(int) $first['store_id']] ?? 0), 2);
 
@@ -292,7 +293,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         $totals['deducted_consumption'] = round((float) $totalAccountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
             $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
 
-            return max(0, $consumption - ($giftScreenshots->has($key) ? 5000 : 0));
+            return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
         }), 2);
         $totals['historical_revenue'] = round((float) $rows->sum('historical_revenue'), 2);
         $totals['estimated_total_roi'] = $totals['deducted_consumption'] > 0

@@ -88,7 +88,7 @@
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261116-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261118-1"></script>
 @endpush
 
 @section('content')

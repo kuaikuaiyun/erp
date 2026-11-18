@@ -451,6 +451,8 @@
                         var videoCell = document.createElement('td');
                         if (record.video_url) {
                             var link = document.createElement('a'); link.className = 'btn btn-xs btn-info'; link.target = '_blank'; link.href = record.video_url; link.textContent = record.video_code || '投放视频'; videoCell.appendChild(link);
+                        } else if (record.video_code) {
+                            var code = document.createElement('code'); code.textContent = record.video_code; videoCell.appendChild(code);
                         } else videoCell.textContent = '—';
                         row.appendChild(videoCell); body.appendChild(row);
                     });
