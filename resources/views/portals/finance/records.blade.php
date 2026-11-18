@@ -179,7 +179,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <p class="finance-note">{{ __('finance.records.'.$definition['channel'].'_note') }}</p>
 @endif
 <div class="box {{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'box-solid logistics-filter-box' : 'box-primary finance-records-panel' }}" ><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? '筛选条件' : __('finance.records.filter_title') }}</h3></div><div class="box-body">
-<form method="get" id="finance-filters" @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true)) class="logistics-filter-form" @endif>
+<form method="get" id="finance-filters" @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true)) class="logistics-filter-form" @endif @if($logisticsOptionFields) data-logistics-options-url="{{ request()->url() }}?logistics_filter_options=1" @endif>
     <input type="hidden" name="per_page" value="{{ $records->perPage() }}">
     <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-grid' : 'finance-filter finance-records-filter' }}">
         @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
@@ -198,7 +198,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
                 <div class="logistics-filter-field {{ $commonField ? '' : 'paypal-extra-filter' }}" style="order:{{ $loop->index * 10 }}">
                     <label for="paypal-field-{{ $field }}">{{ $label }}</label>
                     @if(in_array($field, ['currency', 'status'], true) || isset($fixedFilterOptions[$field]))
-                        <select id="paypal-field-{{ $field }}" class="form-control" name="order_fields[{{ $field }}]">
+                        <select id="paypal-field-{{ $field }}" class="form-control" name="order_fields[{{ $field }}]" @if(in_array($field, $logisticsOptionFields, true)) data-logistics-option-field="{{ $field }}" @endif>
                             <option value="">全部</option>
                             @foreach($fixedFilterOptions[$field] ?? $conditionChoices[$field] ?? [] as $option)
                                 <option value="{{ $option['value'] }}" @selected(($filters['order_fields'][$field] ?? '') === $option['value'])>{{ $option['label'] }}</option>
@@ -306,6 +306,40 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <script>
 (function(){
     var toggle=document.getElementById('paypal-toggle-filters'), filterForm=document.getElementById('finance-filters');
+    if (filterForm?.dataset.logisticsOptionsUrl) {
+        var optionsRequested = false;
+        filterForm.addEventListener('focusin', function(event) {
+            if (optionsRequested || !event.target.matches('[data-logistics-option-field]')) return;
+            optionsRequested = true;
+            var select = event.target;
+            select.querySelector('[data-logistics-load-status]')?.remove();
+            var loading = new Option('正在加载筛选选项…', '');
+            loading.disabled = true;
+            loading.dataset.logisticsLoadStatus = '';
+            select.add(loading);
+            fetch(filterForm.dataset.logisticsOptionsUrl, {headers: {Accept: 'application/json'}})
+                .then(function(response) {
+                    if (!response.ok) throw new Error('Filter options unavailable');
+                    return response.json();
+                })
+                .then(function(options) {
+                    filterForm.querySelectorAll('[data-logistics-option-field]').forEach(function(field) {
+                        var selected = field.value;
+                        var selectedOption = field.selectedOptions[0];
+                        var choices = options[field.dataset.logisticsOptionField] || [];
+                        var entries = [new Option('全部', '')];
+                        choices.forEach(function(choice) { entries.push(new Option(choice.label, choice.value)); });
+                        if (selected && !choices.some(function(choice) { return choice.value === selected; })) {
+                            entries.push(new Option(selectedOption.textContent, selected));
+                        }
+                        field.replaceChildren(...entries);
+                        field.value = selected;
+                    });
+                })
+                .catch(function() { optionsRequested = false; loading.textContent = '选项加载失败，重新聚焦重试'; })
+                .finally(function() { if (optionsRequested) loading.remove(); });
+        });
+    }
     if(toggle){
         function expandFilters(expanded){filterForm.classList.toggle('paypal-filters-expanded',expanded);toggle.setAttribute('aria-expanded',String(expanded));toggle.textContent=expanded?'收起筛选':'更多筛选';}
         expandFilters(Array.from(filterForm.querySelectorAll('.paypal-extra-filter input,.paypal-extra-filter select')).some(function(input){return input.value!=='';}));

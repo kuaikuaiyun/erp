@@ -16,10 +16,8 @@ class FinanceXuzongCostEligibility
         $numbers = $records->map(self::merchantNumber(...))->filter(fn ($number) => $number !== '')->unique();
         $siblings = $records;
         foreach ($numbers->chunk(300) as $batch) {
-            $siblings = $siblings->concat(app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: true)
-                ->where(fn ($query) => $query->whereIn('payload->商户订单号', $batch->all())
-                    ->orWhereIn('payload->_legacy_order_id', $batch->all()))
-                ->get());
+            $siblings = $siblings->concat(app(FinanceLogisticsCreditOrders::class)
+                ->query(xuzongReport: true, merchantNumbers: $batch->all())->get());
         }
         $siblings = $siblings->keyBy('id');
         $successful = $siblings->filter(fn ($record) => FinanceSettlementService::isSuccessfulTransaction($record->status));

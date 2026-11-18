@@ -180,25 +180,33 @@ class FinancePayPalSettlementOrders
         return $amount === null ? '' : trim((is_string($currency) ? $currency : '').' '.FinanceCatalog::reportAmount($amount));
     }
 
-    public function page(array $filters, int $offset, int $limit): array
+    public function page(array $filters, int $offset, int $limit, bool $stopAtLimit = false): array
     {
         $db = $this->workbooks->database();
         $graph = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
-            ? Cache::remember(
+            ? $this->orderGraphCache()->remember(
                 $this->orderGraphCacheKey(),
                 15,
                 fn () => $this->orderGraph(null),
             )
             : $this->orderGraph(null);
         if ($graph === null) {
-            return [collect(), 0, collect()];
+            return [collect(), 0, collect(), true];
         }
         $orders = $this->ordersInDateRange($graph[0], $filters);
 
         $scope = array_intersect_key($filters, array_flip(['account', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
         if (! array_filter($scope)) {
             $rows = collect($this->matchingRows($filters, array_slice($orders, $offset, $limit), $graph, false));
-            return [$rows, count($orders), $rows];
+            return [$rows, count($orders), $rows, true];
+        }
+        $status = $filters['order_status'] ?? '';
+        if (in_array($status, ['已付款', '付款失败', '付款待确认', '待关联交易'], true)
+            && ! array_filter(array_diff_key($scope, ['order_status' => true]))) {
+            $orders = $this->ordersWithPostingStatus($orders, $graph[1], $status);
+            $rows = collect($this->matchingRows($filters, array_slice($orders, $offset, $limit), $graph, false));
+
+            return [$rows, count($orders), $rows, true];
         }
         $rows = collect();
         $subscriptions = [];
@@ -210,8 +218,39 @@ class FinancePayPalSettlementOrders
                 $rows->push($row);
             }
             $total++;
+            if ($stopAtLimit && $total >= $offset + $limit) {
+                return [$rows, $total, collect($subscriptions), false];
+            }
         }
-        return [$rows, $total, collect($subscriptions)];
+        return [$rows, $total, collect($subscriptions), true];
+    }
+
+    private function ordersWithPostingStatus(array $orders, array $roots, string $status): array
+    {
+        if ($status === '待关联交易') {
+            return array_filter($orders, fn (array $order) => isset($order['event']));
+        }
+        $statuses = $this->settlements->query('paypal', [])->toBase()->pluck('status', 'id');
+        $edits = $this->workbooks->database()->table('finance_settlement_supplements')
+            ->whereNotNull('payload->_edited_fields')->pluck('payload', 'finance_record_id')
+            ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR)['_edited_fields'] ?? []);
+
+        return array_filter($orders, function (array $order) use ($roots, $status, $statuses, $edits): bool {
+            $id = $order['id'];
+            if (isset($order['event']) || ! $statuses->has($id)) {
+                return false;
+            }
+            $sourceStatus = $statuses->get($id);
+            $flags = array_replace([
+                'success' => FinanceSettlementService::isSuccessfulTransaction($sourceStatus),
+                'failed' => in_array(strtoupper((string) $sourceStatus), FinanceSettlementService::CARD_FAILURE_STATUSES, true),
+            ], $edits->get($id, []));
+
+            // A voided root remains a completed payment for the list's posting status.
+            $success = ($roots[$id]['status'] ?? null) === 'V' || $flags['success'];
+
+            return $this->postingStatus($success, (bool) $flags['failed']) === $status;
+        });
     }
 
     private function ordersInDateRange(array $orders, array $filters): array
@@ -260,7 +299,13 @@ class FinancePayPalSettlementOrders
 
     private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails, bool $matchCandidateDomains = false): iterable
     {
+        if (filled($filters['account'] ?? null)) {
+            $orders = $this->accountCandidates($orders, $filters['account']);
+        }
         [, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
+        if (filled($filters['reference'] ?? null)) {
+            $orders = $this->referenceCandidates($orders, $roots, $children, $filters['reference']);
+        }
         $lockedMonths = $this->workbooks->database()->table('finance_period_locks')
             ->whereNotNull('report_snapshot')->pluck('month')->all();
         $numericConditionFields = $this->settlements->numericConditionFields('paypal');
@@ -282,7 +327,11 @@ class FinancePayPalSettlementOrders
                     $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails, $lockedMonths);
                 } else {
                     $payment = $payments->get($order['id']);
-                    if ($payment === null) {
+                    if ($payment === null
+                        || (filled($filters['domain'] ?? null) && ! str_contains($payment['domain'] ?? '', $filters['domain']))
+                        || (filled($filters['team'] ?? null) && $this->paymentTeam($payment) !== $filters['team'])
+                        || (filled($filters['subscription'] ?? null) && (filled($payment['subscription'] ?? null) ? $payment['subscription'] : '未匹配')
+                            !== FinanceSettlementService::subscriptionLabel($filters['subscription']))) {
                         continue;
                     }
                     $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $includeDetails);
@@ -294,11 +343,55 @@ class FinancePayPalSettlementOrders
         }
     }
 
+    private function referenceCandidates(array $orders, array $roots, array $children, string $reference): array
+    {
+        $db = $this->workbooks->database();
+        $edited = $db->table('finance_settlement_supplements')->select('finance_record_id')
+            ->where(fn ($query) => $query->where('payload->reference', $reference)
+                ->orWhere('payload->_edited_fields->reference', $reference));
+        $ids = $db->table('finance_records')->where('dataset', 'paypal-orders')->where('reference', $reference)
+            ->select('id')->union($edited)->pluck('id')->flip()->all();
+
+        return array_filter($orders, function (array $order) use ($roots, $children, $reference, $ids): bool {
+            if (isset($order['event'])) {
+                return $order['event']['reference'] === $reference;
+            }
+            $id = $order['id'];
+
+            return isset($ids[$id]) || ($roots[$id]['reference'] ?? null) === $reference
+                || in_array($reference, array_column($children[$id] ?? [], 'reference'), true);
+        });
+    }
+
+    private function accountCandidates(array $orders, string $account): array
+    {
+        $db = $this->workbooks->database();
+        $linked = $db->table('finance_payment_transactions as payment')
+            ->join('finance_payment_accounts as owner', 'owner.id', '=', 'payment.payment_account_id')
+            ->where('owner.account_type', 'paypal')->whereNull('owner.deleted_at')
+            ->where('owner.activity_account', $account)->select('payment.finance_record_id');
+        $ids = $db->table('finance_records')->where('dataset', 'paypal-orders')
+            ->where('account', $account)->select('id')->union($linked)->pluck('id')->flip()->all();
+
+        // Keep both potential sources of account ownership; matches() applies the final rule.
+        return array_filter($orders, fn (array $order) => isset($order['event'])
+            ? $order['event']['account_key'] === $account
+            : isset($ids[$order['id']]));
+    }
+
     public function forgetOrderGraph(): void
     {
         if (in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)) {
-            Cache::forget($this->orderGraphCacheKey());
+            $this->orderGraphCache()->forget($this->orderGraphCacheKey());
         }
+    }
+
+    private function orderGraphCache(): \Illuminate\Contracts\Cache\Repository
+    {
+        $store = config('cache.default');
+
+        // Avoid binding the full serialized graph as a SQL parameter.
+        return Cache::store(config("cache.stores.{$store}.driver") === 'database' ? 'file' : $store);
     }
 
     public function isUnlinkedSettlement(int $recordId): bool
@@ -349,11 +442,12 @@ class FinancePayPalSettlementOrders
         $removedEvents = (clone $removedSettlements)->where('payload->_deleted_unlinked_event', true)
             ->pluck('finance_record_id')->flip()->all();
         $removed = array_diff_key($removedSettlements->pluck('finance_record_id')->flip()->all(), $removedEvents);
+        $accounts = $db->table('finance_payment_accounts')->whereNull('deleted_at')
+            ->get(['id', 'account_name', 'activity_account'])->keyBy('id');
         $transactions = $db->table('finance_payment_transactions as txn')
-            ->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id')
-            ->join('finance_payment_accounts as account', 'account.id', '=', 'txn.payment_account_id')
-            ->whereNull('account.deleted_at');
+            ->whereIntegerInRaw('txn.payment_account_id', $accounts->keys()->all());
         $withdrawals = (clone $transactions)->where('txn.event_code', 'like', 'T04%')
+            ->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id')
             ->get(['txn.payment_account_id', 'txn.transaction_id'])
             ->groupBy('payment_account_id')->map(fn ($rows) => $rows->pluck('transaction_id')->flip()->all())->all();
         $transactions->where('txn.event_code', 'not like', 'T04%');
@@ -366,7 +460,8 @@ class FinancePayPalSettlementOrders
         });
         if ($detailAccountIds !== null) {
             // Parent links are account-scoped, but duplicate payment IDs must be checked across accounts.
-            $matchingRoots = $settlementTransactions->whereIn('txn.transaction_id', $detailTransactions->pluck('transaction_id')->unique())
+            $matchingRoots = $settlementTransactions->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id')
+                ->whereIn('txn.transaction_id', $detailTransactions->pluck('transaction_id')->unique())
                 ->get(['txn.finance_record_id', 'txn.payment_account_id', 'txn.transaction_id']);
             foreach ($matchingRoots as $txn) {
                 if (isset($byId[$txn->finance_record_id])) {
@@ -382,19 +477,42 @@ class FinancePayPalSettlementOrders
         } else {
             $transactions = $settlementTransactions;
         }
-        // Read in primary-key order before joining to avoid sorting the remaining history on each page.
+        // Resolve IDs through the narrow event index before loading the wider JSON rows.
+        $candidates = clone $transactions;
+        if ($mysql) {
+            $candidates->forceIndex($db->getSchemaBuilder()->hasIndex('finance_payment_transactions', 'finance_payment_account_events_idx')
+                ? 'finance_payment_account_events_idx' : 'PRIMARY')->selectRaw('STRAIGHT_JOIN txn.id');
+        } else {
+            $candidates->select('txn.id');
+        }
+        $transactionIds = $candidates->pluck('id')->all();
+        sort($transactionIds, SORT_NUMERIC);
+        $transactions->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id');
         if ($mysql) {
             $transactions->forceIndex('PRIMARY')->selectRaw('STRAIGHT_JOIN txn.id');
         } else {
             $transactions->select('txn.id');
         }
         $transactions->addSelect('txn.finance_record_id', 'txn.payment_account_id', 'txn.transaction_id',
-            'txn.event_code', 'txn.raw_payload->transaction_info as transaction_info', 'record.occurred_at',
-            'account.account_name', 'account.activity_account');
+            'txn.event_code', 'record.occurred_at');
+        if ($mysql) {
+            $source = $db->getQueryGrammar()->wrap('txn.raw_payload');
+            $fields = ['paypal_reference_id', 'paypal_reference_id_type', 'invoice_id', 'transaction_amount',
+                'fee_amount', 'transaction_status', 'transaction_updated_date'];
+            $pairs = array_map(fn ($field) => "'{$field}', JSON_EXTRACT({$source}, '$.transaction_info.{$field}')", $fields);
+            $transactions->selectRaw('JSON_OBJECT('.implode(', ', $pairs).') as transaction_info');
+        } else {
+            $transactions->addSelect('txn.raw_payload->transaction_info as transaction_info');
+        }
         if ($recordId !== null) {
             $transactions->addSelect('event_type.category as configured_category');
         }
-        foreach ($transactions->lazyById(8000, 'txn.id', 'id') as $txn) {
+        $transactionRows = \Illuminate\Support\LazyCollection::make(function () use ($transactions, $transactionIds): iterable {
+            foreach (array_chunk($transactionIds, 4000) as $ids) {
+                yield from (clone $transactions)->whereIntegerInRaw('txn.id', $ids)->orderBy('txn.id')->get();
+            }
+        });
+        foreach ($transactionRows as $txn) {
             if (isset($removedEvents[(int) $txn->finance_record_id])) {
                 continue;
             }
@@ -415,7 +533,8 @@ class FinancePayPalSettlementOrders
             }
             $event = [
                 'id' => (int) $txn->finance_record_id, 'account_id' => (int) $txn->payment_account_id,
-                'account' => $txn->account_name, 'account_key' => $txn->activity_account,
+                'account' => $accounts[$txn->payment_account_id]->account_name,
+                'account_key' => $accounts[$txn->payment_account_id]->activity_account,
                 'code' => $txn->event_code, 'reference' => $txn->transaction_id,
                 'related_id' => $relatedId, 'related_type' => $relatedType,
                 'invoice' => trim((string) ($info['invoice_id'] ?? '')),
@@ -517,8 +636,7 @@ class FinancePayPalSettlementOrders
             $result['settlement'], $payment['shop_paid_usd'] ?? null,
         );
         unset($result['shop_paid_usd'], $payment['shop_paid_usd']);
-        $isBrushOrder = $payment['subscription'] === '刷单' || str_contains((string) $payment['owner'], '刷单');
-        $result['team'] = $isBrushOrder ? '刷单' : $payment['operation_department'];
+        $result['team'] = $this->paymentTeam($payment);
         $result['operation_region'] = FinanceSettlementService::operationRegion($result['team']);
         $result['order_status'] = $this->paymentStatus($result);
         if (isset($ambiguous[$id])) {
@@ -542,6 +660,12 @@ class FinancePayPalSettlementOrders
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
 
         return $result;
+    }
+
+    private function paymentTeam(array $payment): string
+    {
+        return $payment['subscription'] === '刷单' || str_contains((string) $payment['owner'], '刷单')
+            ? '刷单' : $payment['operation_department'];
     }
 
     private function unlinkedRow(array $event, string $zone, bool $includeDetails, array $lockedMonths): array
@@ -724,8 +848,21 @@ class FinancePayPalSettlementOrders
                 $effective = $event['status'] === 'S' || ($field === 'dispute_hold' && $event['status'] === 'P');
                 $rejectedRelease = $field === 'dispute_release' && $event['status'] === 'D';
                 $fundedAmount = $fundedRefund['amounts'][$event['id']] ?? null;
+                $refundFeeUsd = $fundedRefund['fees'][$event['id']] ?? null;
                 $amount = $fundedAmount ?? ($effective || $rejectedRelease
                     ? $this->exchange($event, $event['amount'], $conversions, $usedExchanges, $rejectedRelease) : null);
+                // Refund FX is often for the net debit after the fee is returned.
+                if ($refund && $effective && $amount === null && $event['currency'] !== 'USD'
+                    && $event['amount'] !== null && bccomp($event['fee'] ?? '0', '0', self::SCALE) > 0) {
+                    $refundNet = bcadd($event['amount'], $event['fee'], self::SCALE);
+                    if (bccomp($refundNet, '0', self::SCALE) < 0) {
+                        $netUsd = $this->exchange($event, $refundNet, $conversions, $usedExchanges);
+                        if ($netUsd !== null) {
+                            $refundFeeUsd = bcmul($event['fee'], bcdiv($netUsd, $refundNet, self::SCALE), self::SCALE);
+                            $amount = bcsub($netUsd, $refundFeeUsd, self::SCALE);
+                        }
+                    }
+                }
                 if ($rejectedRelease) {
                     $effective = $event['currency'] === 'USD'
                         ? isset($pairedDisputes[$event['reference']])
@@ -774,7 +911,7 @@ class FinancePayPalSettlementOrders
 
                 if ($refund && $event['fee'] !== null && bccomp($event['fee'], '0', self::SCALE) !== 0) {
                     $feeField = bccomp($event['fee'], '0', self::SCALE) > 0 ? 'fee_return' : 'refund_fee';
-                    $this->addMoney($money, $review, $feeField, $event['currency'] === 'USD' ? $event['fee'] : null,
+                    $this->addMoney($money, $review, $feeField, $event['currency'] === 'USD' ? $event['fee'] : $refundFeeUsd,
                         $feeField === 'fee_return' ? 1 : -1);
                 }
             }
@@ -896,7 +1033,7 @@ class FinancePayPalSettlementOrders
         }
         $refund = $refunds->first();
         if ($refund['amount'] === null || bccomp(bcadd($refund['amount'], $root['amount'], self::SCALE), '0', self::SCALE) !== 0
-            || bccomp($refund['fee'] ?? '0', '0', self::SCALE) !== 0) {
+            || bccomp($refund['fee'] ?? '0', '0', self::SCALE) < 0) {
             return null;
         }
 
@@ -911,14 +1048,15 @@ class FinancePayPalSettlementOrders
             return null;
         }
         $release = $releases->first();
-        $shortfall = bcadd($refund['amount'], $release['amount'], self::SCALE);
-        if (bccomp($shortfall, '0', self::SCALE) >= 0) {
+        $refundNet = bcadd($refund['amount'], $refund['fee'] ?? '0', self::SCALE);
+        $shortfall = bcadd($refundNet, $release['amount'], self::SCALE);
+        if (bccomp($shortfall, '0', self::SCALE) > 0) {
             return null;
         }
 
         $probe = $usedExchanges;
         if ($this->exchange($release, $release['amount'], $conversions, $probe, true) !== null
-            || $this->exchange($refund, $refund['amount'], $conversions, $probe) !== null) {
+            || $this->exchange($refund, $refundNet, $conversions, $probe) !== null) {
             return null;
         }
         $hold = $holds->get($release['reference']);
@@ -932,10 +1070,14 @@ class FinancePayPalSettlementOrders
         }
 
         $usedExchanges = $probe;
+        $shortfallUsd ??= bcsub('0', $manualTopUp, self::SCALE);
+        $refundRate = bcdiv(bcadd($holdUsd, $shortfallUsd, self::SCALE), $refundNet, self::SCALE);
+        $feeUsd = bcmul($refund['fee'] ?? '0', $refundRate, self::SCALE);
 
         return [
-            'amounts' => [$hold['id'] => $holdUsd, $release['id'] => bcsub('0', $holdUsd, self::SCALE), $refund['id'] => $holdUsd],
-            'shortfall_usd' => $shortfallUsd ?? bcsub('0', $manualTopUp, self::SCALE),
+            'amounts' => [$hold['id'] => $holdUsd, $release['id'] => bcsub('0', $holdUsd, self::SCALE), $refund['id'] => bcsub($holdUsd, $feeUsd, self::SCALE)],
+            'fees' => [$refund['id'] => $feeUsd],
+            'shortfall_usd' => $shortfallUsd,
         ];
     }
 
@@ -1106,7 +1248,7 @@ class FinancePayPalSettlementOrders
 
     private function paymentStatus(array $payment): string
     {
-        $status = [$payment['success'] ? '已付款' : ($payment['failed'] ? '付款失败' : '付款待确认')];
+        $status = [$this->postingStatus((bool) $payment['success'], (bool) $payment['failed'])];
         if ($payment['refund_state'] !== 'none') {
             $status[] = $payment['refund_state'] === 'full' ? '全额退款' : '部分退款';
         }
@@ -1122,6 +1264,11 @@ class FinancePayPalSettlementOrders
         }
 
         return implode(' · ', $status);
+    }
+
+    private function postingStatus(bool $success, bool $failed): string
+    {
+        return $success ? '已付款' : ($failed ? '付款失败' : '付款待确认');
     }
 
     private function detail(array $event, string $zone, ?string $usd = null, string $source = '接口原始流水'): array
