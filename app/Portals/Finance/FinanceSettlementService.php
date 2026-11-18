@@ -674,6 +674,9 @@ class FinanceSettlementService
                     }
                 }
                 if ($conflux) {
+                    if (filled($saved['_ye_settlement_type'] ?? null)) {
+                        $row['card_layout']['ledger_settlement_type'] = $saved['_ye_settlement_type'];
+                    }
                     $layout = $conflux->storeFees($row['card_layout'], $ledger->get($record->id, collect()), $manual);
                     $builder = trim((string) ($group->site_builder ?? ''));
                     $platform = strcasecmp($builder, 'xshoppy') === 0 ? '索引' : ($builder === '' ? null : $builder);
@@ -684,7 +687,7 @@ class FinanceSettlementService
                     }
                     $row['ledger_wallet'] = $wallet;
                     $row['card_layout'] = array_replace($layout, $conflux->exceptionColumns($layout, $entries, $row['ledger_wallet']));
-                    $row['ledger_matched'] = $ledger->has($record->id);
+                    $row['ledger_matched'] = $ledger->has($record->id) || filled($saved['_ye_settlement_type'] ?? null);
                     $row['card_layout']['ledger_status'] = $row['ledger_matched'] ? '已匹配账单' : '待匹配账单';
                 }
             }
