@@ -853,20 +853,23 @@ class FinanceSettlementService
             return $department;
         }
 
-        $region = '';
-        foreach (explode('、', $department) as $name) {
-            // Existing departments use city prefixes. New cities can use their full city name.
-            if (! preg_match('/^(厦门|深圳|郑州|西安)|^(\p{Han}{2,8}?)市(?=$|[\s·—-]|运营|[一二三四五六七八九十0-9]+部)/u', trim($name), $matches)) {
-                return '';
+        // City names may appear anywhere in a department or its hierarchy label.
+        $cities = '厦门|深圳|郑州|西安|北京|上海|天津|重庆|杭州|广州|南京|苏州|成都|武汉|长沙|合肥|福州|泉州|漳州|宁波|温州|金华|义乌|绍兴|嘉兴|无锡|常州|南通|东莞|佛山|珠海|中山|惠州|济南|青岛|烟台|大连|沈阳|长春|哈尔滨|石家庄|太原|南昌|南宁|海口|贵阳|昆明|兰州|西宁|银川|乌鲁木齐|呼和浩特|拉萨|香港|澳门|台北';
+        preg_match_all('/'.$cities.'/u', $department, $matches);
+        $regions = $matches[0];
+        // Retain support for other explicitly named cities, such as 杭州市运营部.
+        foreach (preg_split('/[、,，\/／>＞|｜·—\s()（）]+/u', $department, -1, PREG_SPLIT_NO_EMPTY) as $name) {
+            if (preg_match('/'.$cities.'/u', $name)) {
+                continue;
             }
-            $matchedRegion = $matches[2] ?? $matches[1];
-            if ($region !== '' && $region !== $matchedRegion) {
-                return '';
+            $name = preg_replace('/^(?:(?:订阅|独立站|跨境|电商|运营|业务|事业部|总部)[-：:]*)+/u', '', $name);
+            if (preg_match('/^(\p{Han}{2,8}?)市(?=$|运营|团队|分公司|分部|[一二三四五六七八九十0-9]+部)/u', $name, $city)) {
+                $regions[] = $city[1];
             }
-            $region = $matchedRegion;
         }
+        $regions = array_values(array_unique($regions));
 
-        return $region;
+        return count($regions) === 1 ? $regions[0] : '';
     }
 
     private function brushOrderOwner(?object $group): ?string
