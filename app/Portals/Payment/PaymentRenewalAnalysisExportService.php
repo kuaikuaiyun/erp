@@ -28,7 +28,7 @@ class PaymentRenewalAnalysisExportService
         $rowNumber = 2;
         foreach ($data['rows'] as $row) {
             $values = [
-                (string)$row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['bill_number'],
+                (string)$row['erp_order_id'], $row['initial_order'], implode("\n", $row['transaction_ids']), implode("\n", $row['bill_numbers']),
                 $row['buyer_email'], $row['store_name'], $methodName($row['payment_method']),
                 $pt('purchase_'.$row['purchase_type']), $row['paid_at'], $row['raw_amount'], $row['refund_count'], $row['raw_refund_amount'],
             ];
@@ -49,6 +49,10 @@ class PaymentRenewalAnalysisExportService
             $sheet->getStyle('L2:L'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00');
         }
         foreach (range('A','L') as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+        foreach (['C','D'] as $column) {
+            $sheet->getColumnDimension($column)->setAutoSize(false)->setWidth(32);
+            if ($rowNumber > 2) $sheet->getStyle($column.'2:'.$column.($rowNumber-1))->getAlignment()->setWrapText(true);
+        }
 
         $scope = $book->createSheet();
         $scope->setTitle($dt('export_scope_sheet'));
@@ -184,14 +188,14 @@ class PaymentRenewalAnalysisExportService
             $detail->fromArray([[
                 $row['stage_number'] === 0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
                 $channels[$row['initial_channel']], $channels[$row['actual_channel']],
-                $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'], $row['bill_number'], $row['buyer_email'],
+                $row['initial_order'], $row['renewal_order'], $row['store_name'], implode("\n", $row['transaction_ids']), implode("\n", $row['bill_numbers']), $row['buyer_email'],
                 $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'], $eventTimes($row['refund_details']),
                 $row['dispute_count'], $row['dispute_amount'], $eventTimes($row['dispute_details']),
                 $row['payment_method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
                 $data[$row['stage_number'] === 0 ? 'initial_calculation' : 'calculation']['timezone'],
             ]], null, 'A'.$rowNumber);
-            foreach (['H'=>'bill_number','I'=>'buyer_email'] as $column=>$field) {
-                $detail->setCellValueExplicit($column.$rowNumber, $row[$field], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            foreach (['G'=>'transaction_ids','H'=>'bill_numbers','I'=>'buyer_email'] as $column=>$field) {
+                $detail->setCellValueExplicit($column.$rowNumber, is_array($row[$field]) ? implode("\n", $row[$field]) : $row[$field], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             }
             $rowNumber++;
         }
@@ -201,6 +205,10 @@ class PaymentRenewalAnalysisExportService
             $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF287FBD');
             $sheet->freezePane('A'.($headerRow+1));
             foreach (range('A',$sheet->getHighestColumn()) as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+        foreach (['G','H'] as $column) {
+            $detail->getColumnDimension($column)->setAutoSize(false)->setWidth(32);
+            if ($rowNumber > 2) $detail->getStyle($column.'2:'.$column.($rowNumber-1))->getAlignment()->setWrapText(true);
         }
         foreach (['N','Q'] as $column) {
             $detail->getColumnDimension($column)->setAutoSize(false)->setWidth(24);

@@ -1298,3 +1298,6 @@
 
 .payment-renewal-detail-table { min-width: 1540px; }
 .payment-renewal-detail-email { min-width: 190px; max-width: 240px; overflow-wrap: anywhere; }
+
+.payment-renewal-detail-identifier { display: block; overflow-wrap: anywhere; line-height: 1.6; }
+.payment-renewal-detail-identifier + .payment-renewal-detail-identifier { margin-top: 5px; padding-top: 5px; border-top: 1px dashed #d8e3ed; }

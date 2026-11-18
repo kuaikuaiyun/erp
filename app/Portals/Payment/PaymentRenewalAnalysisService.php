@@ -7,6 +7,7 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsPayPalTransaction;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -98,7 +99,7 @@ class PaymentRenewalAnalysisService
         $keyword = trim((string) ($detail['detail_keyword'] ?? ''));
         $rows = array_values(array_filter($scopeRows, static function (array $row) use ($detail, $keyword): bool {
             if ($keyword !== '' && !str_contains(mb_strtolower(implode(' ', [
-                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'], $row['bill_number'], $row['buyer_email'],
+                $row['erp_order_id'], $row['initial_order'], implode(' ', $row['transaction_ids']), $row['store_name'], implode(' ', $row['bill_numbers']), $row['buyer_email'],
             ])), mb_strtolower($keyword))) return false;
             if (($detail['detail_store'] ?? '') !== '' && $row['store_name'] !== $detail['detail_store']) return false;
             if (($detail['detail_method'] ?? '') !== '' && $row['payment_method'] !== $detail['detail_method']) return false;
@@ -197,7 +198,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v18:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v19:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -281,8 +282,9 @@ class PaymentRenewalAnalysisService
         }
         $orderIds = collect($current)->flatten(1)->map(fn (array $entry): int => (int) $entry['order']->id)->all();
         $orderIds = array_values(array_unique(array_merge($orderIds, $nonSubscription->modelKeys())));
+        $identifiers = $this->paymentIdentifiers($orderIds);
         $risk = $this->riskMaps($orderIds, ['risk_date_mode' => 'payment', 'timezone' => $timezone], $from, $to);
-        $nonSubscriptionRows = $nonSubscription->map(fn (LogisticsOrder $order): array => $this->paymentRow($order, $order, 0, $timezone, $risk, 'non_subscription'))->values()->all();
+        $nonSubscriptionRows = $nonSubscription->map(fn (LogisticsOrder $order): array => $this->paymentRow($order, $order, 0, $timezone, $risk, 'non_subscription', $identifiers[(int)$order->id] ?? []))->values()->all();
         $numbers = [0 => true];
         foreach (array_keys($current) as $number) $numbers[$number] = true;
         foreach (array_keys($previousOrders) as $number) $numbers[$number + 1] = true;
@@ -301,7 +303,7 @@ class PaymentRenewalAnalysisService
                 $paidFrom = $paidFrom === null ? $paid : min($paidFrom, $paid);
                 $paidTo = $paidTo === null ? $paid : max($paidTo, $paid);
                 if ($number > 0) $renewalOrderIds[] = (int) $order->id;
-                $stageRows[] = $this->paymentRow($order, $initial, $number, $timezone, $risk);
+                $stageRows[] = $this->paymentRow($order, $initial, $number, $timezone, $risk, 'subscription', $identifiers[(int)$order->id] ?? []);
             }
             // Stage numbers still use chain history. The rate compares period order
             // counts directly and does not intersect the two periods' customers.
@@ -332,7 +334,7 @@ class PaymentRenewalAnalysisService
         $stores = $candidates->pluck('store_name')->merge($initials->pluck('store_name'))->push($filters['store'] ?? '')->filter()->unique()->sort()->values()->all();
         // Output rows now contain scalars; release historical model graphs before other queries.
         unset($candidates, $initials, $initialMap, $renewals, $batch, $entries, $current,
-            $entry, $order, $initial, $referenceMap, $stageRows);
+            $entry, $order, $initial, $referenceMap, $stageRows, $identifiers);
         return [
             'calculation' => [
                 'period_from' => $localFrom->format('Y-m-d H:i:s'), 'period_to' => $localTo->format('Y-m-d H:i:s'),
@@ -353,7 +355,7 @@ class PaymentRenewalAnalysisService
     }
 
     /** @return array<string,mixed> */
-    private function paymentRow(LogisticsOrder $order, LogisticsOrder $initial, int $number, string $timezone, array $risk, string $purchaseType = 'subscription'): array
+    private function paymentRow(LogisticsOrder $order, LogisticsOrder $initial, int $number, string $timezone, array $risk, string $purchaseType = 'subscription', array $identifiers = []): array
     {
         $refund = $risk['refunds'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
         $dispute = $risk['disputes'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
@@ -367,10 +369,41 @@ class PaymentRenewalAnalysisService
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
             'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
             'bill_number' => (string) $order->bill_number, 'buyer_email' => (string) $order->buyer_email,
+            'transaction_ids' => $this->uniqueIdentifiers([(string)$order->transaction_id, ...($identifiers['transactions'] ?? [])]),
+            'bill_numbers' => $this->uniqueIdentifiers([(string)$order->bill_number, ...($identifiers['bills'] ?? [])]),
             'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
             'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
             'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
         ];
+    }
+
+    /** Load only explicit associations, in batches, without changing the selected order population. */
+    private function paymentIdentifiers(array $orderIds): array
+    {
+        $result = [];
+        foreach (array_chunk($orderIds, 500) as $chunk) {
+            $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $chunk)
+                ->orderByRaw('CASE WHEN reference_type = ? THEN 0 ELSE 1 END', [LogisticsOrderPaymentReference::TYPE_PRIMARY])
+                ->orderBy('id')->get(['logistics_order_id','reference_number']);
+            foreach ($references as $reference) {
+                $result[(int)$reference->logistics_order_id]['bills'][] = (string)$reference->reference_number;
+            }
+            $payments = LogisticsPayPalTransaction::query()->whereIn('logistics_order_id', $chunk)
+                ->where('event_code', 'like', 'T00%')->whereIn('status', ['S','V'])
+                ->orderBy('id')->get(['logistics_order_id','payment_transaction_id']);
+            foreach ($payments as $payment) {
+                $result[(int)$payment->logistics_order_id]['transactions'][] = (string)$payment->payment_transaction_id;
+            }
+        }
+        return $result;
+    }
+
+    private function uniqueIdentifiers(array $values): array
+    {
+        return array_values(array_unique(array_filter(
+            array_map(static fn ($value): string => trim((string)$value), $values),
+            static fn (string $value): bool => $value !== '',
+        )));
     }
 
     /** @return Collection<int,LogisticsOrder> */

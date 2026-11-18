@@ -28,10 +28,10 @@ class PaymentRenewalAnalysisTest extends TestCase
         });
         Schema::create('logistics_paypal_transactions', function (Blueprint $table): void {
             $table->increments('id'); $table->unsignedInteger('logistics_order_id')->nullable();
-            $table->string('event_code')->nullable(); $table->string('status')->nullable();
+            $table->string('event_code')->nullable(); $table->string('status')->nullable(); $table->string('payment_transaction_id')->nullable();
         });
         Schema::create('logistics_order_payment_references', function (Blueprint $table): void {
-            $table->increments('id'); $table->unsignedInteger('logistics_order_id'); $table->string('reference_type'); $table->string('gateway_order_id')->nullable();
+            $table->increments('id'); $table->unsignedInteger('logistics_order_id'); $table->string('reference_type'); $table->string('gateway_order_id')->nullable(); $table->string('reference_number')->nullable();
         });
         foreach (['logistics_paypal_refunds', 'logistics_paypal_disputes', 'logistics_credit_card_refunds'] as $name) {
             Schema::create($name, function (Blueprint $table): void {
@@ -235,6 +235,77 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertEquals(0,$stage['dispute_amount']);
         self::assertEquals(0,$stage['dispute_count']);
         self::assertSame($total,$service->exportData($filters)['initial_refunds']['total']);
+    }
+
+    public function test_multiple_payment_identifiers_are_displayed_searched_and_exported_without_changing_totals(): void
+    {
+        $filters=$this->filters();
+        $service=app(PaymentRenewalAnalysisService::class);
+        $before=$service->dashboard($filters);
+        DB::table('logistics_orders')->where('id',5)->update(['bill_number'=>'00001234567890123456789']);
+        foreach ([
+            ['primary','00001234567890123456789','NOT-A-TRANSACTION'],
+            ['upsell','ADDON-BILL-5','NOT-A-TRANSACTION'],
+            ['upsell','ADDON-BILL-5',null],
+            ['upsell','<script>alert(1)</script>',null],
+            ['upsell','   ',null],
+        ] as [$type,$bill,$gateway]) DB::table('logistics_order_payment_references')->insert([
+            'logistics_order_id'=>5,'reference_type'=>$type,'reference_number'=>$bill,'gateway_order_id'=>$gateway,
+        ]);
+        DB::table('logistics_order_payment_references')->insert(['logistics_order_id'=>6,'reference_type'=>'upsell','reference_number'=>'OTHER-ORDER-BILL']);
+        foreach ([
+            ['TX-5','T0006','S',5], ['EXTRA-TRANSACTION-5','T0006','S',5],
+            ['EXTRA-TRANSACTION-5','T0006','V',5], ['FAILED-TRANSACTION','T0006','D',5],
+            ['REFUND-TRANSACTION','T1107','S',5], ['UNLINKED-TRANSACTION','T0006','S',null],
+        ] as [$id,$event,$status,$order]) DB::table('logistics_paypal_transactions')->insert([
+            'logistics_order_id'=>$order,'payment_transaction_id'=>$id,'event_code'=>$event,'status'=>$status,
+        ]);
+        \Illuminate\Support\Facades\Cache::flush();
+        $after=$service->dashboard($filters);
+        self::assertSame($before['summary'],$after['summary']);
+        self::assertSame($before['stages'],$after['stages']);
+        self::assertSame($before['initial_refunds_by_type'],$after['initial_refunds_by_type']);
+        $detail=$service->initialOrderDetails($filters,$this->detailFilters(['detail_group'=>'method_pp']));
+        self::assertCount(1,$detail['rows']);
+        $row=$detail['rows'][0];
+        self::assertSame(['TX-5','EXTRA-TRANSACTION-5'],$row['transaction_ids']);
+        self::assertSame(['00001234567890123456789','ADDON-BILL-5','<script>alert(1)</script>'],$row['bill_numbers']);
+        self::assertSame('TX-5',$row['transaction_id']);
+        self::assertSame('00001234567890123456789',$row['bill_number']);
+        foreach (['EXTRA-TRANSACTION-5','ADDON-BILL-5'] as $search) {
+            $filtered=$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>$search]));
+            self::assertSame([5],array_column($filtered['rows'],'erp_order_id'));
+        }
+        foreach (['NOT-A-TRANSACTION','FAILED-TRANSACTION','REFUND-TRANSACTION','UNLINKED-TRANSACTION'] as $search) {
+            self::assertSame(0,$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>$search]))['pagination']['total']);
+        }
+        $html=view('portals.payment.renewal-order-details',compact('detail'))->render();
+        self::assertStringContainsString('EXTRA-TRANSACTION-5',$html);
+        self::assertStringContainsString('ADDON-BILL-5',$html);
+        self::assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;',$html);
+        self::assertStringNotContainsString('<script>alert(1)</script>',$html);
+        foreach (['modal','main'] as $kind) {
+            $export=app(PaymentRenewalAnalysisExportService::class);
+            $response=$kind==='main' ? $export->download($filters) : $export->downloadOrderDetails($filters,$this->detailFilters(['detail_keyword'=>'ADDON-BILL-5']));
+            ob_start();$response->sendContent();$bytes=ob_get_clean();
+            $path=tempnam(sys_get_temp_dir(),'renewal-multiple-');
+            try {
+                file_put_contents($path,$bytes);$book=IOFactory::load($path);
+                $sheet=$book->getSheet($kind==='main' ? 3 : 0);
+                $target=null;
+                for($r=2;$r<=$sheet->getHighestRow();$r++) {
+                    if((string)$sheet->getCell(($kind==='main'?'E':'A').$r)->getValue()==='5') {$target=$r;break;}
+                }
+                self::assertNotNull($target);
+                $txn=$kind==='main'?'G':'C';$bill=$kind==='main'?'H':'D';
+                self::assertSame("TX-5\nEXTRA-TRANSACTION-5",$sheet->getCell($txn.$target)->getValue());
+                self::assertSame("00001234567890123456789\nADDON-BILL-5\n<script>alert(1)</script>",$sheet->getCell($bill.$target)->getValue());
+                self::assertSame('s',$sheet->getCell($bill.$target)->getDataType());
+                self::assertTrue($sheet->getStyle($bill.$target)->getAlignment()->getWrapText());
+                if($kind==='modal') self::assertSame(2,$sheet->getHighestRow());
+                $book->disconnectWorksheets();
+            } finally {unlink($path);}
+        }
     }
 
     private function detailFilters(array $overrides = []): array

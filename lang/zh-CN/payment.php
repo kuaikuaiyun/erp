@@ -272,7 +272,7 @@ return array_replace_recursive($translations, [
         'title'=>'首购订单核查', 'close'=>'关闭', 'loading'=>'正在加载订单明细…',
         'error'=>'订单明细加载失败，请重试。', 'retry'=>'重试', 'empty'=>'当前筛选条件下没有订单。',
         'all'=>'全部', 'unknown'=>'未识别', 'query'=>'查询', 'reset'=>'重置筛选',
-        'keyword_hint'=>'搜索 ERP ID、订单号、交易号、账单号、邮箱或店铺',
+        'keyword_hint'=>'搜索 ERP ID、订单号、任一付款流水/账单号、邮箱或店铺',
         'scope'=>'原始范围：:method / :type / :kind；付款日期 :from ～ :to（:timezone）；店铺：:store。',
         'scope_note'=>'弹窗筛选仅在原始范围内缩小；退款按关联订单统计，不限制退款发生日期，同一订单多次退款只算一个退款订单。',
         'generated'=>'数据生成：:time；与页面相同统计缓存，若期间数据更新，请刷新页面后核对。',
