@@ -665,6 +665,7 @@ class OperationAiProductLibraryController extends Controller
             (string) $video->path,
             (string) $video->file_name,
             $video->mime_type,
+            $request,
         );
     }
 
