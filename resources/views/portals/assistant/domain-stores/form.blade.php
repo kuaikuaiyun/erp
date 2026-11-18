@@ -201,6 +201,13 @@
                 </div>
             </div>
 
+            <div class="box box-solid assistant-form-section"><div class="box-body row assistant-form-grid">                        <div class="form-group assistant-owner-form-field @error('user_name') has-error @enderror" data-store-required-field="user_name" data-store-required-message="请填写或选择使用人">
+                            <label for="user_name">使用人 <span class="text-red">*</span></label>
+                            <input id="user_name" name="user_name" type="text" class="form-control" value="{{ old('user_name', $store->user_name) }}" maxlength="100" placeholder="可自由填写使用人">
+                            <span class="help-block">仅用于记录和核对，不参与权限或订单归属计算。</span>
+                            @error('user_name')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+</div></div>
             <div class="box box-solid assistant-form-section assistant-form-system-section">
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.system_payment') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
@@ -553,18 +560,18 @@
                 <div class="box box-solid assistant-form-section assistant-form-owner-section">
                     <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.operation_owner') }}</h3></div>
                     <div class="box-body row assistant-form-grid">
-                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror">
-                            <label for="operation_department_id">{{ $t('fields.owner_operation_department') }}</label>
+                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror" data-store-required-field="operation_department_id" data-store-required-message="请填写或选择运营部门">
+                            <label for="operation_department_id">{{ $t('fields.owner_operation_department') }} <span class="text-red">*</span></label>
                             <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
-                                <option value="">{{ $t('form.owner_operation_department_placeholder') }}</option>
+                                <option value="">请选择运营部门</option>
                                 @foreach ($ownerOperationDepartments as $department)
                                     <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ str_repeat('-- ', (int) ($department->tree_depth ?? 0)) }}{{ $department->name }}</option>
                                 @endforeach
                             </select>
                             @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror">
-                            <label for="owner_user_id">{{ $t('fields.owner_user') }}</label>
+                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror" data-store-required-field="owner_user_id" data-store-required-message="请填写或选择店铺归属人">
+                            <label for="owner_user_id">{{ $t('fields.owner_user') }} <span class="text-red">*</span></label>
                             <select id="owner_user_id" name="owner_user_id" class="form-control" data-owner-user @disabled($ownerOperationDepartmentId === null && empty($currentOwnerOutsideScope))>
                                 <option value="">{{ $t('form.owner_user_placeholder') }}</option>
                                 @if ($ownerOperationDepartmentId !== null)
@@ -586,12 +593,6 @@
                             <input id="owner_effective_at" name="owner_effective_at" type="datetime-local" class="form-control" value="{{ $ownerEffectiveAt ?? old('owner_effective_at') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
                             <span class="help-block">留空即以当前上海时间生效；仅会影响该时间起的新订单归属。</span>
                             @error('owner_effective_at')<span class="help-block">{{ $message }}</span>@enderror
-                        </div>
-                        <div class="form-group assistant-owner-form-field @error('user_name') has-error @enderror">
-                            <label for="user_name">使用人</label>
-                            <input id="user_name" name="user_name" type="text" class="form-control" value="{{ old('user_name', $store->user_name) }}" maxlength="100" placeholder="可自由填写使用人">
-                            <span class="help-block">仅用于记录和核对，不参与权限或订单归属计算。</span>
-                            @error('user_name')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         <div class="assistant-owner-form-note">
                             <i class="fa fa-info-circle" aria-hidden="true"></i>
@@ -637,7 +638,7 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261116-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261118-1"></script>
     <script>
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);
