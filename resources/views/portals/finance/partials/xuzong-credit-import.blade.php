@@ -13,6 +13,7 @@
             <input type="file" id="xuzong-import-file" name="file" accept=".xlsx,.csv,.tsv,.txt" multiple required>
         </label>
         <p class="settlement-note" style="padding:0 20px">支持订单、退款明细和逐笔结算账单。退款明细按平台订单号匹配，仅计入成功退款。文件时间默认按 UTC（+0）读取。</p>
+        <p class="settlement-note" style="padding:0 20px">金额变动可填写完整资料，也可只填订单号和变动金额；正数累加、负数冲减，空白不变，同订单多行逐条累计。仅填订单号时须能唯一匹配已有订单。重复导入金额变动会再次累计。</p>
         <p id="xuzong-credit-import-progress" style="padding:0 20px;white-space:pre-line;overflow-wrap:anywhere" role="status" aria-live="polite"></p>
         <footer>
             <button type="button" class="btn btn-default" data-xuzong-import-close>取消</button>

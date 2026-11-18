@@ -145,7 +145,7 @@ class FinanceCreditSettlementLayout
             '拒付预警ethoca' => $values['ethoca_fee'], 'ethoca预警退款' => $values['ethoca_refund'] ?? ''];
     }
 
-    public static function values(string $channel, array $row, array $payload, array $saved, string $sourceTimezone): array
+    public static function values(string $channel, array $row, array $payload, array $saved, string $sourceTimezone, bool $summaryOnly = false): array
     {
         $aliases = [
             'website_name' => $payload['商户名称'] ?? $payload['店铺名称'] ?? null,
@@ -160,7 +160,13 @@ class FinanceCreditSettlementLayout
             'settlement' => null,
         ];
         $values = [];
-        foreach (self::columns($channel) as $field => $label) {
+        $columns = self::columns($channel);
+        if ($summaryOnly && $channel === 'ye') {
+            $columns = array_intersect_key($columns, FinanceSettlementService::MONEY + FinanceSettlementService::CONDITION_FIELDS
+                + array_fill_keys(['settlement', 'source_settlement_usd', 'settlement_currency', 'website_name',
+                    'store_platform', 'project', 'nbc_fee', 'store_fee', 'payable'], true));
+        }
+        foreach ($columns as $field => $label) {
             if ($channel === 'ye' && $field === 'website_name') {
                 $values[$field] = self::confluxWebsiteName($payload, $saved);
                 continue;
@@ -190,7 +196,9 @@ class FinanceCreditSettlementLayout
                 : (filled($raw) ? $raw : $fallback);
         }
 
-        $values['completed_at'] = self::reportTimestamp($values['completed_at'] ?? null, $sourceTimezone, $row['timezone']);
+        if (! $summaryOnly) {
+            $values['completed_at'] = self::reportTimestamp($values['completed_at'] ?? null, $sourceTimezone, $row['timezone']);
+        }
         if ($channel === 'worldpay') {
             $values = FinanceWorldpayImport::settlementValues($values, $payload, $saved, $row['success'], $row['failed']);
             $values['worldpay_exception'] = isset($payload['_worldpay_events']) ? '是' : '否';

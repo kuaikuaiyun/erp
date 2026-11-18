@@ -461,6 +461,12 @@ class FinanceWorkbookService
                 if ($fillMissing && ! $created) {
                     $model = FinanceRecord::query()->whereKey($model->id)->lockForUpdate()->firstOrFail();
                     $payload = $model->payload;
+                    if (in_array($record['dataset'], FinanceCatalog::XUZONG_REPORT_IMPORTS, true)) {
+                        $payload = $this->addXuzongAmounts($payload, $record['payload']);
+                        if ($payload !== $model->payload) {
+                            app(FinanceAccountingService::class)->guardUnlocked($model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                        }
+                    }
                     foreach ($record['payload'] as $key => $value) {
                         if (blank($payload[$key] ?? null) && filled($value)) {
                             $payload[$key] = $value;
@@ -513,18 +519,24 @@ class FinanceWorkbookService
                         }
                     }
                     if (isset($inserts[$fingerprint])) {
-                        $inserts[$fingerprint]['payload'] = $this->addCreditCosts($inserts[$fingerprint]['payload'], $record['payload']);
+                        if ($record['dataset'] !== FinanceLogisticsCreditOrders::IMPORTED_DATASET) {
+                            $inserts[$fingerprint]['payload'] = $this->addCreditCosts($inserts[$fingerprint]['payload'], $record['payload']);
+                        }
                     } else {
                         $inserts[$fingerprint] = [...$record, 'created_at' => $now, 'updated_at' => $now];
                     }
                     continue;
                 }
-                $payload = $this->addCreditCosts($model->payload, $record['payload']);
+                $payload = $record['dataset'] === FinanceLogisticsCreditOrders::IMPORTED_DATASET
+                    ? $model->payload
+                    : $this->addCreditCosts($model->payload, $record['payload']);
                 if ($payload !== $model->payload) {
                     app(FinanceAccountingService::class)->guardUnlocked($model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
                 }
                 if ($fillMissing) {
-                    foreach (array_diff_key($record['payload'], array_flip(FinanceXuzongCostEligibility::FIELDS)) as $key => $value) {
+                    $excluded = $record['dataset'] === FinanceLogisticsCreditOrders::IMPORTED_DATASET
+                        ? self::XUZONG_ADDITIVE_FIELDS : FinanceXuzongCostEligibility::FIELDS;
+                    foreach (array_diff_key($record['payload'], array_flip($excluded)) as $key => $value) {
                         if (blank($payload[$key] ?? null) && filled($value)) {
                             $payload[$key] = $value;
                         }
@@ -549,6 +561,123 @@ class FinanceWorkbookService
 
             return count($inserts) + $updated;
         });
+    }
+
+    public const XUZONG_ADDITIVE_FIELDS = [
+        '退款金额', '退款费用', '拒付金额', '拒付费用', 'ethoca预警退款', '拒付预警ethoca',
+        '拒付RDR金额', 'RDR费用', 'CDRN费用', '拒付返还', '争议处理费', '保证金返还',
+        '应结算', '物流-元', '采购成本-元',
+    ];
+
+    public function importXuzongAdjustments(array $rows, ?string $account): int
+    {
+        $groups = [];
+        $numbers = app(FinanceSettlementService::class);
+        foreach ($rows as $line => $row) {
+            $identifiers = [];
+            foreach (['平台订单号', '交易单号', '交易流水号', '商户订单号'] as $field) {
+                $value = trim((string) ($row[$field] ?? ''));
+                if ($value !== '') {
+                    $identifiers[$field] = $value;
+                }
+            }
+            if ($identifiers === []) {
+                throw ValidationException::withMessages(['file' => '第'.$line.'行请填写订单号。']);
+            }
+            $primary = array_key_first($identifiers);
+            $key = json_encode([$primary, $identifiers[$primary]], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $group = $groups[$key] ?? ['line' => $line, 'row' => $identifiers];
+            foreach ($identifiers as $field => $value) {
+                if (isset($group['row'][$field]) && $group['row'][$field] !== $value) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行同一订单的订单号信息不一致。']);
+                }
+                $group['row'][$field] = $value;
+            }
+            $hasAmount = false;
+            foreach (self::XUZONG_ADDITIVE_FIELDS as $field) {
+                if (blank($row[$field] ?? null)) {
+                    continue;
+                }
+                $hasAmount = true;
+                $value = $numbers->number($row[$field]);
+                if ($value === null) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行「'.$field.'」金额无效。']);
+                }
+                $group['row'][$field] = bcadd($group['row'][$field] ?? '0', $value, 8);
+            }
+            if (! $hasAmount) {
+                throw ValidationException::withMessages(['file' => '第'.$line.'行请填写需要变动的金额。']);
+            }
+            $groups[$key] = $group;
+        }
+        $rows = [];
+        foreach ($groups as $group) {
+            $rows[$group['line']] = $group['row'];
+        }
+        return $this->database()->transaction(function () use ($rows, $account): int {
+            $saved = 0;
+            foreach ($rows as $line => $row) {
+                $identifiers = array_filter(array_map(fn ($field) => trim((string) ($row[$field] ?? '')),
+                    ['平台订单号', '交易单号', '交易流水号', '商户订单号']));
+                if ($identifiers === []) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行请填写订单号。']);
+                }
+                $query = FinanceRecord::query()->whereIn('dataset', [
+                    ...FinanceCatalog::XUZONG_REPORT_IMPORTS, FinanceLogisticsCreditOrders::IMPORTED_DATASET,
+                    ...array_keys(FinanceCatalog::XUZONG_REPORT_IMPORTS),
+                ])->when($account !== null, fn ($query) => $query->where('account', $account));
+                foreach (['平台订单号', '交易单号', '交易流水号', '商户订单号'] as $field) {
+                    $value = trim((string) ($row[$field] ?? ''));
+                    if ($value !== '') {
+                        $query->where(function ($query) use ($field, $value): void {
+                            $query->where('payload->'.$field, $value);
+                            if (in_array($field, ['平台订单号', '交易单号', '交易流水号'], true)) {
+                                $query->orWhere('reference', $value);
+                            }
+                        });
+                    }
+                }
+                $matches = $query->lockForUpdate()->get();
+                if ($matches->count() !== 1) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行无法匹配唯一的已导入订单，请核对账户和订单号。']);
+                }
+                $hasAmount = false;
+                foreach (self::XUZONG_ADDITIVE_FIELDS as $field) {
+                    if (blank($row[$field] ?? null)) {
+                        continue;
+                    }
+                    $hasAmount = true;
+                    if (app(FinanceSettlementService::class)->number($row[$field]) === null) {
+                        throw ValidationException::withMessages(['file' => '第'.$line.'行「'.$field.'」金额无效。']);
+                    }
+                }
+                if (! $hasAmount) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行请填写需要变动的金额。']);
+                }
+                $model = $matches->sole();
+                app(FinanceAccountingService::class)->guardUnlocked($model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                $model->update(['payload' => $this->addXuzongAmounts($model->payload, $row)]);
+                $saved++;
+            }
+
+            return $saved;
+        });
+    }
+
+    private function addXuzongAmounts(array $payload, array $incoming): array
+    {
+        $numbers = app(FinanceSettlementService::class);
+        foreach (self::XUZONG_ADDITIVE_FIELDS as $field) {
+            $value = $numbers->number($incoming[$field] ?? null);
+            if ($value === null) {
+                continue;
+            }
+            $prior = $numbers->number($payload['_edited_report_fields'][$field] ?? $payload[$field] ?? null) ?? '0';
+            $payload[$field] = bcadd($prior, $value, 8);
+            unset($payload['_edited_report_fields'][$field]);
+        }
+
+        return $payload;
     }
 
     private function addCreditCosts(array $payload, array $incoming): array

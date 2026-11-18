@@ -9,7 +9,7 @@
     @endswitch
     </span>
     @if(filled($status['updated_at'] ?? null))
-        快照时间 {{ \Illuminate\Support\Carbon::parse($status['updated_at'])->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}（北京时间）
+        数据时间 {{ \Illuminate\Support\Carbon::parse($status['updated_at'])->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}（北京时间）
     @endif
 </p>
 @if($watch)

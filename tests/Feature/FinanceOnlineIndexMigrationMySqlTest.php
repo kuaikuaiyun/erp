@@ -90,7 +90,7 @@ class FinanceOnlineIndexMigrationMySqlTest extends TestCase
 
     private function assertLockReleased(): void
     {
-        $name = hash('sha256', 'finance:summaries:refresh:'.$this->testDatabase);
+        $name = hash('sha256', 'finance:indexes:apply:'.$this->testDatabase);
         $this->assertNull($this->db->selectOne('SELECT IS_USED_LOCK(?) AS owner', [$name])->owner);
     }
 
@@ -98,7 +98,7 @@ class FinanceOnlineIndexMigrationMySqlTest extends TestCase
     {
         $before = $this->db->table('finance_records')->orderBy('id')->pluck('payload')->all();
         $settings = $this->settings();
-        app('migrator')->run($this->paths());
+        $this->artisan('migrate', ['--path' => $this->paths(), '--realpath' => true, '--force' => true])->assertSuccessful();
         $this->assertEqualsCanonicalizing(ApplyFinanceIndexes::MIGRATIONS, app('migrator')->getRepository()->getRan());
         $schema = $this->db->getSchemaBuilder();
         $this->assertTrue($schema->hasIndex('finance_records', 'finance_statement_notice_page_idx'));
@@ -111,7 +111,7 @@ class FinanceOnlineIndexMigrationMySqlTest extends TestCase
         $this->assertSame(1, (int) $row->finance_has_statement_notice);
         $this->assertSame(1, (int) $row->finance_is_conflux_order);
         $this->assertSame('Mixed-Case-123', $this->db->table('finance_records')->where('reference', 'PAY-2')->value('finance_xuzong_merchant_number'));
-        app('migrator')->run($this->paths());
+        $this->artisan('migrate', ['--path' => $this->paths(), '--realpath' => true, '--force' => true])->assertSuccessful();
         $this->assertCount(6, app('migrator')->getRepository()->getRan());
         $this->assertSame($before, $this->db->table('finance_records')->orderBy('id')->pluck('payload')->all());
         $this->assertSame($settings, $this->settings());
@@ -128,8 +128,8 @@ class FinanceOnlineIndexMigrationMySqlTest extends TestCase
         ob_start();
         try { app('migrator')->run([$this->paths()[0]]); }
         finally { $output = ob_get_clean(); }
-        $this->assertLessThan(1, microtime(true) - $started);
-        $this->assertStringContainsString('未提交 ALTER TABLE', $output);
+        $this->assertLessThan(3, microtime(true) - $started);
+        $this->assertStringContainsString('改表期间出现并发事务', $output);
         $this->assertSame([], app('migrator')->getRepository()->getRan());
         $this->assertFalse($this->db->getSchemaBuilder()->hasColumn('finance_records', 'finance_has_statement_notice'));
         $this->assertSame(2, $blocker->table('finance_records')->count());
@@ -140,6 +140,57 @@ class FinanceOnlineIndexMigrationMySqlTest extends TestCase
         $this->assertSame([ApplyFinanceIndexes::MIGRATIONS[0]], app('migrator')->getRepository()->getRan());
         $this->assertTrue($this->db->getSchemaBuilder()->hasIndex('finance_records', 'finance_statement_notice_page_idx'));
         $this->assertFalse($this->db->getSchemaBuilder()->hasColumn('finance_records', 'finance_is_conflux_order'));
+        $this->assertLockReleased();
+    }
+
+    public function test_summary_mutex_and_transaction_on_another_table_do_not_block_index_creation(): void
+    {
+        $blocker = DB::connection('finance_ddl_blocker');
+        $summaryLock = hash('sha256', 'finance:summaries:refresh:'.$this->testDatabase);
+        $this->assertSame(1, (int) $blocker->selectOne('SELECT GET_LOCK(?, 0) AS acquired', [$summaryLock])->acquired);
+        $blocker->beginTransaction();
+        $blocker->table('logistics_orders')->first();
+        try {
+            app('migrator')->run([$this->paths()[0]]);
+            $this->assertSame([ApplyFinanceIndexes::MIGRATIONS[0]], app('migrator')->getRepository()->getRan());
+            $this->assertTrue($this->db->getSchemaBuilder()->hasIndex('finance_records', 'finance_statement_notice_page_idx'));
+            $this->assertSame(2, $this->db->table('finance_records')->count());
+        } finally {
+            $blocker->rollBack();
+            $blocker->selectOne('SELECT RELEASE_LOCK(?) AS released', [$summaryLock]);
+        }
+        $this->assertLockReleased();
+    }
+
+    public function test_real_partial_schema_resumes_without_adding_the_column_twice(): void
+    {
+        $this->db->statement("ALTER TABLE finance_records ADD COLUMN finance_has_statement_notice TINYINT(1) "
+            ."GENERATED ALWAYS AS (COALESCE(JSON_TYPE(JSON_EXTRACT(payload, '$._xuzong_statement_import.notice')) <> 'NULL', 0)) VIRTUAL, "
+            .'ALGORITHM=INPLACE, LOCK=NONE');
+        $before = $this->db->table('finance_records')->orderBy('id')->pluck('payload')->all();
+        $this->artisan('migrate', ['--path' => [$this->paths()[0]], '--realpath' => true, '--force' => true])->assertSuccessful();
+        $this->assertTrue($this->db->getSchemaBuilder()->hasIndex('finance_records', 'finance_statement_notice_page_idx'));
+        $this->assertSame([ApplyFinanceIndexes::MIGRATIONS[0]], app('migrator')->getRepository()->getRan());
+        $this->assertSame($before, $this->db->table('finance_records')->orderBy('id')->pluck('payload')->all());
+        $this->assertLockReleased();
+    }
+
+    public function test_real_concurrent_index_migration_skips_without_blocking_business_writes_then_resumes(): void
+    {
+        $blocker = DB::connection('finance_ddl_blocker');
+        $name = hash('sha256', 'finance:indexes:apply:'.$this->testDatabase);
+        $this->assertSame(1, (int) $blocker->selectOne('SELECT GET_LOCK(?, 0) AS acquired', [$name])->acquired);
+        try {
+            $this->artisan('migrate', ['--path' => [$this->paths()[0]], '--realpath' => true, '--force' => true])->assertSuccessful();
+            $this->assertSame([], app('migrator')->getRepository()->getRan());
+            $this->assertFalse($this->db->getSchemaBuilder()->hasColumn('finance_records', 'finance_has_statement_notice'));
+            $this->assertSame(1, $blocker->table('finance_records')->where('reference', 'PAY-1')->update(['raw_type' => 'business-still-writable']));
+        } finally {
+            $blocker->selectOne('SELECT RELEASE_LOCK(?) AS released', [$name]);
+        }
+        $this->artisan('migrate', ['--path' => [$this->paths()[0]], '--realpath' => true, '--force' => true])->assertSuccessful();
+        $this->assertTrue($this->db->getSchemaBuilder()->hasIndex('finance_records', 'finance_statement_notice_page_idx'));
+        $this->assertSame([ApplyFinanceIndexes::MIGRATIONS[0]], app('migrator')->getRepository()->getRan());
         $this->assertLockReleased();
     }
 

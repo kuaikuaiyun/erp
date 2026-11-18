@@ -52,6 +52,7 @@ class LogisticsOrderController extends Controller
         'asbaght.com',
         'soremina.com',
         'kyfren.com',
+        'yeeshone.com',
     ];
 
     public function __construct(
