@@ -8,6 +8,7 @@ use App\Models\Department;
 use App\Models\InternalMessage;
 use App\Models\InternalMessageRecipient;
 use App\Models\OperationTaskAsset;
+use App\Models\OperationTaskDailyPlan;
 use App\Models\OperationTaskRecap;
 use App\Models\OperationTaskRectification;
 use App\Models\OperationTaskReview;
@@ -452,7 +453,8 @@ class OperationTaskReviewController extends Controller
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
         abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
-        $menu = $context['portal']->menus()->where('code', 'review_center_operation_tasks')->where('is_enabled', true)->first();
+        $menuCode = $request->routeIs('review-center.operation-tasks.dashboard') ? 'review_center_operation_task_dashboard' : 'review_center_operation_tasks';
+        $menu = $context['portal']->menus()->where('code', $menuCode)->where('is_enabled', true)->first();
         abort_unless($menu && app(\App\Portal\Services\PortalMenuAuthorizationService::class)->canAccess($context['user'], $menu), 403);
         abort_unless($this->canReview($context['user']), 403);
         app()->setLocale('zh-CN');
@@ -655,7 +657,153 @@ class OperationTaskReviewController extends Controller
 
     private function visibleSecondaryDepartments(AdminUser $user, Portal $portal): Collection
     {
-        return Department::business()->whereNotNull('parent_id')->whereIn('id', $this->visibleDepartmentIds($user))->with('parent:id,name')->orderBy('sort')->orderBy('name')->get();
+        return Department::business()->whereNotNull('parent_id')->whereIn('id', $this->visibleDepartmentIds($user))->with(['parent:id,name', 'departmentMembers:id,name,username'])->orderBy('sort')->orderBy('name')->get();
+    }
+
+    public function dashboard(Request $request): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->canManage($context['user']), 403);
+        [$from, $to, $rangeStart, $rangeUntil] = $this->submissionRange($request, 'from', 'to', true);
+        $withinRange = static fn ($date): bool => $date !== null
+            && (! $rangeStart || $date->gte($rangeStart)) && (! $rangeUntil || $date->lt($rangeUntil));
+        $applyRange = static function ($query, string $column) use ($rangeStart, $rangeUntil): void {
+            if ($rangeStart) $query->where($column, '>=', $rangeStart);
+            if ($rangeUntil) $query->where($column, '<', $rangeUntil);
+        };
+        $allTeams = $this->visibleSecondaryDepartments($context['user'], $context['portal']);
+        $selectedTeamId = (int) $request->input('department', 0);
+        if ($selectedTeamId && ! $allTeams->contains('id', $selectedTeamId)) $selectedTeamId = 0;
+        $teams = $selectedTeamId ? $allTeams->where('id', $selectedTeamId)->values() : $allTeams;
+        $filters = ['department' => $selectedTeamId ?: '', 'owner' => trim((string) $request->input('person_search', $request->input('owner', '')))];
+        if ($request->filled('team_search')) $teams = $teams->filter(fn ($team) => str_contains(mb_strtolower($team->name), mb_strtolower(trim((string) $request->input('team_search')))));
+        $teamIds = $teams->modelKeys();
+        $memberIds = $teams->flatMap(fn (Department $team) => $team->departmentMembers->pluck('id'))->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $recapQuery = OperationTaskRecap::query()->whereIn('department_id', $this->visibleDepartmentIds($context['user']))->where(function ($query) use ($teamIds, $memberIds): void {
+            $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
+        });
+        $applyRange($recapQuery, 'submitted_at');
+        $recaps = $recapQuery->get();
+        // Include historical activity for its own column, never as a new product.
+        $tasks = OperationTestTask::query()->whereIn('department_id', $this->visibleDepartmentIds($context['user']))->with(['assets' => fn ($query) => $applyRange($query, 'created_at')])
+            ->where(function ($query) use ($teamIds, $memberIds): void {
+                $query->whereIn('department_id', $teamIds)->orWhereIn('owner_user_id', $memberIds);
+            })->where(function ($query) use ($applyRange, $rangeStart, $rangeUntil): void {
+                if (! $rangeStart && ! $rangeUntil) return;
+                $query->where(fn ($created) => $applyRange($created, 'created_at'))
+                    ->orWhere(fn ($submitted) => $applyRange($submitted, 'submitted_at'))
+                    ->orWhereHas('assets', fn ($assets) => $applyRange($assets, 'created_at'));
+            })->get();
+        if ($filters['owner'] !== '') {
+            $selectedUsers = AdminUser::query()->whereIn('id', $memberIds)->get()
+                ->filter(fn ($member) => str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])))->pluck('id');
+            $recaps = $recaps->whereIn('user_id', $selectedUsers);
+            $tasks = $tasks->whereIn('owner_user_id', $selectedUsers);
+        }
+        // Blank bounds mean all dates. Derive calendar bounds from real activity rather than year 2000.
+        $activityDates = $recaps->pluck('submitted_at')->merge($tasks->pluck('created_at'))
+            ->merge($tasks->flatMap(fn ($task) => $task->assets->pluck('created_at')))
+            ->filter()->map(fn ($date) => $date->copy()->timezone('Asia/Shanghai')->toDateString());
+        $calendarFrom = $from ?: ($activityDates->min() ?: now('Asia/Shanghai')->toDateString());
+        $calendarTo = $to ?: max($calendarFrom, $activityDates->max() ?: now('Asia/Shanghai')->toDateString());
+        $days = collect();
+        for ($day = Carbon::parse($calendarFrom, 'Asia/Shanghai'); $day->lte(Carbon::parse($calendarTo, 'Asia/Shanghai')); $day->addDay()) $days->push($day->toDateString());
+        $plans = OperationTaskDailyPlan::query()->whereIn('department_id', $this->visibleDepartmentIds($context['user']))->whereBetween('plan_date', [$calendarFrom, $calendarTo])
+            ->where(function ($query) use ($teamIds, $memberIds): void {
+                $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
+            })->get()->keyBy(fn ($plan) => $plan->user_id.'|'.$plan->plan_date->format('Y-m-d'));
+        $teamRows = $teams->map(function (Department $team) use ($recaps, $tasks, $plans, $days, $filters, $withinRange) {
+            $members = collect($team->departmentMembers->all())->filter(fn (AdminUser $member) => $filters['owner'] === '' || str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])));
+            $rows = $members->map(function (AdminUser $member) use ($recaps, $tasks, $plans, $days, $withinRange) {
+                $memberRecaps = $recaps->where('user_id', $member->id);
+                $memberTasks = $tasks->where('owner_user_id', $member->id);
+                $newTasks = $memberTasks->filter(fn ($task) => $withinRange($task->created_at));
+                $historical = static fn ($asset, $task): bool => $asset->created_at->copy()->timezone('Asia/Shanghai')->toDateString()
+                    > $task->created_at->copy()->timezone('Asia/Shanghai')->toDateString();
+                $initialCount = (int) $memberTasks->sum(fn ($task) => $task->assets->reject(fn ($asset) => $historical($asset, $task))->count());
+                $supplementCount = (int) $memberTasks->sum(fn ($task) => $task->assets->filter(fn ($asset) => $historical($asset, $task))->count());
+                $progresses = $days->map(fn (string $date) => $this->dailyPlanProgress($plans->get($member->id.'|'.$date), $memberTasks, $date));
+                $recapRecords = $memberRecaps->sortByDesc('submitted_at')->map(fn ($recap) => $this->recapPayload($recap))->values()->all();
+                $bySubmissionDay = $memberRecaps->groupBy(fn ($recap) => $recap->submitted_at?->copy()->timezone('Asia/Shanghai')->toDateString());
+                $recapDayRecords = $days->sortDesc()->flatMap(function (string $date) use ($bySubmissionDay) {
+                    $records = $bySubmissionDay->get($date, collect());
+                    return $records->isEmpty() ? [['date' => $date, 'missing' => true]]
+                        : $records->sortByDesc('submitted_at')->map(fn ($recap) => $this->recapPayload($recap))->values()->all();
+                })->values()->all();
+                $taskRecords = $memberTasks->sortByDesc('created_at')->map(fn ($task) => [
+                    'id' => $task->id, 'task_no' => $task->task_no, 'objective' => $task->selection_objective,
+                    'page_type' => $task->page_type, 'submitted_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->submitted_at),
+                    'new_task' => $withinRange($task->created_at),
+                    'supplement_count' => $task->assets->filter(fn ($asset) => $historical($asset, $task))->count(),
+                    'asset_count' => $task->assets->count(), 'url' => route('review-center.operation-tasks.tests.show', $task),
+                ])->values()->all();
+                return (object) [
+                    'id' => (int) $member->id, 'name' => $this->userName($member), 'position' => $this->departmentPositionLabel($member->pivot?->position),
+                    'recap_days' => $bySubmissionDay->keys()->filter()->count(), 'expected_days' => $days->count(),
+                    'revenue' => (float) $memberRecaps->sum('total_revenue_usd'), 'spend' => (float) $memberRecaps->sum('total_spend_usd'), 'orders' => (int) $memberRecaps->sum('total_orders'),
+                    'single_count' => $newTasks->where('page_type', 'single')->count(),
+                    'single_assets' => (int) $memberTasks->where('page_type', 'single')->sum(fn ($task) => $task->assets->count()),
+                    'category_count' => $newTasks->where('page_type', 'category')->count(),
+                    'category_assets' => (int) $memberTasks->where('page_type', 'category')->sum(fn ($task) => $task->assets->count()),
+                    'initial_assets' => $initialCount, 'supplement_assets' => $supplementCount,
+                    'planned_days' => $progresses->where('has_plan', true)->count(), 'completed_days' => $progresses->where('complete', true)->count(),
+                    'missing_plan_days' => $progresses->where('has_plan', false)->count(), 'daily_progress' => $progresses->values()->all(),
+                    'task_records' => $taskRecords, 'recap_records' => $recapRecords, 'recap_day_records' => $recapDayRecords,
+                ];
+            })->values();
+            return (object) ['id' => (int) $team->id, 'name' => $team->name, 'parent_name' => $team->parent?->name, 'members' => $rows, 'member_count' => $rows->count()];
+        })->values();
+        return view('portals.review-center.operation-tasks.dashboard', [
+            ...$context, 'from' => $from, 'to' => $to, 'recaps' => $recaps, 'tasks' => $tasks, 'teamRows' => $teamRows,
+            'searchTeamOptions' => $allTeams->pluck('name'),
+            'searchPersonOptions' => $allTeams->flatMap(fn ($team) => $team->departmentMembers)->map(fn ($member) => $this->userName($member))->unique(),
+            'operators' => $teamRows->flatMap(fn ($team) => $team->members)->pluck('name')->unique()->sort()->values(),
+            'teams' => $allTeams, 'visibleMemberCount' => $teamRows->sum(fn ($team) => $team->member_count),
+            'dashboardFilters' => $filters, 'canManagePlans' => true,
+        ]);
+    }
+
+    private function departmentPositionLabel(?string $position): string
+    {
+        return match ($position) {
+            Department::POSITION_MANAGER => __('review_center.dashboard_copy.text_001'), Department::POSITION_DEPUTY => __('review_center.dashboard_copy.text_002'), default => __('review_center.dashboard_copy.text_003'),
+        };
+    }
+
+    private function dailyPlanProgress(?OperationTaskDailyPlan $plan, Collection $memberTasks, string $date): array
+    {
+        if (! $plan) return ['date' => $date, 'has_plan' => false, 'complete' => false, 'label' => __('review_center.dashboard_copy.text_004'), 'single_target' => 0, 'category_target' => 0, 'single_done' => 0, 'category_done' => 0];
+        $dayTasks = $memberTasks->filter(function (OperationTestTask $task) use ($date): bool {
+            $submitted = optional($task->created_at)->timezone('Asia/Shanghai')->toDateString() === $date;
+            return $submitted;
+        });
+        $qualified = function (string $pageType, int $minimum) use ($dayTasks, $date): int {
+            return $dayTasks->where('page_type', $pageType)->filter(fn (OperationTestTask $task) => $task->assets->filter(fn (OperationTaskAsset $asset) => optional($asset->created_at)->timezone('Asia/Shanghai')->toDateString() === $date)->count() >= $minimum)->count();
+        };
+        $singleDone = $qualified('single', 1); $categoryDone = $qualified('category', 1);
+        $complete = $singleDone >= (int) $plan->single_target && $categoryDone >= (int) $plan->category_target;
+        return ['date' => $date, 'has_plan' => true, 'complete' => $complete, 'label' => $plan->plan_mode === 'single' ? __('review_center.dashboard_copy.text_005') : ($plan->plan_mode === 'category' ? __('review_center.dashboard_copy.text_006') : __('review_center.dashboard_copy.text_007')), 'single_target' => (int) $plan->single_target, 'category_target' => (int) $plan->category_target, 'single_done' => $singleDone, 'category_done' => $categoryDone, 'note' => $plan->plan_note];
+    }
+
+    private function recapPayload(OperationTaskRecap $recap): array
+    {
+        $answers = collect($recap->question_answers ?? [])->map(fn (array $answer) => ['title' => (string) ($answer['title'] ?? __('review_center.dashboard_copy.text_008')), 'answer' => (string) ($answer['answer'] ?? '—')])->values()->all();
+        if ($answers === []) $answers = collect([
+            ['title' => __('review_center.dashboard_copy.text_009'), 'answer' => $recap->finding_answer], ['title' => __('review_center.dashboard_copy.text_010'), 'answer' => $recap->action_answer],
+            ['title' => __('review_center.dashboard_copy.text_011'), 'answer' => $recap->advertising_plan], ['title' => __('review_center.dashboard_copy.text_012'), 'answer' => $recap->support_needed],
+        ])->filter(fn (array $item) => filled($item['answer']))->values()->all();
+        return [
+            'submitted_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at),
+            'date' => $recap->data_date->format('Y-m-d'), 'version' => (int) $recap->version, 'updated_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->updated_at),
+            'workflow_status' => (string) ($recap->workflow_status ?? 'approved'),
+            'leader_review_status' => (string) ($recap->leader_review_status ?? 'approved'),
+            'department_review_status' => (string) ($recap->department_review_status ?? 'approved'),
+            'rejection_opinion' => $recap->last_rejection_opinion,
+            'revenue' => (float) $recap->total_revenue_usd, 'spend' => (float) $recap->total_spend_usd, 'orders' => (int) $recap->total_orders,
+            'media' => collect($recap->media_items ?? [])->map(fn (array $item) => ['name' => (string) ($item['name'] ?? '—'), 'spend' => (float) ($item['spend'] ?? 0), 'orders' => (int) ($item['orders'] ?? 0), 'revenue' => (float) ($item['revenue'] ?? 0), 'roi' => isset($item['roi']) ? (float) $item['roi'] : null])->values()->all(),
+            'answers' => $answers,
+        ];
     }
 
     private function submissionRange(Request $request, string $fromName = 'from', string $toName = 'to', bool $defaultWeek = false): array
