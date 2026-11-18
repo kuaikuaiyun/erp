@@ -969,6 +969,11 @@ class FinanceController extends Controller
 
     public function importXuzongCreditDetails(Request $request): Response
     {
+        set_time_limit(180);
+        $memoryLimit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($memoryLimit > 0 && $memoryLimit < 384 * 1024 ** 2) {
+            ini_set('memory_limit', '384M');
+        }
         $context = $this->context($request, true);
         if ($context instanceof Response) {
             return $context;
@@ -2809,25 +2814,32 @@ class FinanceController extends Controller
         unset($data['files']);
         $data['card_channel'] = 'ye';
         $conflux = app(FinanceConfluxSettlement::class);
+        $adjustments = app(\App\Portals\Finance\FinanceYeBillAdjustments::class);
         $batch = [];
         foreach ($files as $index => $file) {
             try {
                 $statement = null;
+                $adjustment = null;
                 if ($conflux->isStatement($file)) {
                     if (empty($data['settlement_type'])) {
                         throw ValidationException::withMessages(['file' => '请选择账单的结算类型：正常结算或停结算。']);
                     }
                     $statement = $conflux->read($file, $data['settlement_type']);
+                } else {
+                    $adjustment = $adjustments->read($file);
+                    if ($adjustment !== null && empty($data['settlement_type'])) {
+                        throw ValidationException::withMessages(['file' => '请选择账单的结算类型：正常结算或停结算。']);
+                    }
                 }
-                $batch[] = ['index' => $index, 'file' => $file, 'statement' => $statement];
+                $batch[] = ['index' => $index, 'file' => $file, 'statement' => $statement, 'adjustment' => $adjustment];
             } catch (ValidationException|\PhpOffice\PhpSpreadsheet\Exception $e) {
                 $message = $e instanceof ValidationException ? $e->getMessage() : '无法识别文件。';
                 throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$message]);
             }
         }
         // All orders are available before looking up statement references, regardless of selection order.
-        usort($batch, fn ($left, $right) => ($left['statement'] !== null) <=> ($right['statement'] !== null));
-        $counts = $this->workbooks->database()->transaction(function () use ($batch, $data, $actor, $conflux): array {
+        usort($batch, fn ($left, $right) => ($left['statement'] !== null || $left['adjustment'] !== null) <=> ($right['statement'] !== null || $right['adjustment'] !== null));
+        $counts = $this->workbooks->database()->transaction(function () use ($batch, $data, $actor, $conflux, $adjustments): array {
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->where('card_platform', 'ye')
                 ->whereNotNull('card_merchant_key')->orderBy('id')->lockForUpdate()->get();
             $statementAccounts = [];
@@ -2848,9 +2860,12 @@ class FinanceController extends Controller
 
             $counts = ['orders' => 0, 'duplicates' => 0, 'statements' => 0, 'entries' => 0,
                 'repeated_statements' => 0, 'statements_with_unmatched' => 0];
-            foreach ($batch as ['index' => $index, 'file' => $file, 'statement' => $statement]) {
+            foreach ($batch as ['index' => $index, 'file' => $file, 'statement' => $statement, 'adjustment' => $adjustment]) {
                 try {
-                    if ($statement) {
+                    if ($adjustment !== null) {
+                        $counts['entries'] += $adjustments->import($adjustment, $data['settlement_type'], $actor);
+                        $counts['statements']++;
+                    } elseif ($statement) {
                         $account = $statementAccounts[$index];
                         $result = $conflux->import($statement, $account->activity_account, $actor);
                         $counts['statements']++;
@@ -2889,7 +2904,7 @@ class FinanceController extends Controller
 
         $message = '新增订单 '.$counts['orders'].' 笔，跳过重复订单 '.$counts['duplicates'].' 笔。';
         if ($counts['statements']) {
-            $message .= '识别结算报表 '.$counts['statements'].' 份，新增账单流水 '.$counts['entries'].' 条，跳过重复报表 '.$counts['repeated_statements'].' 份。';
+            $message .= '识别结算报表 '.$counts['statements'].' 份，累计账单明细 '.$counts['entries'].' 条。';
         }
         if ($counts['statements_with_unmatched']) {
             $message .= '其中 '.$counts['statements_with_unmatched'].' 份报表仍有待匹配交易，后续可补导订单。';

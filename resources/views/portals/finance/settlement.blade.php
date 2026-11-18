@@ -294,7 +294,7 @@
                 <option value="{{ $type }}" @selected(old('settlement_type') === $type)>{{ $type }}</option>
             @endforeach
         </select>
-        <p class="help-block">正常结算和停结算账单请分批上传。</p>
+        <p class="help-block">正常结算和停结算账单请分批上传。金额变动可只填订单号和需要变动的字段，同订单金额合并后累计，负数冲减、空白不变，时间沿用订单时间；重复导入会再次累计。</p>
     </div>
     <div id="credit-import-timezone-field"><label for="credit-import-timezone">文件时区</label><select id="credit-import-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => old('timezone', $cardChannel === 'ye' ? 'Asia/Shanghai' : $filters['timezone'])])</select></div>
 </div>

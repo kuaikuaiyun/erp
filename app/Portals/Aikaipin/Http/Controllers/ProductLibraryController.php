@@ -113,7 +113,14 @@ class ProductLibraryController extends Controller
             ->where('client_fingerprint', $data['client_fingerprint'])
             ->first();
 
+        $completedUploadIsMissing = $session !== null
+            && $session->status === AikaipinProductUploadSession::STATUS_COMPLETED
+            && (! $session->assembled_path
+                || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)
+                || (int) Storage::disk(AikaipinProductLibraryStorageService::DISK)->size($session->assembled_path) !== (int) $session->total_size);
+
         if ($session !== null && ($session->status === AikaipinProductUploadSession::STATUS_CONSUMED
+            || $completedUploadIsMissing
             || $session->expires_at?->isPast()
             || (int) $session->total_size !== (int) $data['total_size']
             || (int) $session->total_chunks !== (int) $data['total_chunks']
@@ -441,6 +448,9 @@ class ProductLibraryController extends Controller
                 return $product;
             });
         } catch (ValidationException $exception) {
+            foreach (array_unique($createdPaths) as $path) {
+                $this->storage->deleteFile($path);
+            }
             throw $exception;
         } catch (\Throwable $exception) {
             foreach ($createdPaths as $path) {
@@ -902,6 +912,9 @@ class ProductLibraryController extends Controller
 
             });
         } catch (ValidationException $exception) {
+            foreach (array_unique($createdPaths) as $path) {
+                $this->storage->deleteFile($path);
+            }
             throw $exception;
         } catch (\Throwable $exception) {
             foreach ($createdPaths as $path) {
@@ -914,7 +927,14 @@ class ProductLibraryController extends Controller
             ], 500);
         }
 
+        $createdPathLookup = array_fill_keys(array_unique($createdPaths), true);
         foreach (array_unique($obsoletePaths) as $path) {
+            // A replacement must never delete the file that was just stored.
+            // The UUID directory below makes a collision practically
+            // impossible; this guard also protects data created by older code.
+            if (isset($createdPathLookup[$path])) {
+                continue;
+            }
             try {
                 $this->storage->deleteFile($path);
             } catch (\Throwable $exception) {
@@ -2266,9 +2286,37 @@ class ProductLibraryController extends Controller
                 ++$fileNumber;
                 $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
                 $fileName = $this->referenceProductCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($type).'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
-                $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
+                // Keep the public/display filename stable while placing every
+                // upload in its own storage directory. When an editor deletes
+                // a video and uploads another one in the same save operation,
+                // the old-file cleanup can therefore never remove the new
+                // physical file by mistake.
+                $path = $file->storeAs(
+                    'aikaipin/reference-videos/'.$product->getKey().'/'.Str::uuid(),
+                    $fileName,
+                    'local',
+                );
+                if (! is_string($path) || ! Storage::disk('local')->exists($path)) {
+                    throw ValidationException::withMessages([
+                        'material_videos' => '素材视频保存失败，请重新选择视频后再试。',
+                    ]);
+                }
                 $createdPaths[] = $path;
-                $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
+                $storedSize = (int) Storage::disk('local')->size($path);
+                if ($storedSize < 1 || ($file->getSize() > 0 && $storedSize !== (int) $file->getSize())) {
+                    Storage::disk('local')->delete($path);
+                    throw ValidationException::withMessages([
+                        'material_videos' => '素材视频上传不完整，请重新选择视频后再试。',
+                    ]);
+                }
+
+                $normalization = $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
+                if ($normalization === BrowserCompatibleVideoService::FAILED) {
+                    Storage::disk('local')->delete($path);
+                    throw ValidationException::withMessages([
+                        'material_videos' => '该视频使用 H.265/HEVC 编码，服务器转为网页可播放格式失败。旧视频未删除，请稍后重试或上传 H.264 编码的 MP4 视频。',
+                    ]);
+                }
                 OperationAiProductReferenceVideo::query()->create([
                     'aikaipin_product_id' => $product->getKey(), 'type' => $type,
                     'sequence' => $sequence, 'file_date' => $date->toDateString(), 'disk' => 'local',

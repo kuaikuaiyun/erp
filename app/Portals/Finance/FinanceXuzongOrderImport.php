@@ -90,7 +90,7 @@ class FinanceXuzongOrderImport
         $headers = [...self::STATEMENT_COLUMNS, ...array_keys(self::STATEMENT_AMOUNTS)];
         $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
             ? $this->csvBatches($file, $headers)
-            : [$this->workbooks->read($file, $headers)];
+            : [$this->workbooks->read($file, $headers, maxRows: 20000)];
         $groups = [];
         $total = 0;
         $numbers = app(FinanceSettlementService::class);
@@ -98,20 +98,28 @@ class FinanceXuzongOrderImport
             foreach ($rows as $line => $row) {
                 $reference = trim((string) ($row['平台订单号'] ?? ''));
                 $merchant = trim((string) ($row['商户订单号'] ?? ''));
-                $rate = $numbers->number($row['适用汇率'] ?? null);
+                $rate = blank($row['适用汇率'] ?? null) ? '1' : $numbers->number($row['适用汇率']);
                 $net = $numbers->number($row['折算后结算贡献'] ?? null);
                 $time = trim((string) ($row['结算时间'] ?? ''));
-                if ($reference === '' || $merchant === '' || ($row['结算币种'] ?? '') !== 'USD'
-                    || $rate === null || bccomp($rate, '0', 8) <= 0 || $net === null
-                    || ! preg_match('/^\d{4}-(?:0[1-9]|1[0-2])-\d{2}\s\d{2}:\d{2}:\d{2}$/D', $time)) {
+                if (is_numeric($time) && (float) $time > 0 && (float) $time < 2958466) {
+                    $time = gmdate('Y-m-d H:i:s', \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp((float) $time, 'UTC'));
+                }
+                if ($reference === '' || (filled($row['结算币种'] ?? null) && $row['结算币种'] !== 'USD')
+                    || $rate === null || bccomp($rate, '0', 8) <= 0
+                    || (filled($row['折算后结算贡献'] ?? null) && $net === null)
+                    || ($time !== '' && ! preg_match('/^\d{4}-(?:0[1-9]|1[0-2])-\d{2}\s\d{2}:\d{2}:\d{2}$/D', $time))) {
                     throw ValidationException::withMessages(['file' => '第'.$line.'行的订单号、结算币种、汇率、净额或结算时间无效。']);
                 }
                 $group = $groups[$reference] ?? ['merchant' => $merchant, 'events' => [], 'line' => $line];
-                if ($group['merchant'] !== $merchant) {
+                if ($group['merchant'] !== '' && $merchant !== '' && $group['merchant'] !== $merchant) {
                     throw ValidationException::withMessages(['file' => '第'.$line.'行同一平台订单号对应多个商户订单号。']);
                 }
+                $group['merchant'] = $group['merchant'] ?: $merchant;
                 $amounts = [];
                 foreach (self::STATEMENT_AMOUNTS as $source => $field) {
+                    if (blank($row[$source] ?? null)) {
+                        continue;
+                    }
                     $value = $numbers->number($row[$source] ?? null);
                     if ($value === null) {
                         throw ValidationException::withMessages(['file' => '第'.$line.'行的「'.$source.'」金额无效。']);
@@ -119,6 +127,16 @@ class FinanceXuzongOrderImport
                     $sign = in_array($field, ['结算金额', '保证金返还', '拒付返还'], true) ? '1' : '-1';
                     $value = bcmul(bcmul($value, $rate, 12), $sign, 8);
                     $amounts[$field] = $value;
+                }
+                if ($amounts === [] && $net === null) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行请填写需要变动的金额。']);
+                }
+                if ($net === null) {
+                    $net = '0';
+                    foreach ($amounts as $field => $amount) {
+                        $net = in_array($field, ['结算金额', '保证金返还', '拒付返还'], true)
+                            ? bcadd($net, $amount, 8) : bcsub($net, $amount, 8);
+                    }
                 }
                 $amounts['应结算'] = bcadd($net, '0', 2);
                 $event = ['time' => $time, 'amounts' => $amounts];
@@ -142,7 +160,7 @@ class FinanceXuzongOrderImport
                     ->lockForUpdate()->get()->groupBy('reference');
                 foreach ($batch as $reference => $group) {
                     $matches = $orders->get($reference, collect())->filter(fn ($order) =>
-                        trim((string) ($order->payload['商户订单号'] ?? '')) === $group['merchant']);
+                        $group['merchant'] === '' || trim((string) ($order->payload['商户订单号'] ?? '')) === $group['merchant']);
                     if ($matches->count() !== 1) {
                         throw ValidationException::withMessages(['file' => '第'.$group['line'].'行无法匹配唯一订单，请先导入对应账户的逐笔订单。']);
                     }
@@ -156,6 +174,12 @@ class FinanceXuzongOrderImport
                     $events = $existing['events'] ?? [];
                     $legacy = $this->legacyStatement($payload, $existing);
                     $incoming = $group['events'];
+                    foreach ($incoming as &$event) {
+                        if ($event['time'] === '') {
+                            $event['time'] = $order->occurred_at->utc()->format('Y-m-d H:i:s');
+                        }
+                    }
+                    unset($event);
                     $restoringLegacy = $legacy !== null && $legacy['sha256'] === $hash;
                     if (! $restoringLegacy && $legacy !== null
                         && array_intersect($legacy['times'], array_column($incoming, 'time')) !== []) {
@@ -490,7 +514,7 @@ class FinanceXuzongOrderImport
             'Source（域名）', '发行国', '邮箱', '退款', ...FinanceXuzongCreditMatches::EXCHANGE_HEADERS];
         $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
             ? $this->csvBatches($file, $headers)
-            : array_chunk($this->workbooks->read($file, $headers, $sheet, $headers), 300, true);
+            : array_chunk($this->workbooks->read($file, $headers, $sheet, $headers, maxRows: 20000), 300, true);
 
         $total = $matched = $saved = 0;
         foreach ($batches as $rows) {
@@ -549,6 +573,9 @@ class FinanceXuzongOrderImport
                 }
                 if (filled($row['完成时间'] ?? null)) {
                     try {
+                        if (is_numeric($row['完成时间']) && (float) $row['完成时间'] > 0 && (float) $row['完成时间'] < 2958466) {
+                            $row['完成时间'] = gmdate('Y-m-d H:i:s', \PhpOffice\PhpSpreadsheet\Shared\Date::excelToTimestamp((float) $row['完成时间'], 'UTC'));
+                        }
                         $row['完成时间'] = \Carbon\CarbonImmutable::parse($row['完成时间'], $timezone)->utc()->toDateTimeString();
                     } catch (\Exception) {
                         throw ValidationException::withMessages(['file' => '第'.$line.'行完成时间无效。']);

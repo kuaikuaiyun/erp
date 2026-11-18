@@ -264,43 +264,21 @@ class FinanceConfluxSettlement
             }
             $batch = ['payment_account_id' => $account->id, 'platform' => 'ye', 'settlement_date' => $report['date']];
             $query = $db->table(self::TABLE)->where($batch);
+            // Bills accumulate on every import, including repeated files and identical rows.
+            $report['hash'] = hash('sha256', $report['hash'].(string) \Illuminate\Support\Str::uuid());
             $sameReport = (clone $query)->where('report_hash', $report['hash']);
-            $alreadyImported = $sameReport->exists();
-            if ($alreadyImported && isset($report['settlement_type'])) {
-                $summary = (clone $sameReport)->where('kind', 'summary')->value('payload');
-                $previousType = json_decode($summary ?? '{}', true, 512, JSON_THROW_ON_ERROR)['_settlement_type'] ?? null;
-                if ($previousType !== null && $previousType !== $report['settlement_type']) {
-                    throw ValidationException::withMessages(['file' => '这份账单已按「'.$previousType.'」导入，请核对所选结算类型。']);
-                }
-            }
-            if (! $alreadyImported) {
-                $existingSummaries = (clone $query)->where('kind', 'summary')->pluck('payload')
-                    ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR));
-                $incomingSummaries = collect($report['entries'])->where('kind', 'summary')->pluck('payload')
-                    ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR));
-                $descriptors = static fn (Collection $summaries) => $summaries
-                    ->map(fn ($summary) => mb_strtolower(trim((string) ($summary['账单描述符'] ?? ''))));
-                if ($existingSummaries->isNotEmpty()) {
-                    $existing = $descriptors($existingSummaries);
-                    $incoming = $descriptors($incomingSummaries);
-                    if ($existing->contains('') || $incoming->isEmpty() || $incoming->contains('')
-                        || $existing->intersect($incoming)->isNotEmpty()) {
-                        throw ValidationException::withMessages(['file' => '此账户在该结算日期已有内容不同的报表，请核对账单描述符及原账单后再导入。']);
+            app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
+            $stamp = now();
+            foreach (array_chunk($report['entries'], 80) as $entries) {
+                $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
+                    if (isset($report['settlement_type'])) {
+                        $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
+                        $payload['_settlement_type'] = $report['settlement_type'];
+                        $entry['payload'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
                     }
-                }
-                app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
-                $stamp = now();
-                foreach (array_chunk($report['entries'], 80) as $entries) {
-                    $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
-                        if (isset($report['settlement_type'])) {
-                            $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
-                            $payload['_settlement_type'] = $report['settlement_type'];
-                            $entry['payload'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-                        }
 
-                        return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
-                    }, $entries));
-                }
+                    return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
+                }, $entries));
             }
             $references = $sameReport->whereNotNull('reference')->distinct()->pluck('reference');
             $matched = 0;
@@ -309,7 +287,7 @@ class FinanceConfluxSettlement
                     ->groupBy('reference')->havingRaw('COUNT(*) = 1')->pluck('reference')->count();
             }
 
-            return ['inserted' => $alreadyImported ? 0 : count($report['entries']),
+            return ['inserted' => count($report['entries']),
                 'unmatched' => $references->count() - $matched];
         });
     }
@@ -389,7 +367,17 @@ class FinanceConfluxSettlement
                     ->whereColumn('matched_entry.reference', 'finance_records.reference');
             })
             ->where($uniqueOrder->toBase(), '=', 1);
-        $query->whereExists($ledger, not: ! $matched);
+        $query->where(function ($query) use ($ledger, $matched): void {
+            $query->whereExists($ledger, not: ! $matched);
+            $adjustment = $this->workbooks->database()->table('finance_settlement_supplements as bill_adjustment')
+                ->selectRaw('1')->whereColumn('bill_adjustment.finance_record_id', 'finance_records.id')
+                ->whereNotNull('bill_adjustment.payload->_ye_settlement_type');
+            if ($matched) {
+                $query->orWhereExists($adjustment);
+            } else {
+                $query->whereNotExists($adjustment);
+            }
+        });
     }
 
     public function feesFor(Collection $matchedEntries, ?\ArrayObject $reportFees = null): array
@@ -563,15 +551,6 @@ class FinanceConfluxSettlement
         }
         $reasons = [];
         $exceptionDates = collect();
-        foreach (['sale' => '结算入账', 'refund' => '退款', 'rdr' => 'RDR', 'chargeback' => '拒付', 'ethoca' => 'Ethoca'] as $kind => $label) {
-            if (($byType->get($kind)?->count() ?? 0) > 1) {
-                $reasons[] = '多笔'.$label;
-                $exceptionDates = $exceptionDates->concat($byType->get($kind)->pluck('settlement_date')->sort()->skip(1));
-                if ($kind === 'sale') {
-                    unset($values['settlement']);
-                }
-            }
-        }
         if ($byType->has('rdr') && ($byType->has('refund') || $byType->has('chargeback'))) {
             $reasons[] = $byType->has('refund') && $byType->has('chargeback') ? '退款、拒付与 RDR 同时存在'
                 : ($byType->has('refund') ? '退款与 RDR 同时存在' : '拒付与 RDR 同时存在');
