@@ -294,18 +294,95 @@ class PaymentRenewalAnalysisTest extends TestCase
                 $sheet=$book->getSheet($kind==='main' ? 3 : 0);
                 $target=null;
                 for($r=2;$r<=$sheet->getHighestRow();$r++) {
-                    if((string)$sheet->getCell(($kind==='main'?'E':'A').$r)->getValue()==='5') {$target=$r;break;}
+                    if((string) $this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='5') {$target=$r;break;}
                 }
                 self::assertNotNull($target);
                 $txn=$kind==='main'?'G':'C';$bill=$kind==='main'?'H':'D';
-                self::assertSame("TX-5\nEXTRA-TRANSACTION-5",$sheet->getCell($txn.$target)->getValue());
-                self::assertSame("00001234567890123456789\nADDON-BILL-5\n<script>alert(1)</script>",$sheet->getCell($bill.$target)->getValue());
-                self::assertSame('s',$sheet->getCell($bill.$target)->getDataType());
+                self::assertSame("TX-5\nEXTRA-TRANSACTION-5", $this->exportedValue($sheet,$txn.$target));
+                self::assertSame("00001234567890123456789\nADDON-BILL-5\n<script>alert(1)</script>", $this->exportedValue($sheet,$bill.$target));
+                self::assertContains($sheet->getCell($bill.$target)->getDataType(),['s','inlineStr']);
                 self::assertTrue($sheet->getStyle($bill.$target)->getAlignment()->getWrapText());
                 if($kind==='modal') self::assertSame(2,$sheet->getHighestRow());
                 $book->disconnectWorksheets();
             } finally {unlink($path);}
         }
+    }
+
+    public function test_large_exports_write_all_rows_under_a_bounded_memory_limit(): void
+    {
+        $service=app(PaymentRenewalAnalysisService::class);
+        $fixture=tempnam(sys_get_temp_dir(),'renewal-stream-fixture-');
+        $script=tempnam(sys_get_temp_dir(),'renewal-stream-check-');
+        $payload=['main'=>$service->exportData($this->filters()),
+            'detail'=>$service->initialOrderDetails($this->filters(),$this->detailFilters(),false)];
+        file_put_contents($fixture,json_encode($payload,JSON_THROW_ON_ERROR));
+        $program=<<<'PHP'
+<?php
+require getcwd().'/vendor/autoload.php';
+$app=new Illuminate\Foundation\Application(getcwd());
+$loader=new Illuminate\Translation\FileLoader(new Illuminate\Filesystem\Filesystem,getcwd().'/lang');
+$app->instance('translator',new Illuminate\Translation\Translator($loader,'zh-CN'));
+$factory=Mockery::mock(Illuminate\Contracts\Routing\ResponseFactory::class);
+$factory->shouldReceive('streamDownload')->andReturnUsing(
+    fn($callback,$filename,$headers)=>new Symfony\Component\HttpFoundation\StreamedResponse($callback,200,$headers)
+);
+$app->instance(Illuminate\Contracts\Routing\ResponseFactory::class,$factory);
+$data=json_decode(file_get_contents($argv[1]),true,512,JSON_THROW_ON_ERROR);
+$kind=$argv[2];
+$count=20000;
+if($kind==='main'){
+    $data['main']['initial_rows']=array_fill(0,$count,$data['main']['initial_rows'][0]);
+    $data['main']['rows']=array_fill(0,10000,$data['main']['rows'][0]);
+}else{
+    $data['detail']['rows']=array_fill(0,$count,$data['detail']['rows'][0]);
+}
+$analysis=new class($data) extends App\Portals\Payment\PaymentRenewalAnalysisService{
+    public function __construct(private array $fixture){}
+    public function exportData(array $filters):array{return $this->fixture['main'];}
+    public function initialOrderDetails(array $filters,array $detail,bool $paginate=true):array{return $this->fixture['detail'];}
+};
+$export=new App\Portals\Payment\PaymentRenewalAnalysisExportService($analysis);
+$before=memory_get_usage(true);
+$response=$kind==='main'?$export->download([]):$export->downloadOrderDetails([],[]);
+$output=tempnam(sys_get_temp_dir(),'renewal-stream-result-');
+$handle=fopen($output,'wb');
+try{
+    ob_start(static function($bytes)use($handle){fwrite($handle,$bytes);return '';},65536);
+    try{$response->sendContent();}finally{ob_end_flush();fclose($handle);}
+    $peak=memory_get_peak_usage(true);
+    $reader=new XMLReader;
+    $sheet=$kind==='main'?4:1;
+    if(!$reader->open('zip://'.$output.'#xl/worksheets/sheet'.$sheet.'.xml'))throw new RuntimeException('Invalid workbook');
+    $rows=0;
+    while($reader->read())if($reader->nodeType===XMLReader::ELEMENT&&$reader->localName==='row')$rows++;
+    $reader->close();
+    echo json_encode(['rows'=>$rows,'expected'=>$kind==='main'?30001:20001,'peak'=>$peak,'growth'=>$peak-$before],JSON_THROW_ON_ERROR);
+}finally{unlink($output);}
+PHP;
+        file_put_contents($script,$program);
+        try {
+            foreach (['main','detail'] as $kind) {
+                $process=new \Symfony\Component\Process\Process([PHP_BINARY,'-d','memory_limit=96M',$script,$fixture,$kind],base_path());
+                $process->setTimeout(60);
+                $process->mustRun();
+                $result=json_decode($process->getOutput(),true,512,JSON_THROW_ON_ERROR);
+                self::assertSame($result['expected'],$result['rows']);
+                self::assertLessThan(96*1024*1024,$result['peak']);
+                self::assertLessThan(16*1024*1024,$result['growth']);
+            }
+        } finally {
+            unlink($fixture);
+            unlink($script);
+        }
+    }
+
+    /** Streaming XLSX stores literal text as inline strings; the reader may return RichText. */
+    private function exportedValue($sheet, string $coordinate): ?string
+    {
+        $value=$sheet->getCell($coordinate)->getValue();
+        if ($value===null) return null;
+        $text=(string)$value;
+        return $text==='' ? null : $text;
     }
 
     private function detailFilters(array $overrides = []): array
@@ -593,16 +670,16 @@ class PaymentRenewalAnalysisTest extends TestCase
                 self::assertSame(2,$book->getSheetCount());
                 $sheet=$book->getSheet(0);
                 self::assertSame(count($expected['rows'])+1,$sheet->getHighestRow());
-                self::assertSame('账单号',$sheet->getCell('D1')->getValue());
-                self::assertSame('客户邮箱',$sheet->getCell('E1')->getValue());
+                self::assertSame('账单号', $this->exportedValue($sheet,'D1'));
+                self::assertSame('客户邮箱', $this->exportedValue($sheet,'E1'));
                 if ($index === 0) {
                     self::assertSame(48,$sheet->getHighestRow());
-                    self::assertSame($longBill,$sheet->getCell('D2')->getValue());
-                    self::assertSame('s',$sheet->getCell('D2')->getDataType());
-                    self::assertSame('=1+1',$sheet->getCell('D3')->getValue());
-                    self::assertSame('s',$sheet->getCell('D3')->getDataType());
-                    self::assertSame('buyer44@example.com',$sheet->getCell('E2')->getValue());
-                    self::assertSame('UTC+08:00',$book->getSheet(1)->getCell('B3')->getValue());
+                    self::assertSame($longBill, $this->exportedValue($sheet,'D2'));
+                    self::assertContains($sheet->getCell('D2')->getDataType(),['s','inlineStr']);
+                    self::assertSame('=1+1', $this->exportedValue($sheet,'D3'));
+                    self::assertContains($sheet->getCell('D3')->getDataType(),['s','inlineStr']);
+                    self::assertSame('buyer44@example.com', $this->exportedValue($sheet,'E2'));
+                    self::assertSame('UTC+08:00',$this->exportedValue($book->getSheet(1),'B3'));
                 }
                 $book->disconnectWorksheets();
             } finally { unlink($path); }
@@ -626,34 +703,34 @@ class PaymentRenewalAnalysisTest extends TestCase
             file_put_contents($path,$bytes);
             $book=IOFactory::load($path);
             $sheet=$book->getSheet(3);
-            self::assertSame('退款时间',$sheet->getCell('N1')->getValue());
-            self::assertSame('争议时间',$sheet->getCell('Q1')->getValue());
-            self::assertSame('时间所属时区',$sheet->getCell('S1')->getValue());
-            self::assertSame('账单号',$sheet->getCell('H1')->getValue());
-            self::assertSame('客户邮箱',$sheet->getCell('I1')->getValue());
+            self::assertSame('退款时间', $this->exportedValue($sheet,'N1'));
+            self::assertSame('争议时间', $this->exportedValue($sheet,'Q1'));
+            self::assertSame('时间所属时区', $this->exportedValue($sheet,'S1'));
+            self::assertSame('账单号', $this->exportedValue($sheet,'H1'));
+            self::assertSame('客户邮箱', $this->exportedValue($sheet,'I1'));
             $matched=[];
             for ($r=2;$r<=$sheet->getHighestRow();$r++) {
-                $id=(string)$sheet->getCell('E'.$r)->getValue();
+                $id=(string) $this->exportedValue($sheet,'E'.$r);
                 if ($id==='5') {
-                    self::assertSame('00009549574570768548249622',$sheet->getCell('H'.$r)->getValue());
-                    self::assertSame('s',$sheet->getCell('H'.$r)->getDataType());
-                    self::assertSame('buyer@example.com',$sheet->getCell('I'.$r)->getValue());
-                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00",$sheet->getCell('N'.$r)->getValue());
-                    self::assertNull($sheet->getCell('Q'.$r)->getValue());
-                    self::assertSame('UTC-05:00',$sheet->getCell('S'.$r)->getValue());
+                    self::assertSame('00009549574570768548249622', $this->exportedValue($sheet,'H'.$r));
+                    self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
+                    self::assertSame('buyer@example.com', $this->exportedValue($sheet,'I'.$r));
+                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00", $this->exportedValue($sheet,'N'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
+                    self::assertSame('UTC-05:00', $this->exportedValue($sheet,'S'.$r));
                     self::assertTrue($sheet->getStyle('N'.$r)->getAlignment()->getWrapText());
                     $matched[]=$id;
                 } elseif ($id==='3') {
-                    self::assertSame('=1+1',$sheet->getCell('H'.$r)->getValue());
-                    self::assertSame('s',$sheet->getCell('H'.$r)->getDataType());
-                    self::assertNull($sheet->getCell('I'.$r)->getValue());
-                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00",$sheet->getCell('Q'.$r)->getValue());
-                    self::assertNull($sheet->getCell('N'.$r)->getValue());
-                    self::assertSame('UTC+08:00',$sheet->getCell('S'.$r)->getValue());
+                    self::assertSame('=1+1', $this->exportedValue($sheet,'H'.$r));
+                    self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
+                    self::assertNull( $this->exportedValue($sheet,'I'.$r));
+                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00", $this->exportedValue($sheet,'Q'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'N'.$r));
+                    self::assertSame('UTC+08:00', $this->exportedValue($sheet,'S'.$r));
                     $matched[]=$id;
                 } elseif ($id==='6') {
                     // A refund with no event timestamp remains blank; never invent a payment-time substitute.
-                    self::assertNull($sheet->getCell('N'.$r)->getValue());
+                    self::assertNull( $this->exportedValue($sheet,'N'.$r));
                     $matched[]=$id;
                 }
             }
@@ -672,16 +749,16 @@ class PaymentRenewalAnalysisTest extends TestCase
             file_put_contents($path, $bytes);
             $book = IOFactory::load($path);
             self::assertSame(4, $book->getSheetCount());
-            self::assertSame('UTC-05:00', $book->getSheet(0)->getCell('B1')->getValue());
+            self::assertSame('UTC-05:00', $this->exportedValue($book->getSheet(0),'B1'));
             self::assertSame(20, $book->getSheet(1)->getHighestRow());
-            self::assertSame('支付方式', $book->getSheet(1)->getCell('A5')->getValue());
-            self::assertSame('PayPal支付', $book->getSheet(1)->getCell('A9')->getValue());
-            self::assertSame('UTC+08:00', $book->getSheet(2)->getCell('B1')->getValue());
-            self::assertSame('总体', $book->getSheet(2)->getCell('B7')->getValue());
-            self::assertSame('PayPal支付', $book->getSheet(2)->getCell('B8')->getValue());
-            self::assertSame('信用卡支付', $book->getSheet(2)->getCell('B9')->getValue());
-            self::assertSame('谷歌支付', $book->getSheet(2)->getCell('B10')->getValue());
-            self::assertSame('苹果支付', $book->getSheet(2)->getCell('B11')->getValue());
+            self::assertSame('支付方式', $this->exportedValue($book->getSheet(1),'A5'));
+            self::assertSame('PayPal支付', $this->exportedValue($book->getSheet(1),'A9'));
+            self::assertSame('UTC+08:00', $this->exportedValue($book->getSheet(2),'B1'));
+            self::assertSame('总体', $this->exportedValue($book->getSheet(2),'B7'));
+            self::assertSame('PayPal支付', $this->exportedValue($book->getSheet(2),'B8'));
+            self::assertSame('信用卡支付', $this->exportedValue($book->getSheet(2),'B9'));
+            self::assertSame('谷歌支付', $this->exportedValue($book->getSheet(2),'B10'));
+            self::assertSame('苹果支付', $this->exportedValue($book->getSheet(2),'B11'));
             $book->disconnectWorksheets();
         } finally { @unlink($path); }
     }

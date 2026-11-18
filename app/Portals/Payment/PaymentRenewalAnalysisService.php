@@ -19,7 +19,7 @@ class PaymentRenewalAnalysisService
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
         'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
-        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email',
+        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email', 'collection_account', 'collection_account_email',
     ];
 
     /** Ordered groups shared by the page and Excel export. */
@@ -99,7 +99,7 @@ class PaymentRenewalAnalysisService
         $keyword = trim((string) ($detail['detail_keyword'] ?? ''));
         $rows = array_values(array_filter($scopeRows, static function (array $row) use ($detail, $keyword): bool {
             if ($keyword !== '' && !str_contains(mb_strtolower(implode(' ', [
-                $row['erp_order_id'], $row['initial_order'], implode(' ', $row['transaction_ids']), $row['store_name'], implode(' ', $row['bill_numbers']), $row['buyer_email'],
+                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], implode(' ', $row['transaction_ids']), $row['store_name'], implode(' ', $row['bill_numbers']), $row['buyer_email'], $row['collection_account'], $row['collection_account_email'],
             ])), mb_strtolower($keyword))) return false;
             if (($detail['detail_store'] ?? '') !== '' && $row['store_name'] !== $detail['detail_store']) return false;
             if (($detail['detail_method'] ?? '') !== '' && $row['payment_method'] !== $detail['detail_method']) return false;
@@ -198,7 +198,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v19:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v20:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -360,6 +360,15 @@ class PaymentRenewalAnalysisService
         $refund = $risk['refunds'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
         $dispute = $risk['disputes'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
         $paid = $order->paid_at->copy()->setTimezone($timezone)->format('Y-m-d H:i:s');
+        $primary = $this->uniqueIdentifiers($identifiers['primary_bills'] ?? []);
+        $upsell = $this->uniqueIdentifiers($identifiers['upsell_bills'] ?? []);
+        $legacyBill = trim((string)$order->bill_number);
+        // Explicit upsell classification takes precedence over the legacy single bill field.
+        if ($legacyBill !== '' && !in_array($legacyBill, $upsell, true)) {
+            $primary = $this->uniqueIdentifiers([$legacyBill, ...$primary]);
+        }
+        // If a reference was recorded as both types, the explicit primary wins.
+        $upsell = array_values(array_diff($upsell, $primary));
         return [
             'erp_order_id' => (int) $order->id,
             'stage_key' => $number === 0 ? 'initial' : 'renewal_'.$number, 'stage_number' => $number, 'purchase_type' => $purchaseType,
@@ -369,8 +378,12 @@ class PaymentRenewalAnalysisService
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
             'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
             'bill_number' => (string) $order->bill_number, 'buyer_email' => (string) $order->buyer_email,
-            'transaction_ids' => $this->uniqueIdentifiers([(string)$order->transaction_id, ...($identifiers['transactions'] ?? [])]),
-            'bill_numbers' => $this->uniqueIdentifiers([(string)$order->bill_number, ...($identifiers['bills'] ?? [])]),
+            'transaction_ids' => $this->uniqueIdentifiers($identifiers['transactions'] ?? []),
+            'primary_bill_numbers' => $primary, 'upsell_bill_numbers' => $upsell,
+            'bill_numbers' => $this->uniqueIdentifiers([...$primary, ...$upsell]),
+            'collection_account' => trim((string)$order->collection_account),
+            'collection_account_email' => trim((string)$order->collection_account_email),
+            'collection_accounts' => $this->uniqueIdentifiers([(string)$order->collection_account,(string)$order->collection_account_email]),
             'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
             'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
             'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
@@ -384,9 +397,14 @@ class PaymentRenewalAnalysisService
         foreach (array_chunk($orderIds, 500) as $chunk) {
             $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $chunk)
                 ->orderByRaw('CASE WHEN reference_type = ? THEN 0 ELSE 1 END', [LogisticsOrderPaymentReference::TYPE_PRIMARY])
-                ->orderBy('id')->get(['logistics_order_id','reference_number']);
+                ->orderBy('id')->get(['logistics_order_id','reference_number','reference_type']);
             foreach ($references as $reference) {
-                $result[(int)$reference->logistics_order_id]['bills'][] = (string)$reference->reference_number;
+                $type = match ($reference->reference_type) {
+                    LogisticsOrderPaymentReference::TYPE_PRIMARY => 'primary_bills',
+                    LogisticsOrderPaymentReference::TYPE_UPSELL => 'upsell_bills',
+                    default => null,
+                };
+                if ($type !== null) $result[(int)$reference->logistics_order_id][$type][] = (string)$reference->reference_number;
             }
             $payments = LogisticsPayPalTransaction::query()->whereIn('logistics_order_id', $chunk)
                 ->where('event_code', 'like', 'T00%')->whereIn('status', ['S','V'])

@@ -1,9 +1,31 @@
 <?php
 
+use App\Portals\AssetManager\Http\Controllers\AccountController;
+use App\Portals\AssetManager\Http\Controllers\AccountDingTalkController;
 use App\Portals\AssetManager\Http\Controllers\AssetManagerController;
 use App\Portals\AssetManager\Http\Controllers\ComputerDepartmentBindingController;
 use App\Portals\AssetManager\Http\Controllers\DisciplineController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('asset-manager/accounts')->name('asset-manager.accounts.')->group(function () {
+    $accounts = AccountController::class;
+    $ding = AccountDingTalkController::class;
+    Route::get('/', [$accounts, 'index'])->name('index');
+    Route::get('/options', [$accounts, 'options'])->name('options');
+    Route::get('/dingtalk/directory', [$ding, 'directory'])->middleware('throttle:60,1')->name('dingtalk.directory');
+    Route::get('/dingtalk/audits', [$ding, 'audits'])->name('dingtalk.audits');
+    Route::get('/dingtalk/company-grants', [$ding, 'grants'])->name('dingtalk.grants');
+    Route::post('/dingtalk/company-grants', [$ding, 'saveGrants'])->middleware('throttle:10,1')->name('dingtalk.grants.store');
+    Route::post('/dingtalk/bindings', [$ding, 'store'])->middleware('throttle:10,1')->name('dingtalk.bindings.store');
+    Route::delete('/dingtalk/bindings/{binding}', [$ding, 'destroy'])->whereNumber('binding')->name('dingtalk.bindings.destroy');
+    Route::get('/{account}/dingtalk', [$ding, 'options'])->whereNumber('account')->name('dingtalk.options');
+    Route::get('/{account}/permissions', [$accounts, 'permissions'])->whereNumber('account')->name('permissions');
+    Route::put('/{account}/permissions', [$accounts, 'savePermissions'])->whereNumber('account')->name('permissions.update');
+    Route::post('/', [$accounts, 'store'])->name('store');
+    Route::get('/{account}', [$accounts, 'show'])->whereNumber('account')->name('show');
+    Route::put('/{account}', [$accounts, 'update'])->whereNumber('account')->name('update');
+    Route::delete('/{account}', [$accounts, 'destroy'])->whereNumber('account')->name('destroy');
+});
 
 Route::prefix('asset-manager/computer-department-bindings')->name('asset-manager.computer-department-bindings.')->controller(ComputerDepartmentBindingController::class)->group(function () {
     Route::get('/', 'index')->name('index');

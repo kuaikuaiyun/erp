@@ -258,7 +258,8 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_details' => [
-        'bill_number'=>'账单号', 'buyer_email'=>'客户邮箱',
+        'upsell_bill_number'=>'加购账单号', 'paypal_transactions'=>'PayPal付款流水', 'collection_account'=>'订单收款账号',
+        'bill_number'=>'主账单号', 'buyer_email'=>'客户邮箱',
         'export'=>'导出 Excel', 'exporting'=>'正在导出全部筛选结果…',
         'export_error'=>'订单明细导出失败，请重试。',
         'export_filename'=>'首购订单明细_:time.xlsx', 'export_default_filename'=>'首购订单明细.xlsx',
@@ -272,13 +273,13 @@ return array_replace_recursive($translations, [
         'title'=>'首购订单核查', 'close'=>'关闭', 'loading'=>'正在加载订单明细…',
         'error'=>'订单明细加载失败，请重试。', 'retry'=>'重试', 'empty'=>'当前筛选条件下没有订单。',
         'all'=>'全部', 'unknown'=>'未识别', 'query'=>'查询', 'reset'=>'重置筛选',
-        'keyword_hint'=>'搜索 ERP ID、订单号、任一付款流水/账单号、邮箱或店铺',
+        'keyword_hint'=>'搜索 ERP ID、订单号、交易号、主/加购账单、PayPal流水、收款账号、邮箱或店铺',
         'scope'=>'原始范围：:method / :type / :kind；付款日期 :from ～ :to（:timezone）；店铺：:store。',
         'scope_note'=>'弹窗筛选仅在原始范围内缩小；退款按关联订单统计，不限制退款发生日期，同一订单多次退款只算一个退款订单。',
         'generated'=>'数据生成：:time；与页面相同统计缓存，若期间数据更新，请刷新页面后核对。',
         'scope_total'=>'原始范围：:orders 单 / 实收 :revenue / 退款订单 :refunded 单 / 退款金额 :amount',
         'filtered'=>'筛选结果', 'order_count'=>'订单总数', 'revenue'=>'实收金额', 'refund_orders'=>'退款订单数', 'refund_amount'=>'退款金额',
-        'erp_id'=>'ERP ID', 'order'=>'订单号', 'transaction'=>'交易号', 'store'=>'店铺', 'method'=>'支付方式',
+        'erp_id'=>'ERP ID', 'order'=>'订单号', 'transaction'=>'订单交易号', 'store'=>'店铺', 'method'=>'支付方式',
         'type'=>'订单类型', 'paid_at'=>'付款时间', 'refund_count'=>'退款记录数',
         'refund_yes'=>'有关联退款', 'refund_no'=>'无关联退款', 'refund_state'=>'退款状态',
         'records'=>'查看退款记录', 'record_amount'=>'退款金额', 'reason'=>'原因', 'status'=>'状态', 'time'=>'退款时间',
@@ -1001,7 +1002,8 @@ return array_replace_recursive($translations, [
             'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
             'columns' => [
                 'stage' => '付款阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
-                'initial_order' => '首扣订单', 'renewal_order' => '本阶段订单', 'store' => '店铺', 'transaction' => '支付流水', 'bill_number' => '账单号', 'buyer_email' => '客户邮箱',
+                'initial_order' => '首扣订单', 'renewal_order' => '本阶段订单', 'store' => '店铺', 'transaction' => '订单交易号', 'bill_number' => '主账单号',
+                'upsell_bill_number'=>'加购账单号', 'paypal_transactions'=>'PayPal付款流水', 'collection_account'=>'订单收款账号', 'buyer_email' => '客户邮箱',
                 'paid_at' => '付款时间', 'amount' => '实收金额', 'refund_count' => '退款笔数', 'refund_amount' => '退款金额', 'refund_time' => '退款时间',
                 'dispute_count' => '争议笔数', 'dispute_amount' => '争议金额', 'dispute_time' => '争议时间',
             ],

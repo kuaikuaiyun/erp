@@ -32,11 +32,16 @@
     </div>
     <div class="payment-renewal-detail-scroll" tabindex="0" aria-label="{{ $dt('title') }}">
         <table class="payment-renewal-detail-table">
-            <thead><tr>@foreach(['erp_id','order','transaction','bill_number','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
+            <thead><tr>@foreach(['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
             <tbody>
             @forelse($detail['rows'] as $row)
                 <tr data-renewal-detail-order="{{ $row['erp_order_id'] }}">
-                    <td>{{ $row['erp_order_id'] }}</td><td>{{ $row['initial_order'] }}</td><td class="payment-renewal-detail-reference">@forelse($row['transaction_ids'] as $identifier)<span class="payment-renewal-detail-identifier">{{ $identifier }}</span>@empty<span>—</span>@endforelse</td><td class="payment-renewal-detail-reference">@forelse($row['bill_numbers'] as $identifier)<span class="payment-renewal-detail-identifier">{{ $identifier }}</span>@empty<span>—</span>@endforelse</td><td class="payment-renewal-detail-email">{{ $row['buyer_email'] ?: '—' }}</td><td>{{ $row['store_name'] ?: '—' }}</td>
+                    <td>{{ $row['erp_order_id'] }}</td><td>{{ $row['initial_order'] }}</td>
+                    <td class="payment-renewal-detail-reference">{{ $row['transaction_id'] ?: '—' }}</td>
+                    @foreach(['primary_bill_numbers','upsell_bill_numbers','transaction_ids','collection_accounts'] as $field)
+                    <td class="payment-renewal-detail-reference">@forelse($row[$field] as $identifier)<span class="payment-renewal-detail-identifier">{{ $identifier }}</span>@empty<span>—</span>@endforelse</td>
+                    @endforeach
+                    <td class="payment-renewal-detail-email">{{ $row['buyer_email'] ?: '—' }}</td><td>{{ $row['store_name'] ?: '—' }}</td>
                     <td><span class="payment-method-badge">{{ $methodName($row['payment_method']) }}</span></td><td>{{ $pt('purchase_'.$row['purchase_type']) }}</td>
                     <td class="payment-renewal-detail-date">{{ $row['paid_at'] }}</td><td class="payment-renewal-detail-number">{{ $money($row['raw_amount']) }}</td>
                     <td><strong class="{{ $row['refund_count'] > 0 ? 'payment-renewal-has-refund' : '' }}">{{ $row['refund_count'] }}</strong>
@@ -50,7 +55,7 @@
                     </td><td class="payment-renewal-detail-number">{{ $money($row['raw_refund_amount']) }}</td>
                 </tr>
             @empty
-                <tr><td colspan="12" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
+                <tr><td colspan="15" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
             @endforelse
             </tbody>
         </table>

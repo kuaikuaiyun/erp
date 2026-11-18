@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'id' => 'ID',
+    'title' => '账号管理', 'subtitle' => '人员账号、部门任职与钉钉绑定', 'filters' => '筛选条件', 'list' => '人员列表',
+    'search' => '姓名或登录账号', 'search_placeholder' => '请输入姓名或登录账号', 'department' => '所属部门', 'all' => '全部',
+    'query' => '查询', 'reset' => '重置', 'add' => '新增账号', 'view' => '查看', 'edit' => '编辑', 'delete' => '删除', 'save' => '保存', 'close' => '关闭',
+    'username' => '登录账号', 'name' => '姓名', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'employment_status' => '在职状态',
+    'employed' => '在职', 'resigned' => '离职', 'status' => '账号状态', 'enabled' => '启用', 'disabled' => '禁用', 'password' => '密码',
+    'password_confirmation' => '确认密码', 'password_hint' => '至少 8 位；编辑时留空保持原密码。',
+    'memberships' => '部门任职', 'add_membership' => '添加部门', 'remove' => '移除', 'position' => '岗位', 'manager' => '主管', 'deputy' => '副主管', 'member' => '成员',
+    'choose_department' => '请选择部门', 'retained' => '范围外任职保留，不可调整', 'no_membership' => '暂无部门任职',
+    'system' => '超级管理员', 'system_locked' => '超级管理员的登录账号、启用状态和部门任职保持原有保护规则。',
+    'scope_hint' => '仅显示部门管理配置授权范围内的账号；同一账号只显示一次。修改账号信息会同步影响总后台。',
+    'readonly' => '当前只读；新增、编辑、删除和钉钉管理需要主管／副主管身份及对应部门范围。',
+    'delete_warning' => '将删除整个账号及其全部部门关系，包括其他部门任职。此操作不能撤销，请核对后确认。',
+    'delete_confirm' => '确认删除整个账号', 'binding' => '钉钉绑定', 'no_binding' => '未绑定', 'actions' => '操作', 'updated_at' => '修改时间（北京时间）',
+    'empty' => '暂无可见人员', 'saved' => '账号信息已保存。', 'deleted' => '账号已删除。', 'failed' => '操作失败，请重试。',
+    'loading' => '正在加载…', 'saving' => '正在保存…', 'per_page' => '每页', 'records' => '条', 'total' => '显示第 :from–:to 条，共 :total 条',
+    'previous' => '上一页', 'next' => '下一页', 'permissions' => '页面权限', 'inherit' => '继承部门授权', 'allow' => '允许', 'deny' => '拒绝',
+    'permissions_hint' => '仅超级管理员可配置普通账号的页面权限；此操作同步影响总后台。',
+    'install_required' => '请先创建编码为 asset-manager 的系统，再安装人事账号管理菜单。',
+    'attributes' => ['username' => '登录账号', 'name' => '姓名', 'password' => '密码', 'status' => '账号状态', 'employment_status' => '在职状态', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'memberships' => '部门任职', 'memberships.*.department_id' => '所属部门', 'memberships.*.position' => '部门岗位', 'permissions' => '页面权限', 'search' => '搜索内容', 'per_page' => '每页条数', 'page' => '页码', 'department_ids' => '筛选部门', 'department_ids.*' => '筛选部门'],
+    'validation' => ['required' => ':attribute不能为空。', 'string' => ':attribute必须为文字。', 'integer' => ':attribute必须为有效编号。', 'array' => ':attribute必须为列表。', 'boolean' => ':attribute状态无效。', 'in' => ':attribute选项无效。', 'distinct' => ':attribute不能重复。', 'date_format' => ':attribute格式应为 :format。', 'max.string' => ':attribute最多 :max 字。', 'max.array' => ':attribute最多 :max 项。', 'min.string' => ':attribute至少 :min 位。', 'min.numeric' => ':attribute不能小于 :min。', 'confirmed' => '两次输入的密码不一致。', 'unique' => '该登录账号已存在。', 'present' => '请提交:attribute。'],
+];
