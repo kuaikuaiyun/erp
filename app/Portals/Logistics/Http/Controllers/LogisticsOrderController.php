@@ -5,6 +5,7 @@ namespace App\Portals\Logistics\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
+use App\Models\LogisticsSyncLog;
 use App\Models\LogisticsRefundDetail;
 use App\Models\LogisticsTongtuSkuMapping;
 use App\Models\LogisticsTrackingSyncBatch;
@@ -13,6 +14,7 @@ use App\Models\ProductRequestLinkSku;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Services\PortalDomainService;
 use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
+use App\Portals\Logistics\LogisticsOrderItemService;
 use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
@@ -103,6 +105,136 @@ class LogisticsOrderController extends Controller
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
             'nonRunnableProductKeys' => $nonRunnableProductKeys,
         ]);
+    }
+
+    public function create(Request $request): Response|View
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        return view('portals.logistics.orders.create', [
+            ...$this->viewContext($context),
+            'stores' => $this->shopifyStores(),
+        ]);
+    }
+
+    public function store(Request $request, LogisticsOrderItemService $items): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) abort(403);
+
+        // Only the explicit manual-entry fields can be persisted. Source payloads,
+        // ownership snapshots and matched payment accounts are never client inputs.
+        $input = $request->all();
+        array_walk_recursive($input, static function (&$value): void {
+            if (is_string($value)) $value = trim($value);
+        });
+        $request->replace($input);
+        $money = ['required', 'numeric', 'min:0', 'regex:/^\d{1,14}(?:\.\d{1,4})?$/D'];
+        $data = $request->validate([
+            'assistant_domain_store_id' => ['required', 'integer'],
+            'shopify_order_id' => ['required', 'string', 'regex:/^[1-9][0-9]{0,99}$/D'],
+            'shopify_order_number' => ['required', 'string', 'max:100', 'not_regex:/^#+$/D'],
+            'order_created_at' => ['required', 'date_format:Y-m-d\TH:i,Y-m-d\TH:i:s'],
+            'paid_at' => ['required', 'date_format:Y-m-d\TH:i,Y-m-d\TH:i:s'],
+            'paid_amount_usd' => $money,
+            'total_shipping_usd' => ['nullable', 'numeric', 'min:0', 'regex:/^\d{1,14}(?:\.\d{1,4})?$/D'],
+            'buyer_name' => ['nullable', 'string', 'max:191'],
+            'buyer_email' => ['nullable', 'email', 'max:191'],
+            'buyer_phone' => ['nullable', 'string', 'max:100'],
+            'operator_name' => ['nullable', 'string', 'max:100'],
+            'destination' => ['nullable', 'string', 'max:255'],
+            'payment_method' => ['required', 'string', 'max:191'],
+            'payment_gateway' => ['required', 'string', 'max:191'],
+            'collection_account' => ['nullable', 'string', 'max:255'],
+            'collection_account_email' => ['nullable', 'email', 'max:191'],
+            'transaction_id' => ['nullable', 'string', 'max:255'],
+            'bill_number' => ['nullable', 'string', 'max:255'],
+            'payment_gateway_order_id' => ['nullable', 'string', 'max:255'],
+            'is_add_on' => ['required', Rule::in(['no', 'yes'])],
+            'subscription_kind' => ['required', Rule::in(['none', 'initial', 'renewal'])],
+            'renewal_number' => ['required_if:subscription_kind,renewal', 'nullable', 'integer', 'min:1', 'max:9999'],
+            'subscription_origin_order_id' => ['required_if:subscription_kind,renewal', 'nullable', 'string', 'regex:/^[1-9][0-9]{0,99}$/D'],
+            'shipping_company' => ['nullable', 'string', 'max:191'],
+            'tracking_number' => ['nullable', 'string', 'max:255'],
+            'items' => ['required', 'array', 'min:1', 'max:100'],
+            'items.*.shopify_sku' => ['required', 'string', 'max:191'],
+            'items.*.product_title' => ['required', 'string', 'max:255'],
+            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'items.*.unit_price_usd' => $money,
+        ], [], __('logistics.orders.manual.fields'));
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $domain = null;
+        try {
+            $order = DB::connection($connection)->transaction(function () use ($data, $context, $items, &$domain): LogisticsOrder {
+                $store = AssistantDomainStore::query()->whereKey($data['assistant_domain_store_id'])
+                    ->where('site_builder', 'shopify')->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
+                    ->lockForUpdate()->first();
+                if (!$store) throw ValidationException::withMessages(['assistant_domain_store_id' => __('logistics.orders.manual.invalid_store')]);
+
+                $host = strtolower((string) parse_url(str_contains((string) $store->shop_login_url, '://') ? $store->shop_login_url : 'https://'.$store->shop_login_url, PHP_URL_HOST));
+                $domain = preg_match('/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/D', $host) ? $host : null;
+                $duplicate = LogisticsOrder::query()->where('shopify_order_id', $data['shopify_order_id'])
+                    ->where(function ($query) use ($store, $domain): void {
+                        $query->where('assistant_domain_store_id', $store->getKey());
+                        if ($domain !== null) $query->orWhere('source_shop_domain', $domain);
+                    })->exists();
+                if ($duplicate) throw ValidationException::withMessages(['shopify_order_id' => __('logistics.orders.manual.duplicate')]);
+                if ($data['subscription_kind'] === 'renewal' && $data['subscription_origin_order_id'] === $data['shopify_order_id']) {
+                    throw ValidationException::withMessages(['subscription_origin_order_id' => __('logistics.orders.manual.self_origin')]);
+                }
+
+                $attributes = Arr::except($data, ['items', 'assistant_domain_store_id', 'subscription_kind', 'renewal_number', 'is_add_on', 'subscription_origin_order_id']);
+                foreach (['order_created_at', 'paid_at'] as $field) {
+                    $value = $data[$field];
+                    if (strlen($value) === 16) $value .= ':00';
+                    $attributes[$field] = \Carbon\CarbonImmutable::createFromFormat('!Y-m-d\TH:i:s', $value, 'Asia/Shanghai')->utc();
+                }
+                $number = ltrim($data['shopify_order_number'], '#');
+                $order = new LogisticsOrder([
+                    ...$attributes,
+                    'assistant_domain_store_id' => $store->getKey(), 'source_shop_domain' => $domain,
+                    'shopify_order_number' => $number, 'tongtu_order_number' => $store->makeTongtuOrderNumber($number),
+                    'store_name' => $store->shop_name, 'group_names' => AssistantDomainStore::displayMultiValue($store->team),
+                    'staff_status' => '正常', 'payment_status' => '已付款', 'data_status' => LogisticsOrder::STATUS_NORMAL,
+                    'logistics_status' => LogisticsOrder::LOGISTICS_PENDING,
+                    'is_add_on' => $data['is_add_on'] === 'yes' ? '已加购' : '未加购',
+                    'subscription_type' => match ($data['subscription_kind']) {
+                        'initial' => '订阅首次购买', 'renewal' => '订阅复购'.$data['renewal_number'].'次', default => '无订阅',
+                    },
+                    'subscription_status' => $data['subscription_kind'] === 'none' ? '未订阅' : '已订阅',
+                    'subscription_origin_order_id' => $data['subscription_kind'] === 'renewal' ? $data['subscription_origin_order_id'] : null,
+                ]);
+                $this->ownerTimeline->applySnapshotIfMissing($order, $store);
+                $order->save();
+                // Reuse the existing item/revenue allocation with transient input.
+                // No Shopify request or fabricated original JSON is stored.
+                $nodes = array_map(static fn (array $row): array => [
+                    'sku' => $row['shopify_sku'], 'title' => $row['product_title'], 'quantity' => $row['quantity'], 'price' => $row['unit_price_usd'],
+                ], array_values($data['items']));
+                $items->syncFromShopifyPayload($order, ['lineItems' => ['nodes' => $nodes]]);
+                $this->paymentReferences->syncFromAttributes($order, []);
+                $this->paypalAssociations->reconcileOrder($order);
+                $this->tracking->scheduleForOrder($order);
+                $this->skuMappings->scheduleForOrder($order);
+                LogisticsSyncLog::query()->create([
+                    'logistics_order_id' => $order->getKey(), 'source' => 'manual', 'action' => 'create', 'status' => 'success',
+                    'message' => __('logistics.orders.manual.audit'), 'actor_id' => $context['user']->getKey(), 'actor_name' => $context['user']->name,
+                    'context' => json_encode(['item_count' => count($nodes)], JSON_THROW_ON_ERROR),
+                ]);
+                return $order;
+            });
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $exception) {
+            $exists = LogisticsOrder::query()->where('shopify_order_id', $data['shopify_order_id'])->where(function ($query) use ($data, $domain): void {
+                $query->where('assistant_domain_store_id', $data['assistant_domain_store_id']);
+                if ($domain !== null) $query->orWhere('source_shop_domain', $domain);
+            })->exists();
+            if (!$exists) throw $exception;
+            throw ValidationException::withMessages(['shopify_order_id' => __('logistics.orders.manual.duplicate')]);
+        }
+
+        return redirect()->route('logistics.orders.index', ['shopify_order_id' => $order->shopify_order_id])->with('success', __('logistics.orders.manual.saved'));
     }
 
     public function missingTongtu(Request $request, PortalDomainService $domains, TongtuOrderSnapshotService $snapshots): Response|View|JsonResponse

@@ -37,7 +37,8 @@ class AccountController extends Controller
             ->title(__('organization.accounts.title'))
             ->description(__('organization.accounts.description'))
             ->body($this->grid())
-            ->body($this->dingtalkModals());
+            ->body($this->dingtalkModals())
+            ->body($this->companyAssignmentModal());
     }
 
     public function create(Content $content): Content
@@ -168,7 +169,7 @@ class AccountController extends Controller
 
         $grid->setName('organization-accounts');
         $grid->setActionClass(OrganizationActions::class);
-        $grid->model()->with(['departments','dingTalkBindings.identity'])->orderBy('id');
+        $grid->model()->with(['departments','company','dingTalkBindings.identity'])->orderBy('id');
         if (!$actor->isAdministrator()) {
             $managedDepartmentIds = $this->authorization->managedDepartmentIds($actor);
             $departmentsTable = (new Department())->getTable();
@@ -237,6 +238,12 @@ class AccountController extends Controller
         $grid->column('id', __('organization.common.id'))->sortable();
         $grid->column('username', __('organization.accounts.username'));
         $grid->column('name', __('organization.accounts.name'));
+        $grid->column('company_affiliation', __('organization.accounts.company'))->display(function (): string {
+            $company = $this->company;
+            $label = $company ? $company->name.($company->trashed() ? __('organization.accounts.company_archived')
+                : (!$company->enabled ? __('organization.accounts.company_disabled') : '')) : __('organization.accounts.company_filter_unassigned');
+            return '<span data-account-company="'.(int)$this->id.'">'.e($label).'</span>';
+        });
         $grid->column('hired_at', __('organization.accounts.hired_at'))->display(function ($hiredAt): string {
             if (!$hiredAt) return '<span class="text-muted">—</span>';
 
@@ -308,6 +315,7 @@ class AccountController extends Controller
         });
 
         $grid->tools(function (Tools $tools) use ($bindingAccess): void {
+            if ($this->administrator()->isAdministrator()) $tools->append('<button type="button" class="btn btn-sm btn-default" data-account-company-open>'.e(__('organization.company_assignment.title')).'</button>');
             if ($bindingAccess->isOwner()) $tools->append('<button type="button" class="btn btn-sm btn-default" data-ding-grants>'.e(__('dingtalk.company.assign')).'</button>');
             $tools->batch(function (Tools\BatchActions $actions): void {
                 $actions->disableDelete();
@@ -331,6 +339,64 @@ class AccountController extends Controller
         $options=['base'=>admin_url('organization/accounts'),'owner'=>$owner,'csrf'=>csrf_token()];
         $messages=array_merge(__('dingtalk.manage'),__('dingtalk.workspace'),__('dingtalk.company'),__('dingtalk.labels'));
         return view('admin.organization.dingtalk-modals',compact('owner','options','messages'))->render();
+    }
+
+    private function companyAssignmentModal(): string
+    {
+        return view('admin.organization.accounts.company-assignment', [
+            'assignmentOptions' => ['url'=>admin_url('organization/accounts/company-assignment'), 'csrf'=>csrf_token()],
+            'assignmentMessages' => __('organization.company_assignment'),
+        ])->render();
+    }
+
+    private function assignmentInput(Request $request, bool $saving = false): array
+    {
+        abort_unless($this->administrator()->isAdministrator(), 403, __('organization.authorization.super_admin_only'));
+        $rules = ['account_ids'=>['required','array','min:1','max:200'], 'account_ids.*'=>['required','integer','min:1','distinct']];
+        if ($saving) $rules['company_id'] = ['required','integer','min:1'];
+        return $request->validate($rules, [], ['account_ids'=>__('organization.company_assignment.accounts'), 'company_id'=>__('organization.accounts.company')]);
+    }
+
+    private function assignmentAccounts(array $ids, bool $lock = false)
+    {
+        $model = config('admin.database.users_model');
+        $query = $model::query()->with('company')->whereIn('id', $ids)->orderBy('id');
+        if ($lock) $query->lockForUpdate();
+        $accounts = $query->get();
+        if ($accounts->count() !== count($ids)) throw ValidationException::withMessages(['account_ids'=>__('organization.company_assignment.missing')]);
+        foreach ($accounts as $account) $this->authorizeAccountManagement($account);
+        return $accounts;
+    }
+
+    public function companyAssignmentOptions(Request $request): JsonResponse
+    {
+        $data = $this->assignmentInput($request);
+        $accounts = $this->assignmentAccounts($data['account_ids']);
+        $companies = \App\Models\DingTalkCompany::query()->where('enabled', true)->orderBy('name')->get(['id','name']);
+        return response()->json(['companies'=>$companies, 'accounts'=>$accounts->map(fn ($account)=>[
+            'id'=>$account->id, 'name'=>$account->name, 'username'=>$account->username,
+            'company'=>$account->company?->name ?? __('organization.accounts.company_filter_unassigned'),
+        ])->values()])->header('Cache-Control', 'no-store');
+    }
+
+    public function assignCompany(Request $request): JsonResponse
+    {
+        $data = $this->assignmentInput($request, true);
+        $result = DB::connection($this->connectionName())->transaction(function () use ($data): array {
+            $company = \App\Models\DingTalkCompany::query()->where('enabled', true)->whereKey($data['company_id'])->lockForUpdate()->first();
+            if (!$company) throw ValidationException::withMessages(['company_id'=>__('organization.accounts.company_invalid')]);
+            $accounts = $this->assignmentAccounts($data['account_ids'], true);
+            $changed = 0;
+            foreach ($accounts as $account) {
+                if ((int) $account->company_id === (int) $company->id) continue;
+                $account->company_id = $company->id;
+                $account->save();
+                $changed++;
+            }
+            return ['count'=>$accounts->count(), 'changed'=>$changed, 'company'=>$company->name,
+                'account_ids'=>$accounts->pluck('id')->all()];
+        }, 3);
+        return response()->json($result + ['message'=>__('organization.company_assignment.saved', ['count'=>$result['count'], 'changed'=>$result['changed']])]);
     }
 
     private function form(?AdminUser $account = null): Form

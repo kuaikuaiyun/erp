@@ -88,14 +88,39 @@
                 search.className = 'form-control'; search.placeholder = t.department_search; search.setAttribute('aria-label', t.department_search);
                 top.append(node('label', t.fields.department_ids), count); section.append(top, search, chips, list, empty); grid.appendChild(section);
                 var selected = row.department_ids ? JSON.parse(row.department_ids) : row.department_id ? [row.department_id] : [];
+                var groups = new Map();
+                options.departments.forEach(function (d) {
+                    var key = String(d.parent_id || d.id);
+                    if (!groups.has(key)) groups.set(key, {name: d.parent_name || d.short_name || d.name, items: []});
+                    if (d.parent_id || !d.has_children || selected.map(String).includes(String(d.id))) groups.get(key).items.push(d);
+                });
                 function refreshDepartments() {
                     chips.replaceChildren(); var checked = list.querySelectorAll('[data-department]:checked'); count.textContent = t.department_selected.replace(':count', checked.length);
-                    Array.from(list.children).forEach(function (label) { var input = label.querySelector('input'); label.classList.toggle('is-selected', input.checked); label.hidden = !label.textContent.toLowerCase().includes(search.value.toLowerCase());
-                        if (input.checked) { var chip = node('button', label.textContent + ' ×', 'ar-department-chip'); chip.type = 'button'; chip.setAttribute('aria-label', t.department_remove + ' ' + label.textContent); chip.onclick = function () { input.checked = false; refreshDepartments(); }; chips.appendChild(chip); }
+                    Array.from(list.querySelectorAll('.ar-department-group')).forEach(function (group) {
+                        var inputs = Array.from(group.querySelectorAll('[data-department]')), parent = group.querySelector('[data-department-parent]');
+                        var chosen = inputs.filter(function (input) { return input.checked; }).length;
+                        parent.checked = inputs.length > 0 && chosen === inputs.length; parent.indeterminate = chosen > 0 && chosen < inputs.length;
+                        var matching = group.dataset.search.toLowerCase().includes(search.value.toLowerCase());
+                        group.hidden = !matching;
+                        inputs.forEach(function (input) {
+                            var label = input.closest('label'); label.classList.toggle('is-selected', input.checked);
+                            if (input.checked) { var chip = node('button', input.dataset.label + ' ×', 'ar-department-chip'); chip.type = 'button'; chip.setAttribute('aria-label', t.department_remove + ' ' + input.dataset.label); chip.onclick = function () { input.checked = false; refreshDepartments(); }; chips.appendChild(chip); }
+                        });
                     });
-                    chips.hidden = !checked.length; empty.hidden = Array.from(list.children).some(function (label) { return !label.hidden; });
+                    chips.hidden = !checked.length; empty.hidden = Array.from(list.children).some(function (group) { return !group.hidden; });
                 }
-                options.departments.forEach(function (d) { var label = node('label', null, 'ar-department-option'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.department = d.id; checkbox.checked = selected.map(String).includes(String(d.id)); label.append(checkbox, node('span', d.name)); checkbox.onchange = refreshDepartments; list.appendChild(label); });
+                groups.forEach(function (data, key) {
+                    var group = node('section', null, 'ar-department-group'), heading = node('label', null, 'ar-department-parent'), parent = node('input'), children = node('div', null, 'ar-department-children');
+                    parent.type = 'checkbox'; parent.dataset.departmentParent = key; parent.disabled = !data.items.length;
+                    heading.append(parent, node('span', data.name)); group.append(heading, children); group.dataset.search = data.name + ' ' + data.items.map(function (d) { return d.name; }).join(' ');
+                    data.items.forEach(function (d) {
+                        var label = node('label', null, 'ar-department-option'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.department = d.id; checkbox.dataset.label = d.name; checkbox.checked = selected.map(String).includes(String(d.id));
+                        label.append(checkbox, node('span', (d.short_name || d.name) + (d.has_children && !d.parent_id ? t.department_legacy : ''))); checkbox.onchange = refreshDepartments; children.appendChild(label);
+                    });
+                    if (!data.items.length) children.appendChild(node('p', t.department_no_children, 'ar-hint'));
+                    parent.onchange = function () { children.querySelectorAll('[data-department]').forEach(function (input) { input.checked = parent.checked; }); refreshDepartments(); };
+                    list.appendChild(group);
+                });
                 search.oninput = refreshDepartments; refreshDepartments();
             }
             var status = field(grid, 'enabled', row.enabled == null ? '0' : row.enabled, [{id: 0, name: t.disabled}, {id: 1, name: t.enabled}]);

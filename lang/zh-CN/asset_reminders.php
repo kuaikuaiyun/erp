@@ -55,8 +55,9 @@ return [
     'statuses' => ['preparing' => '准备中', 'sending' => '发送中', 'accepted' => '钉钉已接受', 'failed' => '准备失败', 'uncertain' => '结果待确认，不自动重发', 'skipped' => '无人缺交，未发送', 'duplicate' => '本轮已处理'],
     'reminder_rounds' => ['第一次提醒', '第二次提醒', '第三次提醒'],
     'legacy_round' => '超出次数', 'legacy_times' => '原配置超过三次，请移除多余时间后保存；系统不会自动删除原时间。',
+    'department_legacy' => '（原配置一级部门）', 'department_no_children' => '暂无可管理的二级部门',
     'department_selected' => '已选 :count 个部门', 'department_no_match' => '没有匹配的部门', 'department_remove' => '移除部门',
-    'department_search' => '搜索并勾选部门；所有所选部门共用本条提醒配置',
+    'department_search' => '搜索部门；勾选一级部门可全选当前可管理的二级部门',
     'fields' => [
         'department_ids' => '管理部门（多选）', 'department_ids.*' => '管理部门',
         'department_id' => '管理部门', 'company_id' => '钉钉企业', 'name' => '接收群名称',

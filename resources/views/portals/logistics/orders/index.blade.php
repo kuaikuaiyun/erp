@@ -125,6 +125,7 @@
         <div class="box box-solid logistics-table-box">
             <div class="box-header with-border logistics-list-toolbar">
                 <h3 class="box-title">订单列表</h3>
+                <a class="btn btn-success btn-sm" href="{{ route('logistics.orders.create') }}"><i class="fa fa-plus"></i> {{ __('logistics.orders.manual.title') }}</a>
                 <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#logistics-order-export-modal"><i class="fa fa-download"></i> 导出</button>
                 <button class="btn btn-info btn-sm" type="button" data-toggle="modal" data-target="#logistics-refund-import-modal"><i class="fa fa-upload"></i> {{ __('logistics.refund_import.open_button') }}</button>
                 <button class="btn btn-info btn-sm" type="submit" form="tracking-sync-form" id="tracking-sync-button" disabled><i class="fa fa-truck"></i> {{ __('logistics.tracking.batch_sync') }}</button>

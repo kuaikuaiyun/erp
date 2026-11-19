@@ -62,7 +62,7 @@ class ReminderController extends Controller
         $c = $this->context($request, true);
         $actor = $c['user'];
         return response()->json([
-            'departments' => Department::whereIn('id', $this->service->ids($actor, true))->with('parent:id,name')->get()->map(fn ($d) => ['id' => $d->id, 'name' => ($d->parent ? $d->parent->name.' / ' : '').$d->name]),
+            'departments' => Department::whereIn('id', $this->service->ids($actor, true))->with('parent:id,name')->withExists('children')->get()->map(fn ($d) => ['id' => $d->id, 'name' => ($d->parent ? $d->parent->name.' / ' : '').$d->name, 'short_name' => $d->name, 'parent_id' => $d->parent_id, 'parent_name' => $d->parent?->name, 'has_children' => (bool) $d->children_exists]),
             'companies' => $this->service->companies($actor),
             'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get()->map(fn ($group) => $this->service->publicGroup($group)),
             'today' => now('Asia/Shanghai')->toDateString(), 'yesterday' => now('Asia/Shanghai')->subDay()->toDateString(),

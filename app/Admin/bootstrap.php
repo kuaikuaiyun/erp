@@ -44,4 +44,6 @@ Ladmin\Admin::js(asset('js/erp-account-labels.js').'?v=20261116-2');
 Ladmin\Admin::js(asset('js/dingtalk-directory.js').'?v=20261116-2');
 Ladmin\Admin::js(asset('js/dingtalk-bindings.js').'?v=20261116-2');
 Ladmin\Admin::js(asset('js/dingtalk-companies.js').'?v=20261116-4');
+Ladmin\Admin::css(asset('css/account-company-assignment.css').'?v=20261119-1');
+Ladmin\Admin::js(asset('js/account-company-assignment.js').'?v=20261119-1');
 app(\App\Services\AdminWatermarkService::class)->registerForCurrentAdministrator();

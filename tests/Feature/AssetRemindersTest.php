@@ -113,6 +113,18 @@ class AssetRemindersTest extends TestCase
 {
     use AssetRemindersEnvironment;
 
+    public function test_department_options_include_hierarchy_without_exposing_unauthorized_children(): void
+    {
+        $parent = \App\Models\Department::create(['name' => '一级测试部门', 'slug' => 'reminder-parent']);
+        $this->teamA->update(['parent_id' => $parent->id]);
+        $this->outside->update(['parent_id' => $parent->id]);
+        $response = $this->getJson($this->remindersUrl.'/options')->assertOk();
+        $rows = collect($response->json('departments'));
+        $this->assertSame($parent->id, $rows->firstWhere('id', $this->teamA->id)['parent_id']);
+        $this->assertSame($parent->name, $rows->firstWhere('id', $this->teamA->id)['parent_name']);
+        $this->assertFalse($rows->contains('id', $this->outside->id));
+    }
+
     public function test_three_round_limit_and_default_link_preserve_existing_configuration(): void
     {
         $group = $this->reminderGroup();
