@@ -11,6 +11,13 @@ class FinanceAccountingService
 {
     public const SOURCES = ['transaction_event_code', 'transaction_subject', 'transaction_note'];
     public const SUBJECTS = ['refund', 'payment_fee', 'withdrawal_fee', 'fx', 'other'];
+    public const RATE_CHANNELS = [
+        'paypal' => 'PayPal',
+        'xuzong1' => '徐总支付 1',
+        'xuzong2' => '徐总支付 2',
+        'ye' => '叶总支付',
+        'worldpay' => 'Worldpay',
+    ];
 
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
@@ -47,7 +54,7 @@ class FinanceAccountingService
         $category ??= $db->table('finance_transaction_types')->where('raw_type', Arr::get($raw, 'transaction_info.transaction_event_code', ''))->value('category');
         $category = filled($category) ? $category : null;
         $currency = Arr::get($raw, 'transaction_info.transaction_amount.currency_code');
-        $rate = $currency === 'CNY' ? '1' : $db->table('finance_monthly_exchange_rates')->where('month', $month)->where('currency', $currency)->value('cny_rate');
+        $rate = $this->monthlyCnyRate($month, (string) $currency, 'paypal');
         $amount = Arr::get($raw, 'transaction_info.transaction_amount.value');
 
         return ['accounting_month' => $month, 'category' => $category, 'direction' => $direction,
@@ -92,13 +99,53 @@ class FinanceAccountingService
         $db = $this->workbooks->database();
         $db->transaction(function () use ($db, $data, $actor): void {
             $this->guardUnlocked($data['month']);
-            $existing = $db->table('finance_monthly_exchange_rates')->where('month', $data['month'])->where('currency', $data['currency'])->first();
-            $db->table('finance_monthly_exchange_rates')->updateOrInsert(['month' => $data['month'], 'currency' => $data['currency']], [
-                'cny_rate' => $data['cny_rate'], 'source' => $data['source'] ?? null, 'updated_by' => $actor,
+            $key = ['month' => $data['month'], 'channel' => $data['channel'], 'currency' => $data['currency']];
+            $existing = $db->table('finance_monthly_exchange_rates')->where($key)->first();
+            $db->table('finance_monthly_exchange_rates')->updateOrInsert($key, [
+                'cny_rate' => $data['cny_rate'], 'source' => null, 'updated_by' => $actor,
                 'created_at' => $existing->created_at ?? now(), 'updated_at' => now(),
             ]);
-            $this->reapply($data['month']);
+            if ($data['channel'] === 'paypal') {
+                $this->reapply($data['month']);
+            }
         });
+    }
+
+    public function monthlyCnyRate(string $month, string $currency, string $channel): ?string
+    {
+        $currency = strtoupper($currency);
+        if ($currency === 'CNY') {
+            return '1';
+        }
+
+        $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')
+            ->where(['month' => $month, 'currency' => $currency])
+            ->whereIn('channel', array_values(array_unique([$channel, 'combined'])))
+            ->orderByRaw('CASE WHEN channel = ? THEN 0 ELSE 1 END', [$channel])
+            ->value('cny_rate');
+
+        return $rate === null ? null : (string) $rate;
+    }
+
+    public function monthlyCnyRates(string $month, array $channels): array
+    {
+        $channels = array_values(array_unique($channels));
+        $rows = $this->workbooks->database()->table('finance_monthly_exchange_rates')
+            ->where('month', $month)->whereIn('channel', [...$channels, 'combined'])
+            ->get(['channel', 'currency', 'cny_rate']);
+        $combined = $rows->where('channel', 'combined')->keyBy('currency');
+        $rates = [];
+        foreach ($channels as $channel) {
+            $rates[$channel] = ['CNY' => '1'];
+            foreach ($combined as $currency => $row) {
+                $rates[$channel][strtoupper((string) $currency)] = (string) $row->cny_rate;
+            }
+            foreach ($rows->where('channel', $channel) as $row) {
+                $rates[$channel][strtoupper((string) $row->currency)] = (string) $row->cny_rate;
+            }
+        }
+
+        return $rates;
     }
 
     public function lock(string $month, int $actor): void

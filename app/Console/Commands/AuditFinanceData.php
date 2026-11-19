@@ -32,8 +32,9 @@ class AuditFinanceData extends Command
                 ->map(fn ($row) => [$row->payment_account_id, $row->total]));
         }
         if ($schema->hasTable('finance_monthly_exchange_rates')) {
-            $this->table(['月份', '币种', '汇率', '来源'], $db->table('finance_monthly_exchange_rates')
-                ->orderBy('month')->get()->map(fn ($row) => [$row->month, $row->currency, $row->cny_rate, $row->source ?? '未记录']));
+            $this->table(['月份', '通道', '币种', '汇率'], $db->table('finance_monthly_exchange_rates')
+                ->orderBy('month')->orderBy('channel')->get()
+                ->map(fn ($row) => [$row->month, $row->channel, $row->currency, $row->cny_rate]));
         }
         $this->warn('以上仅为核查清单。旧关联、名称或无接口配置不能单独证明数据来自开发环境；清理前需备份并核对接口日志、人工维护及结账记录。');
 

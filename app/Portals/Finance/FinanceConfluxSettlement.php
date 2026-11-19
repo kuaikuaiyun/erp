@@ -264,21 +264,29 @@ class FinanceConfluxSettlement
             }
             $batch = ['payment_account_id' => $account->id, 'platform' => 'ye', 'settlement_date' => $report['date']];
             $query = $db->table(self::TABLE)->where($batch);
-            // Bills accumulate on every import, including repeated files and identical rows.
-            $report['hash'] = hash('sha256', $report['hash'].(string) \Illuminate\Support\Str::uuid());
             $sameReport = (clone $query)->where('report_hash', $report['hash']);
-            app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
-            $stamp = now();
-            foreach (array_chunk($report['entries'], 80) as $entries) {
-                $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
-                    if (isset($report['settlement_type'])) {
-                        $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
-                        $payload['_settlement_type'] = $report['settlement_type'];
-                        $entry['payload'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-                    }
+            $alreadyImported = $sameReport->exists();
+            if ($alreadyImported && isset($report['settlement_type'])) {
+                $summary = (clone $sameReport)->where('kind', 'summary')->value('payload');
+                $previousType = json_decode($summary ?? '{}', true, 512, JSON_THROW_ON_ERROR)['_settlement_type'] ?? null;
+                if ($previousType !== null && $previousType !== $report['settlement_type']) {
+                    throw ValidationException::withMessages(['file' => '这份账单已按「'.$previousType.'」导入，请核对所选结算类型。']);
+                }
+            }
+            if (! $alreadyImported) {
+                app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
+                $stamp = now();
+                foreach (array_chunk($report['entries'], 80) as $entries) {
+                    $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
+                        if (isset($report['settlement_type'])) {
+                            $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
+                            $payload['_settlement_type'] = $report['settlement_type'];
+                            $entry['payload'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+                        }
 
-                    return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
-                }, $entries));
+                        return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
+                    }, $entries));
+                }
             }
             $references = $sameReport->whereNotNull('reference')->distinct()->pluck('reference');
             $matched = 0;
@@ -287,7 +295,7 @@ class FinanceConfluxSettlement
                     ->groupBy('reference')->havingRaw('COUNT(*) = 1')->pluck('reference')->count();
             }
 
-            return ['inserted' => count($report['entries']),
+            return ['inserted' => $alreadyImported ? 0 : count($report['entries']),
                 'unmatched' => $references->count() - $matched];
         });
     }

@@ -15,6 +15,7 @@ use App\Portals\Finance\FinanceCreditUsdRates;
 use App\Portals\Finance\FinanceLogisticsCreditOrders;
 use App\Portals\Finance\FinancePaymentBalanceService;
 use App\Portals\Finance\FinancePayPalBalanceService;
+use App\Portals\Finance\FinancePayPalSettlementProjection;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
 use App\Portals\Finance\FinanceProductNames;
 use App\Portals\Finance\FinanceSettlementEditor;
@@ -1481,7 +1482,8 @@ class FinanceController extends Controller
         $db = $this->workbooks->database();
 
         return response()->view('portals.finance.accounting', [
-            ...$context, 'rates' => $db->table('finance_monthly_exchange_rates')->orderByDesc('month')->orderBy('currency')->get(),
+            ...$context, 'rates' => $db->table('finance_monthly_exchange_rates')->orderByDesc('month')->orderBy('channel')->orderBy('currency')->get(),
+            'rateChannels' => \App\Portals\Finance\FinanceAccountingService::RATE_CHANNELS,
             'creditUsdRates' => $db->table(FinanceCreditUsdRates::TABLE)->orderByDesc('starts_on')->orderBy('currency')->get(),
             'rateCurrencies' => FinanceRecord::query()->whereNotNull('currency')->distinct()->pluck('currency'),
             'rules' => $db->table('finance_transaction_type_mappings')->orderBy('priority')->orderBy('id')->get(),
@@ -1531,8 +1533,8 @@ class FinanceController extends Controller
                 $data = $request->validate(['month' => ['required', 'date_format:Y-m']]);
                 if ($action === 'rate') {
                     $data += $request->validate([
+                        'channel' => ['required', Rule::in(array_keys($service::RATE_CHANNELS))],
                         'currency' => ['required', 'regex:/^[A-Z]{3}$/'], 'cny_rate' => ['required', 'numeric', 'regex:/^\d{1,10}(?:\.\d{1,8})?$/', 'gt:0'],
-                        'source' => 'nullable|string|max:255',
                     ]);
                     if ($data['currency'] === 'CNY' && bccomp($data['cny_rate'], '1', 8) !== 0) {
                         throw ValidationException::withMessages(['cny_rate' => __('finance.accounting.cny_fixed')]);
@@ -1639,12 +1641,16 @@ class FinanceController extends Controller
         $columns = $summary->columns($tab);
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
+        // Currency is a dimension of the completed summary. Build one monthly
+        // snapshot and filter it afterwards so switching currencies never
+        // triggers another source scan.
+        $buildScope = \Illuminate\Support\Arr::except($scope, ['currency']);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
         $snapshotId = ! $statusOnly && ($request->boolean('download') || $request->has('page'))
             ? $request->query('report_snapshot')
             : null;
-        $build = fn () => $this->buildTransactionReport($tab, $scope, $month, $account);
-        $snapshotScope = [...$scope, 'channel' => $tab, '_usd_summary' => 1];
+        $build = fn () => $this->buildTransactionReport($tab, $buildScope, $month, $account);
+        $snapshotScope = [...$buildScope, 'channel' => $tab, '_settlement_currency_summary' => 1];
         $db = $this->workbooks->database();
         $live = true;
         $reusePublishedRevision = false;
@@ -1681,13 +1687,23 @@ class FinanceController extends Controller
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
+        $currencyOptions = collect($items)->pluck('currency')->filter()->unique()->sort()->values();
+        if (filled($filters['currency'] ?? null)) {
+            $items = array_values(array_filter($items, fn ($item) => $item['currency'] === $filters['currency']));
+        }
         $items = $summary->reallocateUnassignedFailures($items, $tab);
         $missingSummary = $summary->missingSummary($items, $tab, $filters['month']);
         $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
             && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
         if ($request->boolean('download')) {
             abort_if(! $live && $reportSnapshot === null, 409, '报表正在生成，请稍后导出。');
-            $export = \App\Portals\Finance\FinanceExportSelection::filter($request, [$missingSummary, ...$items])->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
+            // Keep the missing-data row when it carries data (or is the only
+            // result), but do not put an empty placeholder before valid rows.
+            $exportRows = $items === [] || (int) $missingSummary['orders'] > 0 || (int) $missingSummary['failed_orders'] > 0
+                ? [$missingSummary, ...$items]
+                : $items;
+            $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $exportRows)
+                ->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
 
             return $this->workbooks->download(array_values($columns), $export, 'finance-transactions-'.$tab.'-'.$filters['month'].'.xlsx');
         }
@@ -1714,12 +1730,7 @@ class FinanceController extends Controller
             'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
             'missingSummary' => $missingSummary,
             'creditMonths' => $creditMonths,
-            'currencyOptions' => Cache::remember($this->filterCacheKey('transaction-summary:currencies'), 60, fn () =>
-                collect(['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
-                    ->flatMap(fn ($dataset) => FinanceRecord::query()->where('dataset', $dataset)
-                        ->whereNotNull('currency')->distinct()->get(['dataset', 'currency'])->pluck('currency'))
-                ->map(fn ($currency) => strtoupper(trim($currency)))
-                ->filter(fn ($currency) => preg_match('/^[A-Z]{3}$/D', $currency))->unique()->sort()->values()),
+            'currencyOptions' => $currencyOptions,
             'subscriptionOptions' => $subscriptionOptions,
             'teamOptions' => $teamOptions,
             'conditionFields' => $service::CONDITION_FIELDS,
@@ -1836,9 +1847,18 @@ class FinanceController extends Controller
                 yield $row;
             }
         })();
-        $cnyPerUsd = $this->workbooks->database()->table('finance_monthly_exchange_rates')
-            ->where(['month' => $month->format('Y-m'), 'currency' => 'USD'])->value('cny_rate');
-        $items = $summary->summarize($source, $tab, usd: true, cnyPerUsd: $cnyPerUsd === null ? null : (string) $cnyPerUsd);
+        $accounting = app(\App\Portals\Finance\FinanceAccountingService::class);
+        $rateChannels = match ($tab) {
+            'paypal' => ['paypal'],
+            'ye' => ['ye'],
+            'worldpay' => ['worldpay'],
+            default => ['xuzong1', 'xuzong2', 'ye', 'worldpay'],
+        };
+        $cnyRatesByChannel = $accounting->monthlyCnyRates($month->format('Y-m'), $rateChannels);
+        $items = $summary->summarize($source, $tab, usd: true, cnyPerUsdByChannel: $cnyRatesByChannel);
+        if (filled($scope['currency'] ?? null)) {
+            $items = array_values(array_filter($items, fn ($item) => $item['currency'] === $scope['currency']));
+        }
         if (collect(\Illuminate\Support\Arr::only($scope, ['payment_account_id', 'currency', 'team', 'subscription', 'conditions']))->contains(fn ($value) => filled($value))) {
             $buildAllocation = function () use ($service, $tab, $month, $reuse, $summary) {
                 $monthRows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse);
@@ -1870,11 +1890,14 @@ class FinanceController extends Controller
             }
             $scope = [
                 'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
-                'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account,
+                'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account ?? ($filters['account'] ?? null),
                 'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
-                'summary_currency' => $filters['currency'] ?? null,
-                'logistics_costs' => ! $settlementTimezones, 'include_unmatched_fees' => $settlementTimezones || $tab === 'ye',
+                'logistics_costs' => ! $settlementTimezones, 'summary_native_settlement' => ! $settlementTimezones,
+                'include_unmatched_fees' => $settlementTimezones || $tab === 'ye',
             ];
+            if (filled($filters['payment_method'] ?? null)) {
+                $scope['summary_row_filters']['payment_method'] = $filters['payment_method'];
+            }
             $paymentChannels = match ($tab) {
                 'credit_card' => ['xuzong1', 'xuzong2'],
                 'ye', 'worldpay' => [$tab],
@@ -1882,7 +1905,7 @@ class FinanceController extends Controller
                 default => [],
             };
             $projection = $reuse && ! $settlementTimezones ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
-                ->stream($channel, $scope, true, $filters['currency'] ?? null, $paymentChannels) : null;
+                ->stream($channel, $scope, true, paymentChannels: $paymentChannels) : null;
             $channelRows = $settlementTimezones
                 ? $this->settlementMonthRows($service, $channel, $scope, $paymentChannels, transactions: true)
                 : ($projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $scope, true,
@@ -1899,9 +1922,7 @@ class FinanceController extends Controller
                     || in_array($tab, ['ye', 'worldpay'], true) && $paymentChannel !== $tab) {
                     continue;
                 }
-                if (empty($filters['currency']) || $row['currency'] === $filters['currency']) {
-                    yield $row;
-                }
+                yield $row;
             }
         }
         });
@@ -2081,18 +2102,28 @@ class FinanceController extends Controller
                 $page = max(1, (int) $request->query('page', 1));
                 $deferPayPal = $canDeferTotal && filled($filters['order_status'] ?? null);
                 $paginationOptions = ['path' => $request->url(), 'query' => $request->except('settlement_total')];
-                if ($deferPayPal && $totalOnly) {
-                    [, $total] = $paypalOrders->page($filters, 0, 0);
+                $projected = ! $totalOnly
+                    ? app(FinancePayPalSettlementProjection::class)
+                        ->page($filters, ($page - 1) * $pageSize, $pageSize)
+                    : null;
+                if ($projected !== null) {
+                    [$rows, $total] = $projected;
+                    $subscriptions = $rows;
+                    $exactTotal = true;
+                } else {
+                    if ($deferPayPal && $totalOnly) {
+                        [, $total] = $paypalOrders->page($filters, 0, 0);
 
-                    return $this->settlementTotalResponse($total, $pageSize, $paginationOptions, $requestedPage);
-                }
-                [$rows, $total, $subscriptions, $exactTotal] = $paypalOrders->page(
-                    $filters, ($page - 1) * $pageSize, $deferPayPal ? $pageSize + 1 : $pageSize, stopAtLimit: $deferPayPal,
-                );
-                if ($deferPayPal && $rows->count() > $pageSize) {
-                    $rows = $rows->take($pageSize);
-                    if (! $exactTotal) {
-                        $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                        return $this->settlementTotalResponse($total, $pageSize, $paginationOptions, $requestedPage);
+                    }
+                    [$rows, $total, $subscriptions, $exactTotal] = $paypalOrders->page(
+                        $filters, ($page - 1) * $pageSize, $deferPayPal ? $pageSize + 1 : $pageSize, stopAtLimit: $deferPayPal,
+                    );
+                    if ($deferPayPal && $rows->count() > $pageSize) {
+                        $rows = $rows->take($pageSize);
+                        if (! $exactTotal) {
+                            $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                        }
                     }
                 }
                 $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $pageSize, $page,
@@ -2348,6 +2379,7 @@ class FinanceController extends Controller
 
         if ($channel === 'paypal') {
             app(FinancePayPalSettlementOrders::class)->forgetOrderGraph();
+            app(FinancePayPalSettlementProjection::class)->forget();
         }
 
         return redirect()->route('finance.report', ['report' => $report, ...$returnFilters])->with('success', '结算明细已保存。');
@@ -2395,6 +2427,7 @@ class FinanceController extends Controller
 
         if ($channel === 'paypal') {
             app(FinancePayPalSettlementOrders::class)->forgetOrderGraph();
+            app(FinancePayPalSettlementProjection::class)->forget();
         }
 
         return redirect()->route('finance.report', $report)->with('success', '已删除 '.count($data['ids']).' 条结算明细，原始订单已保留。');
@@ -2908,7 +2941,7 @@ class FinanceController extends Controller
 
         $message = '新增订单 '.$counts['orders'].' 笔，跳过重复订单 '.$counts['duplicates'].' 笔。';
         if ($counts['statements']) {
-            $message .= '识别结算报表 '.$counts['statements'].' 份，累计账单明细 '.$counts['entries'].' 条。';
+            $message .= '识别结算报表 '.$counts['statements'].' 份，新增账单流水 '.$counts['entries'].' 条，跳过重复报表 '.$counts['repeated_statements'].' 份。';
         }
         if ($counts['statements_with_unmatched']) {
             $message .= '其中 '.$counts['statements_with_unmatched'].' 份报表仍有待匹配交易，后续可补导订单。';
@@ -3256,7 +3289,12 @@ class FinanceController extends Controller
         $accountKeys = $includeOptions ? FinancePaymentAccount::query()->pluck('activity_account')
             ->push(\App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT)->flip() : collect();
         $layer = $data['layer'] ?? 'account';
-        $rows = (function () use ($service, $filters, $data, $report, $reuse, $layer, $includeOptions, $accountKeys, &$optionValues) {
+        $accounting = app(\App\Portals\Finance\FinanceAccountingService::class);
+        $cnyRatesByChannel = collect(array_keys($accounting::RATE_CHANNELS))->mapWithKeys(fn ($channel) => [
+            $channel => $accounting->monthlyCnyRate($comparisonMonth, 'USD', $channel),
+        ])->all();
+        $missingMonthlyRate = false;
+        $rows = (function () use ($service, $filters, $data, $report, $reuse, $layer, $includeOptions, $accountKeys, &$optionValues, $cnyRatesByChannel, &$missingMonthlyRate) {
             foreach (['paypal', 'credit_card'] as $channel) {
                 if (($data['channel'] ?? '') === 'paypal' && $channel !== 'paypal'
                     || filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'combined'], true) && $channel === 'paypal') {
@@ -3321,6 +3359,15 @@ class FinanceController extends Controller
                             continue 2;
                         }
                     }
+                    if ($report === 'losses') {
+                        $rate = $cnyRatesByChannel[$row['payment_channel']] ?? null;
+                        foreach (['logistics', 'purchase'] as $field) {
+                            if ($row[$field] !== null) {
+                                $missingMonthlyRate = $missingMonthlyRate || $rate === null;
+                                $row[$field] = $rate === null ? null : bcdiv($row[$field], $rate, 8);
+                            }
+                        }
+                    }
                     if ($report === 'summary' && in_array($layer, ['account', 'channel', 'team', 'subscription', 'detail'], true)) {
                         $row['channel'] = $row['payment_channel'];
                     }
@@ -3352,7 +3399,16 @@ class FinanceController extends Controller
         if ($report === 'summary') {
             $this->applyTransactionFailureCounts($groups, $service, $start, $data, $layer, $reuse);
         }
-        $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')->where('month', $comparisonMonth)->where('currency', 'USD')->value('cny_rate');
+        $selectedRateChannels = match ($data['channel'] ?? null) {
+            'paypal', 'xuzong1', 'xuzong2', 'ye', 'worldpay' => [$data['channel']],
+            'xuzong' => ['xuzong1', 'xuzong2'],
+            'credit_card' => ['xuzong1', 'xuzong2', 'ye', 'worldpay'],
+            default => array_keys($accounting::RATE_CHANNELS),
+        };
+        $selectedRates = array_intersect_key($cnyRatesByChannel, array_flip($selectedRateChannels));
+        $configuredRates = array_filter($selectedRates, fn ($value) => $value !== null);
+        $rate = $missingMonthlyRate || $configuredRates === [] ? null
+            : (count($selectedRateChannels) === 1 ? reset($configuredRates) : $selectedRates);
         $metrics = ['logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比', 'refund' => '退款金额占比', 'refund_fee' => '退款费用占比', 'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比'];
         foreach ($groups as &$group) {
             $group['ratios'] = [];
@@ -3373,9 +3429,6 @@ class FinanceController extends Controller
                     $amount = bcadd($amount, \App\Portals\Finance\FinanceTransactionSummary::shopifyPayPalDisputeFee(
                         $group['dispute_fee'], $comparisonMonth
                     ), 8);
-                }
-                if (in_array($key, ['logistics', 'purchase'], true)) {
-                    $amount = $amount === null || $rate === null ? null : bcdiv($amount, $rate, 8);
                 }
                 $group['ratios'][$key] = $amount === null || $group['settlement'] === null || bccomp($group['settlement'], '0', 8) === 0 ? null : bcmul(bcdiv($amount, $group['settlement'], 10), '100', 8);
                 if ($group['ratios'][$key] !== null) {
@@ -3404,14 +3457,15 @@ class FinanceController extends Controller
         };
         $counts = [];
         $unallocated = [];
+        $failureFilters = \Illuminate\Support\Arr::only($filters, ['account', 'team', 'subscription', 'payment_method']);
         $itemsByTab = count($tabs) === 4
             ? $summary->summarizeFailuresByTab($this->transactionSummaryRows(
-                $service, 'all', [], $month, null, reuse: $reuse, settlementTimezones: true
+                $service, 'all', $failureFilters, $month, null, reuse: $reuse, settlementTimezones: true
             ))
             : null;
         foreach ($tabs as $tab) {
             $items = $itemsByTab === null
-                ? $summary->summarize($this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, settlementTimezones: true), $tab)
+                ? $summary->summarize($this->transactionSummaryRows($service, $tab, $failureFilters, $month, null, reuse: $reuse, settlementTimezones: true), $tab)
                 : array_filter($itemsByTab, fn ($item) => $item['_failure_tab'] === $tab);
             foreach ($items as $item) {
                 if (! $item['failed_orders']) {

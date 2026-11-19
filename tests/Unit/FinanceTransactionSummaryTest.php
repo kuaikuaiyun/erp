@@ -49,4 +49,26 @@ class FinanceTransactionSummaryTest extends TestCase
         $this->assertNull($missing[0]['payable']);
         $this->assertNull($missing[0]['logistics']);
     }
+
+    public function test_transaction_summary_keeps_actual_settlement_currencies_and_uses_each_channel_rate(): void
+    {
+        $base = ['channel' => 'credit_card', 'account' => 'A', 'team' => '深圳', 'subscription' => '',
+            'month' => '2026-11', 'success' => true, 'failed' => false, 'gross' => '100'];
+        $rows = [
+            [...$base, 'payment_channel' => 'ye', 'currency' => 'USD', '_summary_settlement_currency' => 'GBP',
+                'settlement' => '80', 'logistics' => '80', 'purchase' => '160'],
+            [...$base, 'payment_channel' => 'worldpay', 'currency' => 'USD', '_summary_settlement_currency' => 'EUR',
+                'settlement' => '90', 'logistics' => '75', 'purchase' => '150'],
+        ];
+
+        $items = (new FinanceTransactionSummary)->summarize($rows, 'combined', usd: true, cnyPerUsdByChannel: [
+            'ye' => ['GBP' => '8'], 'worldpay' => ['EUR' => '7.5'],
+        ]);
+        $items = collect($items)->keyBy('currency');
+
+        $this->assertSame(['EUR', 'GBP'], $items->keys()->sort()->values()->all());
+        $this->assertSame('80.00000000', $items['GBP']['amount']);
+        $this->assertSame('10.00000000', $items['GBP']['logistics']);
+        $this->assertSame('20.00000000', $items['EUR']['purchase']);
+    }
 }

@@ -146,6 +146,9 @@ class FinanceWorldpayImport
                         '支付方式' => $row['支付方式'] ?? '', '卡种' => $row['卡种'] ?? '',
                     ]);
                 }
+                // Every imported bill row is an accounting adjustment. Keep a
+                // separate event even when the row content is identical, so a
+                // repeated bill import applies its amount again by design.
                 $payload['_worldpay_posted'][(string) \Illuminate\Support\Str::uuid()] = $row;
             } else {
                 $payload['_worldpay_events'][(string) \Illuminate\Support\Str::uuid()] = $row;

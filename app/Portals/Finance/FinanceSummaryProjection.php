@@ -63,6 +63,25 @@ class FinanceSummaryProjection
                 ->when(filled($currency), fn ($query) => $query->where('currency', $currency))
                 ->orderBy('position');
 
+            $hasFilterColumns = $db->getSchemaBuilder()->hasColumn('finance_summary_rows', 'payment_channel');
+            if ($hasFilterColumns) {
+                if ($paymentChannels !== []) {
+                    $rows->whereIn('payment_channel', $paymentChannels);
+                }
+                if (filled($filters['team'] ?? null)) {
+                    $rows->where('summary_team', $filters['team']);
+                }
+                if (filled($filters['subscription'] ?? null)) {
+                    $rows->where('subscription', FinanceSettlementService::subscriptionLabel($filters['subscription']));
+                }
+                foreach (['account_key' => 'account', 'owner' => 'owner', 'team' => 'team',
+                    'subscription' => 'subscription', 'payment_method' => 'payment_method'] as $filter => $column) {
+                    if (filled($filters['summary_row_filters'][$filter] ?? null)) {
+                        $rows->where($column, $filters['summary_row_filters'][$filter]);
+                    }
+                }
+            }
+
             $first = (clone $rows)->value('payload');
             if ($first !== null && ! isset(json_decode($first, true, 512, JSON_THROW_ON_ERROR)['payment_channel'])) {
                 return null;
@@ -75,6 +94,10 @@ class FinanceSummaryProjection
                 && (json_decode($first, true, 512, JSON_THROW_ON_ERROR)['_summary_usd_version'] ?? null) !== 1) {
                 return null;
             }
+            if ($transactions && $first !== null
+                && (json_decode($first, true, 512, JSON_THROW_ON_ERROR)['_summary_settlement_currency_version'] ?? null) !== 1) {
+                return null;
+            }
             if ($channel === 'credit_card' && $first !== null
                 && (json_decode($first, true, 512, JSON_THROW_ON_ERROR)['_summary_fx_version'] ?? null)
                     !== app(FinanceCreditUsdRates::class)->fingerprint($month)) {
@@ -83,17 +106,17 @@ class FinanceSummaryProjection
                 return null;
             }
 
-            if ($paymentChannels !== []) {
+            if ($paymentChannels !== [] && ! $hasFilterColumns) {
                 $rows->whereIn('payload->payment_channel', $paymentChannels);
             }
-            if (filled($filters['team'] ?? null)) {
+            if (filled($filters['team'] ?? null) && ! $hasFilterColumns) {
                 $rows->where('payload->_summary_team', $filters['team']);
             }
-            if (filled($filters['subscription'] ?? null)) {
+            if (filled($filters['subscription'] ?? null) && ! $hasFilterColumns) {
                 $rows->where('payload->subscription', FinanceSettlementService::subscriptionLabel($filters['subscription']));
             }
 
-            return $rows->select('position', 'payload')->lazyById(2000, 'position')
+            return $rows->select('position', 'payload')->lazyById(10000, 'position')
                 ->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))
                 ->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['_summary_team'] === $filters['team'])
                 && (! filled($filters['subscription'] ?? null) || $row['subscription'] === FinanceSettlementService::subscriptionLabel($filters['subscription'])))
@@ -116,7 +139,7 @@ class FinanceSummaryProjection
         $nextRevision = (int) $db->table('finance_summary_periods')->where([
             'month' => $start->addMonth()->format('Y-m'), 'channel' => $period->channel,
         ])->value('revision');
-        $projectionVersion = hash('sha256', json_encode([2, $nextRevision], JSON_THROW_ON_ERROR));
+        $projectionVersion = hash('sha256', json_encode([3, $nextRevision], JSON_THROW_ON_ERROR));
         $fxVersion = $period->channel === 'credit_card' ? app(FinanceCreditUsdRates::class)->fingerprint($period->month) : null;
         if ((int) $period->published >= (int) $period->revision) {
             $publishedRows = $db->table('finance_summary_rows')->where(['month' => $period->month, 'channel' => $period->channel,
@@ -140,11 +163,13 @@ class FinanceSummaryProjection
         $scope = ['month' => $period->month, 'channel' => $period->channel];
         $version = [...$scope, 'revision' => $period->revision];
         $db->table('finance_summary_rows')->where($version)->delete();
+        $hasFilterColumns = $db->getSchemaBuilder()->hasColumn('finance_summary_rows', 'payment_channel');
         foreach ([['Asia/Shanghai', false], ['Asia/Shanghai', true], ['-04:00', false], ['-04:00', true]] as [$timezone, $transactions]) {
             $batch = [];
             $position = 0;
             $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(),
-                'timezone' => $timezone, 'logistics_costs' => $transactions, 'summary_projection' => true, 'include_unmatched_fees' => true];
+                'timezone' => $timezone, 'logistics_costs' => $transactions, 'summary_projection' => true,
+                'summary_native_settlement' => $transactions, 'include_unmatched_fees' => true];
             if ($period->channel === 'credit_card' && ($timezone === '-04:00' || ! $transactions)) {
                 $filters['summary_payment_channels'] = $timezone === '-04:00' ? ['xuzong1', 'xuzong2'] : ['ye', 'worldpay'];
             }
@@ -156,6 +181,14 @@ class FinanceSummaryProjection
                 }
                 $batch[] = [...$version, 'timezone' => $timezone, 'transactions' => $transactions, 'position' => ++$position,
                     'account' => $row['_summary_source_account'], 'currency' => $row['currency'] ?? null,
+                    ...($hasFilterColumns ? [
+                        'payment_channel' => $row['payment_channel'] ?? null,
+                        'owner' => $row['owner'] ?? null,
+                        'team' => $row['team'] ?? null,
+                        'summary_team' => $row['_summary_team'] ?? null,
+                        'subscription' => $row['subscription'] ?? null,
+                        'payment_method' => $row['payment_method'] ?? null,
+                    ] : []),
                     'payload' => json_encode(array_diff_key($row, ['_summary_source_account' => true]), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)];
                 if (count($batch) === 250) {
                     $db->table('finance_summary_rows')->insert($batch);
@@ -172,7 +205,9 @@ class FinanceSummaryProjection
         }
         // A concurrent import changes the revision in the same transaction as its source rows.
         $published = $db->table('finance_summary_periods')->where($version)->update(['published' => $period->revision]);
-        if ($published) {
+        $alreadyPublished = ! $published && $db->table('finance_summary_periods')->where($version)
+            ->where('published', $period->revision)->exists();
+        if ($published || $alreadyPublished) {
             // Keep the immediately preceding publication available to in-flight readers.
             $db->table('finance_summary_rows')->where($scope)->where('revision', '<', $period->published)->delete();
         } else {
@@ -186,7 +221,8 @@ class FinanceSummaryProjection
         $scopes = [['Asia/Shanghai', true], ['Asia/Shanghai', false], ['-04:00', false]];
         foreach ($scopes as [$zone, $costs]) {
             $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(),
-                'timezone' => $zone, 'logistics_costs' => $costs, 'include_unmatched_fees' => true];
+                'timezone' => $zone, 'logistics_costs' => $costs,
+                'summary_native_settlement' => $costs, 'include_unmatched_fees' => true];
             if ($period->channel === 'credit_card' && ! $costs) {
                 $filters['summary_payment_channels'] = $zone === '-04:00' ? ['xuzong1', 'xuzong2'] : ['ye', 'worldpay'];
             }

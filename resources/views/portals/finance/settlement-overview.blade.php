@@ -132,7 +132,14 @@ document.getElementById('overview-channel').addEventListener('change', function 
     </p>
 @endif
 </form>
-<p class="overview-rate {{ $rate === null ? 'is-missing' : '' }}"><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rate === null ? '本月美元兑人民币汇率未配置，物流和采购损耗占比暂不能计算。' : '本月汇率：1 USD = '.\App\Portals\Finance\FinanceCatalog::reportAmount($rate).' CNY' }}</p>
+@php
+    $rateText = $rate === null
+        ? '本月对应通道的美元兑人民币汇率未配置，物流和采购损耗占比暂不能计算。'
+        : (is_array($rate)
+            ? '本月汇率按各支付通道分别配置，物流和采购成本已按数据所属通道换算。'
+            : '本月汇率：1 USD = '.\App\Portals\Finance\FinanceCatalog::reportAmount($rate).' CNY');
+@endphp
+<p class="overview-rate {{ $rate === null ? 'is-missing' : '' }}"><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rateText }}</p>
 </div></div>
 @if($report === 'summary')
 <div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ $summaryAwaitingResult ? '待生成' : count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ $group['name'] }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">{{ $summaryAwaitingResult ? ($summaryStatus['state'] === 'failed' ? '报表生成失败，后台将重试。' : '报表正在生成，请稍候。') : '无符合条件的记录' }}</td></tr>@endforelse</tbody></table></div></div>

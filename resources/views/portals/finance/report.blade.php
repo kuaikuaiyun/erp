@@ -22,7 +22,7 @@
     <div class="form-group"><label>会计月份（北京时间）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
     <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach</select></div>
     <input type="hidden" name="channel" value="{{ $tab }}">
-    <div class="form-group"><label for="report-currency">货币</label><input id="report-currency" name="currency" list="report-currencies" value="{{ $filters['currency'] ?? '' }}" class="form-control" placeholder="全部货币，可输入或选择" maxlength="3" pattern="[A-Z]{3}"><datalist id="report-currencies">@foreach($currencyOptions as $currency)<option value="{{ $currency }}">@endforeach</datalist></div>
+    <div class="form-group"><label for="report-currency">结算货币</label><input id="report-currency" name="currency" list="report-currencies" value="{{ $filters['currency'] ?? '' }}" class="form-control" placeholder="全部结算货币，可输入或选择" maxlength="3" pattern="[A-Z]{3}"><datalist id="report-currencies">@foreach($currencyOptions as $currency)<option value="{{ $currency }}">@endforeach</datalist></div>
     <div class="form-group"><label for="report-team">区域</label><input id="report-team" list="report-teams" name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" placeholder="全部区域，可输入或选择" maxlength="100"><datalist id="report-teams">@foreach($teamOptions as $team)<option value="{{ $team }}">@endforeach</datalist></div>
     <div class="form-group"><label for="report-subscription">订阅类型</label><input id="report-subscription" list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions" data-options-url="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'subscription_options' => 1]) }}">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
     @include('portals.finance.partials.filter-conditions')
@@ -48,7 +48,7 @@
         @endif
     </p>
 @endif
-<p class="finance-report-help">按支付账户、区域和订阅类型汇总，金额统一以美元（USD）计。金额和结算金额取渠道明细的美元结算值；物流和采购成本按会计月份的人民币兑美元汇率折算，未导入成本或缺少汇率时留空。</p>
+<p class="finance-report-help">按支付账户、区域和订阅类型汇总，结算货币取渠道实际返回的币种；PayPal 和徐总信用卡当前为美元（USD），叶总支付和 Worldpay 可能为其他币种。金额和结算金额按对应结算货币统计；物流和采购成本按会计月份的“通道 + 结算货币”人民币汇率折算，未导入成本或缺少汇率时留空。</p>
 <p class="finance-report-help">顶部“缺失数据汇总”统计当前筛选下区域缺失的数据；PayPal、徐总信用卡和 Shopify 同时包含订阅类型缺失的数据。美元结算值缺失时，对应汇总金额留空。</p>
 <div class="box">
     <nav class="finance-summary-tabs finance-channel-tabs" aria-label="交易汇总通道">

@@ -31,7 +31,7 @@ class FinanceReportSnapshots
         }
         $failed = false;
         $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
-            ->where('report', '<>', 'transactions')->where('month', '<>', '')
+            ->where('month', '<>', '')
             ->orderByDesc('used_at')->orderBy('scope')->get();
         foreach ($activeScopes as $scope) {
             $started = hrtime(true);
@@ -106,7 +106,10 @@ class FinanceReportSnapshots
         }
         $queryCurrentData = $report === 'transactions';
         if ($queryCurrentData) {
-            $live = true;
+            // A transaction report may run synchronously only when its caller has
+            // verified that every source projection is current. Otherwise the web
+            // request must serve the previous snapshot (or a pending state) and let
+            // the scheduler rebuild it, rather than falling back to raw ledgers.
             $reusePublishedRevision = $reusePublishedRevision || FinanceSummaryTriggers::available($db);
         }
 
@@ -134,8 +137,8 @@ class FinanceReportSnapshots
             $revision = null;
             // The caller enables reuse only after every source projection is published at its current revision.
             if ($reusePublishedRevision && ! $db->table('finance_summary_changes')->exists()) {
-                // Usage metadata keeps active pagination/export versions from being pruned.
-                // refresh() no longer enqueues these report types for background generation.
+                // Usage metadata keeps active pagination/export versions from being pruned
+                // and lets the scheduler refresh them after a source revision changes.
                 $db->table('finance_report_scopes')->upsert([
                     compact('scope', 'month', 'report') + ['filters' => json_encode($filters, JSON_THROW_ON_ERROR), 'used_at' => now()],
                 ], ['scope'], ['used_at']);
@@ -222,7 +225,7 @@ class FinanceReportSnapshots
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
         $channel = $filters['channel'] ?? null;
-        $transactionVersion = 13;
+        $transactionVersion = 14;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
@@ -241,14 +244,15 @@ class FinanceReportSnapshots
             ->when($channel === 'paypal', fn ($query) => $query->where('channel', 'paypal'))
             ->when(filled($channel) && ! in_array($channel, ['paypal', 'combined'], true), fn ($query) => $query->where('channel', 'credit_card'))
             ->orderBy('month')->orderBy('channel')->get(['month', 'channel', 'revision']);
-        $rate = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])->value('cny_rate');
+        $rates = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])
+            ->orderBy('channel')->get(['channel', 'cny_rate']);
 
         $version = match ($report) {
             'transactions' => $transactionVersion,
-            'summary' => 8,
-            default => 6,
+            'summary' => 9,
+            default => 7,
         };
-        return hash('sha256', json_encode([$version, $periods, $rate], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode([$version, $periods, $rates], JSON_THROW_ON_ERROR));
     }
 
     private function projectionsReady(Connection $db, string $month, array $filters): bool

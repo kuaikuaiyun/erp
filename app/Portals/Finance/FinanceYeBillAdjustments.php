@@ -19,9 +19,32 @@ class FinanceYeBillAdjustments
     public function read(UploadedFile $file): ?array
     {
         $headers = ['交易 ID', '流水订单号', '平台订单号', '商户订单号', '网站名称', '网关接入号', ...array_values(static::FIELDS)];
+        $hasAmount = fn (array $row) => collect(static::FIELDS)->contains(fn ($label) => filled($row[$label] ?? null));
+        if (strtolower($file->getClientOriginalExtension()) === 'xlsx') {
+            foreach (app(FinanceConfluxOrderReader::class)->rows($file, FinanceCreditSettlementLayout::SHEETS[static::CHANNEL]) as $line => [$cells]) {
+                if ($line === 1) {
+                    $names = array_map(fn ($value) => FinanceCatalog::simplified(trim((string) $value)), $cells);
+                    // A regular order workbook also contains optional adjustment
+                    // columns. Classify it by its required order headers before the
+                    // adjustment reader applies its lower 10,000-row safety limit.
+                    $orderHeaders = static::CHANNEL === 'ye'
+                        ? [['发起时间'], ['流水订单号', '交易 ID'], ['币种', '货币'], ['金额', '总额'], ['交易状态', '状态']]
+                        : [['网关接入号'], ['流水订单号', '交易 ID'], ['交易时间'], ['币种', '货币'], ['交易金额', '总额'], ['交易状态', '状态']];
+                    if (collect($orderHeaders)->every(fn ($alternatives) => collect($alternatives)->contains(
+                        fn ($header) => in_array($header, $names, true)
+                    ))) {
+                        return null;
+                    }
+                    break;
+                }
+                if ($line > 1) {
+                    return null;
+                }
+            }
+        }
+
         $rows = app(FinanceWorkbookService::class)->read($file, $headers, optionalHeaders: $headers, maxRows: 10000);
-        return collect($rows)->contains(fn ($row) => collect(static::FIELDS)->contains(fn ($label) => filled($row[$label] ?? null)))
-            ? $rows : null;
+        return collect($rows)->contains($hasAmount) ? $rows : null;
     }
 
     public function import(array $rows, string $settlementType, int $actor, ?string $account = null): int
