@@ -20,7 +20,7 @@
                     <td><input class="form-control" name="ads[{{$index}}][agency]" value="{{ $row['agency'] ?? '' }}" required></td>
                     <td><input class="form-control" name="ads[{{$index}}][media_source]" value="{{ $row['media_source'] ?? '' }}" required></td>
                     <td><input class="form-control" name="ads[{{$index}}][account_name]" value="{{ $row['account_name'] ?? '' }}" required></td>
-                    <td><input class="form-control" inputmode="numeric" pattern="[0-9]+" title="账户编号只能填写数字" name="ads[{{$index}}][account_number]" value="{{ $row['account_number'] ?? '' }}" required></td>
+                    <td><input class="form-control" inputmode="text" pattern="[0-9]+(-[0-9]+)*" title="账户编号只能填写数字和中横线，例如 460-046-8347" name="ads[{{$index}}][account_number]" value="{{ $row['account_number'] ?? '' }}" required></td>
                     <td><input class="form-control money-input js-book-spend" type="number" min="0" step="0.0001" name="ads[{{$index}}][book_spend]" value="{{ $row['book_spend'] ?? 0 }}" required></td>
                     <td><input class="form-control money-input js-coefficient" type="number" min="0" step="0.0001" name="ads[{{$index}}][settlement_coefficient]" value="{{ $row['settlement_coefficient'] ?? 0 }}" required></td>
                     <td><strong class="js-actual-spend">${{ number_format((float)($row['actual_spend'] ?? 0),2) }}</strong></td>

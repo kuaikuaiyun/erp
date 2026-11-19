@@ -1404,18 +1404,27 @@ class ProductRequestController extends Controller
                 ->pluck('id')
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
+            $selectedSystemSkus = $this->splitSkus((string) ($data['system_skus'] ?? ''));
             // 面板左列可临时修正运营 SKU，仅用于本次勾选与链接级 SKU 处理；
             // 需求记录保留运营原始提交的 skus，采购确认值写入 procurement_skus，运营端据此提示 SKU 有变动
             // 右侧系统 SKU 是同一 1688 链接的历史主数据，当前检验只能追加，不能删除或覆盖。
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
-            unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
+            $systemSkuValueMap = $this->parseProcurementSkuValues((string) ($data['system_sku_value_rows'] ?? ''), $selectedSystemSkus);
+            unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['system_skus'], $data['link_skus'], $data['sku_value_rows'], $data['system_sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
             // 链接级 SKU 始终保留系统历史集合，并追加本次勾选的运营 SKU。
             $linkSkus = array_values(array_unique(array_merge(
                 $this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())),
+                $selectedSystemSkus,
                 $checkedSkus,
             )));
-            $linkSkuValueMap = array_replace($skuValueMap, $this->linkSkuValues($linkHash));
-            $procurementSkus = implode(',', $checkedSkus);
+            $linkSkuValueMap = array_replace($skuValueMap, $systemSkuValueMap, $this->linkSkuValues($linkHash));
+            // 未勾选运营 SKU 而直接采用系统历史 SKU 时，也要把实际采用的 SKU 写入当前记录；
+            // 否则详情、仓库验收等后续流程无法得知本条记录使用了哪些 SKU。
+            $recordSkus = $checkedSkus !== [] ? $checkedSkus : ($selectedSystemSkus !== [] ? $selectedSystemSkus : $linkSkus);
+            $recordSkuValues = $checkedSkus === []
+                ? array_intersect_key(array_replace($systemSkuValueMap, $linkSkuValueMap), array_flip($recordSkus))
+                : $skuValueMap;
+            $procurementSkus = implode(',', $recordSkus);
             if ($linkSkus !== []) {
                 $linkSkuPayload = [
                     'supplier_url' => $normalizedUrl,
@@ -1454,7 +1463,7 @@ class ProductRequestController extends Controller
             $locked->fill([
                 ...$data,
                 'procurement_skus' => $procurementSkus,
-                'procurement_sku_values' => $skuValueMap === [] ? null : $skuValueMap,
+                'procurement_sku_values' => $recordSkuValues === [] ? null : $recordSkuValues,
                 'supplier_url_normalized' => $normalizedUrl,
                 'supplier_url_hash' => $linkHash,
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
@@ -1547,8 +1556,10 @@ class ProductRequestController extends Controller
             'skus' => ['nullable', 'string', 'max:10000'],
             'selected_skus' => ['nullable', 'array', 'max:100'],
             'selected_skus.*' => ['string', 'max:500'],
+            'system_skus' => ['nullable', 'string', 'max:20000'],
             'link_skus' => ['nullable', 'string', 'max:20000'],
             'sku_value_rows' => ['nullable', 'string', 'max:20000'],
+            'system_sku_value_rows' => ['nullable', 'string', 'max:20000'],
             'reuse_source_id' => ['nullable', 'integer'],
             'removed_seller_images' => ['nullable', 'string', 'max:100'],
             'seller_images' => ['nullable', 'array', 'max:3'],
@@ -2901,9 +2912,11 @@ class ProductRequestController extends Controller
             'erp_binding_status' => ['nullable', Rule::in(['unbound', 'bound'])],
             'selected_skus' => ['nullable', 'array', 'max:100'],
             'selected_skus.*' => ['string', 'max:500'],
+            'system_skus' => ['nullable', 'string', 'max:20000'],
             'skus' => ['nullable', 'string', 'max:10000'],
             'link_skus' => ['nullable', 'string', 'max:20000'],
             'sku_value_rows' => ['nullable', 'string', 'max:20000'],
+            'system_sku_value_rows' => ['nullable', 'string', 'max:20000'],
             // 卖家图 / 实拍图必填：已保存附件或复用来源已带图时无需重复上传
             'seller_images' => ($reusedImages || $hasExistingImages || $hasDraftImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
@@ -2921,10 +2934,13 @@ class ProductRequestController extends Controller
                 ->unique();
             // 系统 SKU 不作为 selected_skus[] 提交，保存时会由服务端自动保留。
             $supplierUrl = trim((string) $request->input('supplier_url', ''));
-            $systemSkus = [];
+            $systemSkus = $this->splitSkus((string) $request->input('system_skus', ''));
             if ($supplierUrl !== '' && $productRequest) {
                 $supplierHash = $this->workflow->supplierUrlHash($this->workflow->normalizeSupplierUrl($supplierUrl));
-                $systemSkus = $this->linkSkuSet($supplierHash, $productRequest->getKey());
+                $systemSkus = array_values(array_unique(array_merge(
+                    $systemSkus,
+                    $this->splitSkus($this->linkSkuSet($supplierHash, $productRequest->getKey())),
+                )));
             }
             if ($checkedSkus->isEmpty() && $systemSkus === []) {
                 $validator->errors()->add('selected_skus', __('product_requests.procurement.sku_check_required'));
@@ -3066,10 +3082,17 @@ class ProductRequestController extends Controller
                     if (!is_array($row)) {
                         continue;
                     }
-                    $skuValues[$sku] = [
-                        'price' => (string) ($row['price'] ?? ''),
-                        'weight' => (string) ($row['weight'] ?? ''),
-                    ];
+                    // 历史记录中缺失的价格或重量不能覆盖链接 SKU 库里已保存的有效值。
+                    $current = $skuValues[$sku] ?? ['price' => '', 'weight' => ''];
+                    $price = trim((string) ($row['price'] ?? ''));
+                    $weight = trim((string) ($row['weight'] ?? ''));
+                    if ($price !== '') {
+                        $current['price'] = $price;
+                    }
+                    if ($weight !== '') {
+                        $current['weight'] = $weight;
+                    }
+                    $skuValues[$sku] = $current;
                 }
             });
 

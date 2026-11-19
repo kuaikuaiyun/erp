@@ -299,7 +299,7 @@ class FashionAdvertisingReviewController extends Controller
             'entries.*.agency' => ['required', 'string', 'max:100'],
             'entries.*.media' => ['required', 'string', 'max:100'],
             'entries.*.account_name' => ['required', 'string', 'max:191'],
-            'entries.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+$/'],
+            'entries.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+(?:-\d+)*$/'],
             'entries.*.store_domain' => ['nullable', 'string', 'max:191'],
             'entries.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'entries.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
