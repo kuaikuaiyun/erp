@@ -52,30 +52,11 @@
 @endpush
 @section('finance_content')
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
-@php
-    $summaryStatus = $reportStatuses[$filters['month']] ?? [];
-    $summaryAwaitingResult = collect($reportStatuses)->contains(fn ($status) => $status['state'] !== 'ready' && ! isset($status['updated_at']));
-    $statusNotices = collect($reportStatuses)
-        ->filter(fn ($status) => $status['state'] !== 'ready' || isset($status['updated_at']))
-        ->sortKeys()->take(-5);
-@endphp
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
-<details class="overview-status-disclosure">
-    <summary>
-        <span class="overview-status-title"><i class="fa fa-info-circle" aria-hidden="true"></i>报表生成通知</span>
-        <span class="overview-status-count">最近 {{ $statusNotices->count() }} 个期间 <i class="fa fa-chevron-down" aria-hidden="true"></i></span>
-    </summary>
-    <div class="overview-status-list">
-        <div hidden aria-hidden="true">@include('portals.finance.partials.report-snapshot-status', ['status' => $overviewStatus, 'watchSnapshot' => app(\App\Portals\Finance\FinanceReportSnapshots::class)->runsInBackground(), 'collapsible' => false])</div>
-        @foreach($statusNotices as $period => $status)
-        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => false, 'collapsible' => false])
-        @endforeach
-    </div>
-</details>
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
 @if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
-<div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" max="{{ $filters['month_to'] }}" class="form-control" data-overview-auto-submit required></div>
-<div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" min="{{ $filters['month_from'] }}" class="form-control" data-overview-auto-submit required></div>
+<div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
+<div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
 @php
     $selectedChannel = $filters['channel'] ?? '';
 @endphp
@@ -152,11 +133,7 @@
 @endphp
 @endif
 <div class="overview-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'month' => $filters['month'], 'month_from' => $filters['month_from'], 'month_to' => $filters['month_to']]) }}">重置</a>
-@if(collect($reportStatuses)->every(fn ($status) => $status['state'] === 'ready' || isset($status['updated_at'])))
-    <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), 'report_versions' => array_filter($reportSnapshots), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
-@else
-    <button type="button" class="btn btn-default" disabled>导出 Excel</button>
-@endif
+    <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
 </div>@if(($filters['channel'] ?? '') === 'credit_card')
     <p class="overview-rate overview-import-months">信用卡数据来自「信用卡结算明细」导入记录。
         @if($creditMonths)
@@ -182,7 +159,7 @@
 <p class="overview-rate {{ $rate === null ? 'is-missing' : '' }}"><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rateText }}</p>
 </div></div>
 @if($report === 'summary')
-<div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ $summaryAwaitingResult ? '待生成' : count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ \App\Portals\Finance\FinanceCatalog::settlementProjectName($group['name'], $group['channel']) }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">{{ $summaryAwaitingResult ? ($summaryStatus['state'] === 'failed' ? '报表生成失败，后台将重试。' : '报表正在生成，请稍候。') : '无符合条件的记录' }}</td></tr>@endforelse</tbody></table></div></div>
+<div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ \App\Portals\Finance\FinanceCatalog::settlementProjectName($group['name'], $group['channel']) }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">无符合条件的记录</td></tr>@endforelse</tbody></table></div></div>
 @else
 @php
     $scopeStats = $scopes->flatMap(function ($scope) use ($categoriesByScope, $groups, $panelScope, $panelCategory) {
@@ -213,7 +190,7 @@
 <div class="loss-comparison">
 @forelse($panels as $panel)
 <div class="box loss-month-panel">@include('portals.finance.partials.loss-month-table')</div>
-@empty<div class="box overview-empty"><p>{{ $overviewStatus['state'] === 'ready' ? '当前分类暂无数据' : '报表正在生成，请稍候。' }}</p>@if($overviewStatus['state'] === 'ready')<small>可切换分类或调整月份与筛选条件</small>@endif</div>@endforelse
+@empty<div class="box overview-empty"><p>当前分类暂无数据</p><small>可切换分类或调整月份与筛选条件</small></div>@endforelse
 </div>
 @php
     $switchPanels = $allPanels->map(fn ($panel, $index) => ['scope' => $panelScope($panel), 'category' => $panelCategory($panel), 'template' => 'loss-table-'.$index]);

@@ -75,5 +75,19 @@ document.addEventListener('click', function (event) {
 document.querySelectorAll('[data-finance-notice]').forEach(function (notice) {
     window.setTimeout(function () { notice.remove(); }, 10000);
 });
+document.querySelectorAll('form').forEach(function (form) {
+    var start = form.querySelector('input[name="month_from"]');
+    var end = form.querySelector('input[name="month_to"]');
+    if (!start || !end) return;
+    function validateMonthRange() {
+        end.setCustomValidity(start.value && end.value && start.value > end.value
+            ? '结束月份不能早于开始月份，请先选好开始和结束月份再查询。' : '');
+    }
+    start.addEventListener('input', validateMonthRange);
+    start.addEventListener('change', validateMonthRange);
+    end.addEventListener('input', validateMonthRange);
+    end.addEventListener('change', validateMonthRange);
+    validateMonthRange();
+});
 </script>
 @endpush

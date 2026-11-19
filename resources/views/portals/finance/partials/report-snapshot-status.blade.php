@@ -35,5 +35,5 @@
 </details>
 @endif
 @if($watch)
-    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=6" defer></script>
+    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=7" defer></script>
 @endif

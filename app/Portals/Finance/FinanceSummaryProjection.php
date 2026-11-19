@@ -32,7 +32,7 @@ class FinanceSummaryProjection
         return $rows === null ? null : collect(iterator_to_array($rows, false));
     }
 
-    public function stream(string $channel, array $filters, bool $transactions, ?string $currency = null, array $paymentChannels = []): ?iterable
+    public function stream(string $channel, array $filters, bool $transactions, ?string $currency = null, array $paymentChannels = [], bool $aggregateTransactions = false): ?iterable
     {
         $db = $this->workbooks->database();
         // MyISAM publication/cleanup blocks every reader of this large table.
@@ -48,8 +48,9 @@ class FinanceSummaryProjection
 
         $month = substr($filters['from'], 0, 7);
         $timezone = $filters['timezone'] ?? 'Asia/Shanghai';
-        return $db->transaction(function () use ($db, $month, $channel, $timezone, $filters, $transactions, $currency, $paymentChannels): ?iterable {
-            if ($db->table('finance_summary_changes')->exists()) {
+        return $db->transaction(function () use ($db, $month, $channel, $timezone, $filters, $transactions, $currency, $paymentChannels, $aggregateTransactions): ?iterable {
+            if ($db->table('finance_summary_changes')
+                ->when($channel === 'paypal', fn ($query) => $query->whereNotIn('source', ['fashion', 'fashion_item']))->exists()) {
                 return null;
             }
             $period = $db->table('finance_summary_periods')->where(compact('month', 'channel'))->first();
@@ -116,6 +117,10 @@ class FinanceSummaryProjection
                 $rows->where('payload->subscription', FinanceSettlementService::subscriptionLabel($filters['subscription']));
             }
 
+            if ($transactions && $aggregateTransactions && in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
+                return $this->aggregateTransactions($rows);
+            }
+
             return $rows->select('position', 'payload')->lazyById(10000, 'position')
                 ->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))
                 ->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['_summary_team'] === $filters['team'])
@@ -126,6 +131,44 @@ class FinanceSummaryProjection
                     return $row;
                 });
         });
+    }
+
+    /** SQL reduces current canonical order calculations; no report result is saved. */
+    private function aggregateTransactions(\Illuminate\Database\Query\Builder $rows): iterable
+    {
+        $value = static fn (string $field) => "NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.{$field}')), 'null')";
+        $number = static fn (string $field) => 'CAST('.$value($field).' AS DECIMAL(38, 8))';
+        $dimensions = ['channel', 'payment_channel', 'account', 'account_key', 'currency', 'team', 'subscription',
+            'month', 'success', 'failed', '_cost_adjustment', '_summary_settlement_currency'];
+        $query = (clone $rows)->reorder()->select([]);
+        foreach ($dimensions as $index => $field) {
+            $query->selectRaw("JSON_EXTRACT(payload, '$.{$field}') AS d{$index}")->groupBy('d'.$index);
+        }
+        // Null settlement must remain a separate group so missing USD values
+        // cannot disappear into SUM. Amount falls back to settlement per row.
+        foreach (['settlement', '_summary_amount_usd'] as $index => $field) {
+            $query->selectRaw('('.$value($field)." IS NULL) AS n{$index}")->groupBy('n'.$index);
+        }
+        $fields = array_values(array_unique(['gross', 'settlement', '_summary_amount_usd', ...array_keys(FinanceSettlementService::MONEY)]));
+        foreach ($fields as $index => $field) {
+            $query->selectRaw('SUM('.$number($field).") AS m{$index}");
+        }
+        $refund = $number('refund');
+        foreach (['frozen_refund' => 'refund', 'refund_top_up' => 'refund_fee'] as $field => $legacy) {
+            $refund = '(CASE WHEN '.$value('channel')." = 'paypal' AND COALESCE(".$number($field).', 0) <> 0 AND COALESCE('
+                .$number($legacy).', 0) = 0 THEN COALESCE('.$refund.', 0) + '.$number($field).' ELSE '.$refund.' END)';
+        }
+        $query->selectRaw('SUM('.$refund.') AS refund_total')->selectRaw('COUNT(*) AS row_count')
+            ->selectRaw('MIN(position) AS first_position')->orderBy('first_position');
+        foreach ($query->cursor() as $group) {
+            $row = ['_row_count' => (int) $group->row_count, '_summary_refund' => $group->refund_total];
+            foreach ($dimensions as $index => $field) {
+                $raw = $group->{'d'.$index};
+                $row[$field] = $raw === null ? null : json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            }
+            foreach ($fields as $index => $field) $row[$field] = $group->{'m'.$index};
+            yield $row;
+        }
     }
 
     public function refresh(object $period): void

@@ -2,7 +2,7 @@
 
 return [
     'summaries' => [
-        // Heavy publication belongs to the scheduled CLI worker, not PHP-FPM.
+        // Legacy report-snapshot options; ordinary reports no longer use them.
         'web_refresh' => env('FINANCE_SUMMARY_WEB_REFRESH', false),
         'snapshots_per_run' => 2,
         'snapshot_budget_seconds' => 45,

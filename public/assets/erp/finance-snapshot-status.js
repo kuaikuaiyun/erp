@@ -31,15 +31,15 @@
                 const response = await fetch(url, { headers: { Accept: 'application/json' } });
                 if (response.status === 401 || response.status === 403 || response.redirected) return;
                 if (response.ok) {
-                    const { state, updated_at: updatedAt, version, detail } = await response.json();
+                    const { state, updated_at: updatedAt, version, detail, has_results: hasResults } = await response.json();
                     if (navigating) return;
                     const detailMessage = notice.querySelector('[data-finance-snapshot-detail]');
                     if (detailMessage) detailMessage.textContent = detail ?? '';
                     // Live transaction status can become ready without a snapshot
                     // timestamp. A pending page still needs to load its first result.
-                    const changed = displayedState !== 'ready'
-                        || (version ? version !== displayedVersion : updatedAt && updatedAt !== displayedTime);
-                    if (state === 'ready' && changed) {
+                    const changed = version ? version !== displayedVersion
+                        : (updatedAt ? updatedAt !== displayedTime : displayedState !== 'ready');
+                    if ((state === 'ready' || hasResults) && changed) {
                         const latest = new URL(window.location.href);
                         latest.searchParams.delete('report_snapshot');
                         if (formValues() === originalFilters && !form.contains(document.activeElement)

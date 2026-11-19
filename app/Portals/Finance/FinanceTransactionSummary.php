@@ -173,50 +173,90 @@ class FinanceTransactionSummary
         $groups = [];
         $failedByMonth = [];
         foreach ($rows as $row) {
-            $dimensions = ['account' => $row['account'],
-                'currency' => $usd ? ($row['_summary_settlement_currency'] ?? self::SETTLEMENT_CURRENCY) : $row['currency'],
-                ...($tab === 'combined' ? [] : ['team' => $row['team'], 'subscription' => $row['subscription']]),
-                'month' => $row['month']];
-            $paymentChannel = $row['payment_channel'] ?? $row['channel'];
-            $summaryChannel = $tab === 'combined' ? self::combinedChannel($paymentChannel) : $paymentChannel;
-            $key = json_encode([$summaryChannel, $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
-            $group = &$groups[$key];
-            $group ??= [...$dimensions, 'channel' => $tab === 'combined' ? self::VIEWS[$summaryChannel] : self::VIEWS[$tab], '_payment_channel' => $paymentChannel,
-                'orders' => 0, 'account_group' => $key];
-            if (! empty($row['_cost_adjustment'])) {
-                foreach (array_intersect_key($row, ['purchase' => true, 'logistics' => true]) as $field => $value) {
-                    $group[$field] = bcadd($group[$field] ?? '0', $value, 8);
+            $this->accumulate($groups, $failedByMonth, $row, $tab, $usd);
+        }
+
+        return $this->finish($groups, $failedByMonth, $tab, $usd, $cnyPerUsd, $cnyPerUsdByChannel);
+    }
+
+    /** Read and match orders once for both the combined report and its missing-data total. */
+    public function summarizeCombined(iterable $rows, array $cnyPerUsdByChannel = []): array
+    {
+        $groups = $failed = [];
+        foreach (['combined', 'paypal', 'credit_card', 'ye', 'worldpay'] as $tab) {
+            $groups[$tab] = $failed[$tab] = [];
+        }
+        foreach ($rows as $row) {
+            $sourceTab = self::combinedChannel($row['payment_channel'] ?? $row['channel']);
+            if (! isset($groups[$sourceTab])) continue;
+            foreach (['combined', $sourceTab] as $tab) {
+                $this->accumulate($groups[$tab], $failed[$tab], $row, $tab, true);
+            }
+        }
+        $items = $this->finish($groups['combined'], $failed['combined'], 'combined', true, null, $cnyPerUsdByChannel);
+        $missing = [];
+        foreach (['paypal', 'credit_card', 'ye', 'worldpay'] as $tab) {
+            foreach ($this->finish($groups[$tab], $failed[$tab], $tab, true, null, $cnyPerUsdByChannel) as $item) {
+                if (! filled($item['team']) || (self::requiresSubscription($tab) && ! filled($item['subscription']))) {
+                    $missing[] = $item;
                 }
-                unset($group);
-                continue;
             }
-            $group['orders'] += (int) $row['success'];
-            if ($row['failed'] && ! $row['success']) {
-                $failedByMonth[$row['month']] = ($failedByMonth[$row['month']] ?? 0) + 1;
-            }
-            $paypal = $row['channel'] === 'paypal';
-            $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
-            $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
-            $values['settlement'] = $row['failed'] ? null : $row['settlement'];
-            // Canonical settlement rows already contain USD; never sum native gross as USD.
-            $values['amount'] = $usd ? ($row['failed'] ? null : ($row['_summary_amount_usd'] ?? $values['settlement']))
-                : ($paypal ? $values['settlement'] : $row['gross']);
-            if ($usd && $row['success'] && $values['settlement'] === null) {
-                $group['_missing_usd_settlement'] = true;
-            }
-            if ($tab === 'combined' && $paypal) {
-                $values['fee'] = $this->difference($row['fee'], $row['fee_return']);
-                $values['dispute_hold'] = $this->difference($row['dispute_hold'], $row['dispute_release']);
-                $values['ethoca_refund'] = $row['dispute_refund'];
-                $values['ethoca_fee'] = self::shopifyPayPalDisputeFee($row['dispute_fee'], $row['month']);
-            }
-            foreach ($values as $field => $value) {
-                if ($value !== null) {
-                    $group[$field] = bcadd($group[$field] ?? '0', $value, 8);
-                }
+        }
+        $items[] = ['_combined_missing_summary_groups' => $missing];
+
+        return $items;
+    }
+
+    private function accumulate(array &$groups, array &$failedByMonth, array $row, string $tab, bool $usd): void
+    {
+        $dimensions = ['account' => $row['account'],
+            'currency' => $usd ? ($row['_summary_settlement_currency'] ?? self::SETTLEMENT_CURRENCY) : $row['currency'],
+            ...($tab === 'combined' ? [] : ['team' => $row['team'], 'subscription' => $row['subscription']]),
+            'month' => $row['month']];
+        $paymentChannel = $row['payment_channel'] ?? $row['channel'];
+        $summaryChannel = $tab === 'combined' ? self::combinedChannel($paymentChannel) : $paymentChannel;
+        $key = json_encode([$summaryChannel, $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
+        $group = &$groups[$key];
+        $group ??= [...$dimensions, 'channel' => $tab === 'combined' ? self::VIEWS[$summaryChannel] : self::VIEWS[$tab], '_payment_channel' => $paymentChannel,
+            'orders' => 0, 'account_group' => $key];
+        if (! empty($row['_cost_adjustment'])) {
+            foreach (array_intersect_key($row, ['purchase' => true, 'logistics' => true]) as $field => $value) {
+                if ($value === null) continue;
+                $group[$field] = bcadd($group[$field] ?? '0', $value, 8);
             }
             unset($group);
+            return;
         }
+        $group['orders'] += (int) $row['success'] * ($row['_row_count'] ?? 1);
+        if ($row['failed'] && ! $row['success']) {
+            $failedByMonth[$row['month']] = ($failedByMonth[$row['month']] ?? 0) + ($row['_row_count'] ?? 1);
+        }
+        $paypal = $row['channel'] === 'paypal';
+        $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
+        $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
+        $values['settlement'] = $row['failed'] ? null : $row['settlement'];
+        // Canonical settlement rows already contain USD; never sum native gross as USD.
+        $values['amount'] = $usd ? ($row['failed'] ? null : ($row['_summary_amount_usd'] ?? $values['settlement']))
+            : ($paypal ? $values['settlement'] : $row['gross']);
+        if ($usd && $row['success'] && $values['settlement'] === null) {
+            $group['_missing_usd_settlement'] = true;
+        }
+        if ($tab === 'combined' && $paypal) {
+            $values['fee'] = $this->difference($row['fee'], $row['fee_return']);
+            $values['dispute_hold'] = $this->difference($row['dispute_hold'], $row['dispute_release']);
+            $values['ethoca_refund'] = $row['dispute_refund'] ?? null;
+            $values['ethoca_fee'] = self::shopifyPayPalDisputeFee($row['dispute_fee'], $row['month']);
+        }
+        foreach ($values as $field => $value) {
+            if ($value !== null) {
+                $group[$field] = bcadd($group[$field] ?? '0', $value, 8);
+            }
+        }
+        unset($group);
+    }
+
+    private function finish(array $groups, array $failedByMonth, string $tab, bool $usd, ?string $cnyPerUsd, array $cnyPerUsdByChannel): array
+    {
         $groups = $this->allocateFailures($groups, $failedByMonth, $tab);
         if ($tab === 'credit_card') {
             foreach ($groups as &$group) {
@@ -304,9 +344,9 @@ class FinanceTransactionSummary
             $key = json_encode([$platform, $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
             $groups[$tab][$key] ??= [...$dimensions, 'channel' => self::VIEWS[$tab], 'orders' => 0,
                 'failed_orders' => 0, 'account_group' => $key];
-            $groups[$tab][$key]['orders'] += (int) $row['success'];
+            $groups[$tab][$key]['orders'] += (int) $row['success'] * ($row['_row_count'] ?? 1);
             if ($row['failed'] && ! $row['success']) {
-                $failed[$tab][$row['month']] = ($failed[$tab][$row['month']] ?? 0) + 1;
+                $failed[$tab][$row['month']] = ($failed[$tab][$row['month']] ?? 0) + ($row['_row_count'] ?? 1);
             }
         }
 

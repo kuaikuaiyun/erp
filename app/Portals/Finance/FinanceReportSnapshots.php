@@ -122,9 +122,18 @@ class FinanceReportSnapshots
         $builds = 0;
         $buildLimit = max(1, (int) config('finance.summaries.snapshots_per_run', 2));
         $deadline = microtime(true) + max(1, (int) config('finance.summaries.snapshot_budget_seconds', 45));
-        $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
+        $publications = $db->table('finance_report_snapshots')->selectRaw('scope AS snapshot_scope, MAX(created_at) AS last_snapshot_at')->groupBy('scope');
+        $activeScopes = $db->table('finance_report_scopes')
+            ->leftJoinSub($publications, 'publications', fn ($join) => $join->on('finance_report_scopes.scope', '=', 'publications.snapshot_scope'))
+            ->select('finance_report_scopes.*')
+            ->where('used_at', '>=', $activeSince)
             ->where('month', '<>', '')
-            ->orderByDesc('used_at')->orderBy('scope')->get();
+            // User-requested scopes precede prewarming. Within that tier,
+            // missing and oldest publications precede recently refreshed ones.
+            // Otherwise the five-minute fallback revision can expire before a
+            // long month range ever receives its first complete set of results.
+            ->orderByRaw('CASE WHEN used_at >= ? THEN 0 ELSE 1 END', [now()->subDay()])
+            ->orderBy('last_snapshot_at')->orderByDesc('used_at')->orderBy('scope')->get();
         foreach ($activeScopes as $scope) {
             $started = hrtime(true);
             if (function_exists('memory_reset_peak_usage')) {

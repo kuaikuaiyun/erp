@@ -1596,7 +1596,6 @@ class FinanceController extends Controller
             'payment_accounts' => 'sometimes|array|max:100',
             'payment_accounts.*' => ['required', 'string', 'distinct', 'regex:/^(?:id:[1-9][0-9]*|channel:(?:ye|xuzong1|xuzong2|worldpay))$/'],
             'month_from' => 'nullable|date_format:Y-m', 'month_to' => 'nullable|date_format:Y-m|after_or_equal:month_from',
-            'report_versions' => 'sometimes|array', 'report_versions.*' => 'required|uuid',
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
             'page' => 'nullable|integer|min:1', 'payment_account_id' => 'nullable|integer|min:1',
             'currency' => ['nullable', 'regex:/^[A-Z]{3}$/'], 'channel' => ['nullable', Rule::in(array_keys(\App\Portals\Finance\FinanceTransactionSummary::VIEWS))],
@@ -1676,83 +1675,22 @@ class FinanceController extends Controller
                 ->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]));
         }
         $columns = $summary->columns($tab);
+        if ($statusOnly) return response()->json(['state' => 'ready'])->header('Cache-Control', 'no-store');
         $rangeFilters = $filters;
-        $rangeItems = $rangeSubscriptions = $rangeStatuses = $rangeSnapshots = [];
+        $items = $subscriptionOptions = [];
         foreach ($reportMonths as $reportMonth) {
-        $filters['month'] = $reportMonth;
-        $month = CarbonImmutable::parse($reportMonth.'-01', 'Asia/Shanghai');
-        $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download', 'month_from', 'month_to', 'report_versions']);
-        ksort($scope);
-        // These values are dimensions of the completed summary. Build one
-        // channel/month snapshot and filter it afterwards so ordinary searches
-        // do not register a new background report for every combination.
-        $buildScope = \Illuminate\Support\Arr::except($scope, [
-            'currency', 'payment_account_id', 'team', 'subscription', 'account_channel', 'payment_accounts',
-        ]);
-        $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $snapshotId = ! $statusOnly && ($request->boolean('download') || $request->has('page'))
-            ? ($rangeFilters['report_versions'][$reportMonth] ?? (count($reportMonths) === 1 ? $request->query('report_snapshot') : null))
-            : null;
-        $build = fn () => $this->buildTransactionReport($tab, $buildScope, $month, null);
-        // The combined result no longer uses the retired Shopify label or
-        // dimensions. Its own scope prevents serving an older snapshot, and
-        // includes the team-missing summary introduced for the total view.
-        $snapshotScope = [...$buildScope, 'channel' => $tab, '_settlement_currency_summary' => 3,
-            ...($tab === 'combined' ? ['_combined_channel_rollup' => 10] : [])];
-        $db = $this->workbooks->database();
-        $live = true;
-        $reusePublishedRevision = false;
-        if (in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
-            && $db->getSchemaBuilder()->hasTable('finance_report_scopes')) {
-            $channels = match ($tab) {
-                'paypal' => ['paypal'],
-                'combined' => $account ? [$account->account_type] : ['paypal', 'credit_card'],
-                default => ['credit_card'],
-            };
-            $live = ! ($account?->account_type === 'credit_card' && in_array('credit_card', $channels, true))
-                && \App\Portals\Finance\FinanceSummaryTriggers::available($db)
-                && ! $db->table('finance_summary_changes')->exists()
-                && $db->table('finance_summary_periods')->where('month', $filters['month'])
-                    ->whereIn('channel', $channels)->where('published', '>', 0)
-                    ->whereColumn('published', 'revision')->count() === count($channels);
-            $reusePublishedRevision = $live;
-        }
-        try {
-            [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
-                'transactions', $filters['month'], $snapshotScope, $build, $snapshotId, statusOnly: $statusOnly, live: $live,
-                reusePublishedRevision: $reusePublishedRevision,
+            $monthScope = \Illuminate\Support\Arr::except($rangeFilters, [
+                'page', 'per_page', 'download', 'month_from', 'month_to',
+                'currency', 'payment_account_id', 'team', 'subscription', 'account_channel', 'payment_accounts',
+            ]);
+            $monthScope['month'] = $reportMonth;
+            [$monthItems, $monthSubscriptions] = $this->buildTransactionReport(
+                $tab, $monthScope, CarbonImmutable::parse($reportMonth.'-01', 'Asia/Shanghai'), null
             );
-        } catch (\Illuminate\Validation\ValidationException $exception) {
-            if ($snapshotId === null || $request->boolean('download') || ! isset($exception->errors()['report_snapshot'])) {
-                throw $exception;
-            }
-            [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
-                'transactions', $filters['month'], $snapshotScope, $build, live: $live,
-                reusePublishedRevision: $reusePublishedRevision,
-            );
-        }
-        $rangeStatuses[] = $reportStatus;
-        $rangeSnapshots[$reportMonth] = $reportSnapshot;
-        if (! $statusOnly) {
-            array_push($rangeItems, ...$result[0]);
-            array_push($rangeSubscriptions, ...$result[1]);
-        }
+            array_push($items, ...$monthItems);
+            array_push($subscriptionOptions, ...$monthSubscriptions);
         }
         $filters = $rangeFilters;
-        $filters['report_versions'] = array_filter($rangeSnapshots);
-        $states = array_column($rangeStatuses, 'state');
-        $reportStatus = [
-            'state' => in_array('failed', $states, true) ? 'failed' : (in_array('pending', $states, true) ? 'pending' : (in_array('updating', $states, true) ? 'updating' : 'ready')),
-            'version' => hash('sha256', json_encode($rangeSnapshots, JSON_THROW_ON_ERROR)),
-            'detail' => implode(' ', array_filter(array_column($rangeStatuses, 'detail'))),
-        ];
-        if ($statusOnly) return response()->json($reportStatus)->header('Cache-Control', 'no-store');
-        $hasAllSnapshots = ! in_array(null, $rangeSnapshots, true);
-        $updatedTimes = array_filter(array_column($rangeStatuses, 'updated_at'));
-        if ($hasAllSnapshots && $updatedTimes !== []) $reportStatus['updated_at'] = min($updatedTimes);
-        $reportSnapshot = count($reportMonths) === 1 ? reset($rangeSnapshots) : ($hasAllSnapshots ? $reportStatus['version'] : null);
-        $items = $hasAllSnapshots || $reportStatus['state'] === 'ready' ? $rangeItems : [];
-        $subscriptionOptions = $rangeSubscriptions;
         $missingSummaryItems = [];
         if ($tab === 'combined') {
             foreach ($items as $index => $item) {
@@ -1827,7 +1765,6 @@ class FinanceController extends Controller
         }
         $items = $summary->displayAccounts($items, $tab);
         if ($request->boolean('download')) {
-            abort_if($reportStatus['state'] !== 'ready' && ! $hasAllSnapshots, 409, '报表正在生成，请稍后导出。');
             // Both summary rows are exported for every tab, even when the
             // missing row happens to be all zeroes.
             $exportRows = [$totalSummary, $missingSummary, ...$items];
@@ -1842,13 +1779,12 @@ class FinanceController extends Controller
         $page = min((int) ($filters['page'] ?? 1), max(1, (int) ceil(count($items) / $perPage)));
         $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
             array_slice($items, ($page - 1) * $perPage, $perPage), count($items), $perPage, $page,
-            ['path' => $request->url(), 'query' => [...\Illuminate\Support\Arr::except($filters, ['page', 'download']), 'view' => 'transactions', 'channel' => $tab, 'report_snapshot' => $reportSnapshot]]
+            ['path' => $request->url(), 'query' => [...\Illuminate\Support\Arr::except($filters, ['page', 'download']), 'view' => 'transactions', 'channel' => $tab]]
         );
         $items = $paginator->items();
         $tabUrls = [];
         foreach (\App\Portals\Finance\FinanceTransactionSummary::VIEWS as $key => $label) {
             $query = \Illuminate\Support\Arr::except($filters, ['download', 'channel', 'page']);
-            unset($query['report_versions']);
             if ($key !== 'combined') unset($query['payment_accounts']);
             if (isset($query['account_channel']) && $key !== 'combined'
                 && ($key === 'credit_card' ? ! in_array($query['account_channel'], ['xuzong1', 'xuzong2'], true) : $query['account_channel'] !== $key)) {
@@ -1862,7 +1798,7 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.report', [
             ...$context, 'report' => $report, 'filters' => $filters, 'columns' => $columns, 'items' => $items, 'paginator' => $paginator,
-            'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
+            'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
             'totalSummary' => $totalSummary,
             'missingSummary' => $missingSummary,
             'creditMonths' => $creditMonths,
@@ -2002,46 +1938,26 @@ class FinanceController extends Controller
             default => ['xuzong1', 'xuzong2', 'ye', 'worldpay'],
         };
         $cnyRatesByChannel = $accounting->monthlyCnyRates($month->format('Y-m'), $rateChannels);
-        $items = $summary->summarize($source, $tab, usd: true, cnyPerUsdByChannel: $cnyRatesByChannel);
+        $items = $tab === 'combined'
+            ? $summary->summarizeCombined($source, $cnyRatesByChannel)
+            : $summary->summarize($source, $tab, usd: true, cnyPerUsdByChannel: $cnyRatesByChannel);
+        $combinedMissing = $tab === 'combined' ? array_pop($items) : null;
         if (filled($scope['currency'] ?? null)) {
             $items = array_values(array_filter($items, fn ($item) => $item['currency'] === $scope['currency']));
         }
         if (collect(\Illuminate\Support\Arr::only($scope, ['payment_account_id', 'currency', 'team', 'subscription', 'conditions']))->contains(fn ($value) => filled($value))) {
             $buildAllocation = function () use ($service, $tab, $month, $reuse, $summary) {
-                $monthRows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse);
+                $monthRows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, settlementTimezones: true);
                 return [array_column($summary->summarize($monthRows, $tab, usd: true), 'failed_orders', 'account_group')];
             };
-            if ($reuse) {
-                [[$allocation]] = app(\App\Portals\Finance\FinanceReportSnapshots::class)->result(
-                    'transactions', $month->format('Y-m'), ['channel' => $tab, '_failure_allocation' => true], $buildAllocation, live: true);
-            } else {
-                [$allocation] = $buildAllocation();
-            }
-            $items = array_values(array_filter($items, fn ($item) => $item['team'] !== '未分配' || $item['subscription'] !== '未分配'));
+            [$allocation] = $buildAllocation();
+            $items = array_values(array_filter($items, fn ($item) => ($item['team'] ?? '') !== '未分配' || ($item['subscription'] ?? '') !== '未分配'));
             foreach ($items as &$item) {
                 $item['failed_orders'] = $allocation[$item['account_group']] ?? 0;
             }
             unset($item);
         }
-        if ($tab === 'combined') {
-            // Sum exactly the missing rows used by each of the four source
-            // tabs: PayPal/credit card require both team and subscription;
-            // Ye/Worldpay require team only.
-            $missingGroups = [];
-            foreach (['paypal', 'credit_card', 'ye', 'worldpay'] as $sourceTab) {
-                $sourceRows = $this->transactionSummaryRows($service, $sourceTab, [], $month, null, reuse: $reuse,
-                    settlementTimezones: true);
-                $sourceItems = $summary->summarize($sourceRows, $sourceTab, usd: true, cnyPerUsdByChannel: $cnyRatesByChannel);
-                foreach ($sourceItems as $sourceItem) {
-                    if (! filled($sourceItem['team'])
-                        || ($summary::requiresSubscription($sourceTab) && ! filled($sourceItem['subscription']))) {
-                        $missingGroups[] = $sourceItem;
-                    }
-                }
-            }
-            $items[] = ['_combined_missing_summary_groups' => $missingGroups];
-        }
-
+        if ($combinedMissing !== null) $items[] = $combinedMissing;
         return [$items, $service->subscriptionOptions(collect($subscriptions), includeSourceOptions: false)->all()];
     }
 
@@ -2057,8 +1973,8 @@ class FinanceController extends Controller
                 'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
                 'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account ?? ($filters['account'] ?? null),
                 'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
-                'logistics_costs' => ! $settlementTimezones,
-                'summary_native_settlement' => ! $settlementTimezones,
+                'logistics_costs' => true,
+                'summary_native_settlement' => true,
                 'include_unmatched_fees' => $settlementTimezones || $tab === 'ye',
             ];
             if (filled($filters['payment_method'] ?? null)) {
@@ -2073,7 +1989,8 @@ class FinanceController extends Controller
             $projection = $reuse && ! $settlementTimezones ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
                 ->stream($channel, $scope, true, paymentChannels: $paymentChannels) : null;
             $channelRows = $settlementTimezones
-                ? $this->settlementMonthRows($service, $channel, $scope, $paymentChannels, transactions: true)
+                ? $this->settlementMonthRows($service, $channel, $scope, $paymentChannels, transactions: true,
+                    aggregateTransactions: empty($filters['conditions']))
                 : ($projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $scope, true,
                     fn (array $sourceFilters) => $service->summaryRowStream($channel, $sourceFilters, transactions: true)));
             foreach ($channelRows as $row) {
@@ -3352,26 +3269,12 @@ class FinanceController extends Controller
         $monthlyLossGroups = [];
         $scope = \Illuminate\Support\Arr::except($data, ['month', 'months', 'month_from', 'month_to', 'account_choice']);
         ksort($scope);
-        $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
         $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
-        $reportSnapshots = [];
-        $reportStatuses = [];
-        $monthlyRates = [];
-        $filterOptions = [];
-        $summaryAccountChannels = [];
-        $versions = $request->boolean('download')
-            ? $request->validate(['report_versions' => 'sometimes|array', 'report_versions.*' => 'required|uuid'])['report_versions'] ?? []
-            : [];
+        if ($statusOnly) return response()->json(['state' => 'ready'])->header('Cache-Control', 'no-store');
+        $monthlyRates = $filterOptions = $summaryAccountChannels = [];
         foreach ($comparisonMonths as $comparisonMonth) {
             $includeOptions = true;
-            if ($versions !== [] && ! isset($versions[$comparisonMonth])) {
-                throw ValidationException::withMessages(['report_versions' => '报表版本不完整，请重新查询后导出。']);
-            }
-            [$result, $reportSnapshots[$comparisonMonth], $reportStatuses[$comparisonMonth]] = $snapshots
-                ->result($report, $comparisonMonth, [...$scope, '_include_options' => $includeOptions],
-                    fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true),
-                    $versions[$comparisonMonth] ?? null, statusOnly: $statusOnly);
-            if ($statusOnly) continue;
+            $result = $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true);
             [$groups, $options, $rate] = $result;
             if ($report === 'summary') {
                 foreach ($groups as $group) $summaryAccountChannels[$group['name']] = $group['channel'];
@@ -3385,13 +3288,6 @@ class FinanceController extends Controller
                 }
             }
         }
-        $states = array_column($reportStatuses, 'state');
-        $overviewStatus = [
-            'state' => in_array('failed', $states, true) ? 'failed'
-                : (in_array('pending', $states, true) ? 'pending' : (in_array('updating', $states, true) ? 'updating' : 'ready')),
-            'version' => hash('sha256', json_encode($reportSnapshots, JSON_THROW_ON_ERROR)),
-        ];
-        if ($statusOnly) return response()->json($overviewStatus)->header('Cache-Control', 'no-store');
         if ($report === 'summary') {
             $accountOptions = collect($filterOptions['account'] ?? [])->reject(fn ($option) =>
                 in_array($summaryAccountChannels[$option['label']] ?? null, ['ye', 'xuzong1', 'xuzong2'], true))->values();
@@ -3399,14 +3295,11 @@ class FinanceController extends Controller
                 if (in_array($channel, $summaryAccountChannels, true)) $accountOptions->push(['value' => '@channel:'.$channel, 'label' => $label]);
             }
             $filterOptions['account'] = $accountOptions;
-            $awaitingMonth = collect($reportStatuses)->contains(fn ($status) => $status['state'] !== 'ready' && ! isset($status['updated_at']));
-            $groups = $awaitingMonth ? [] : \App\Portals\Finance\FinanceSettlementOverviewGroups::mergeMonths($monthlyLossGroups);
+            $groups = \App\Portals\Finance\FinanceSettlementOverviewGroups::mergeMonths($monthlyLossGroups);
             // Each month has its own conversion rate; do not present the last
             // month's rate as if it applied to the entire selection.
             if (count($comparisonMonths) > 1) $rate = null;
         }
-        abort_if($request->boolean('download') && $snapshots->runsInBackground() && in_array(null, $reportSnapshots, true),
-            409, '报表正在生成，请稍后重新查询。');
         if ($request->boolean('download') && $report === 'losses') {
             $export = [];
             $selectionKeys = \App\Portals\Finance\FinanceExportSelection::keys($request);
@@ -3446,10 +3339,10 @@ class FinanceController extends Controller
             return $this->workbooks->download($headers, $export, 'finance-'.$report.'-'.$month.'.xlsx');
         }
 
-        return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'monthlyRates' => $monthlyRates, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportSnapshots' => $reportSnapshots, 'reportStatuses' => $reportStatuses, 'overviewStatus' => $overviewStatus, 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
+        return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'monthlyRates' => $monthlyRates, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
     }
 
-    private function settlementMonthRows(FinanceSettlementService $service, string $channel, array $filters, array $paymentChannels, bool $transactions = false, ?callable $options = null): iterable
+    private function settlementMonthRows(FinanceSettlementService $service, string $channel, array $filters, array $paymentChannels, bool $transactions = false, ?callable $options = null, bool $aggregateTransactions = false): iterable
     {
         $zones = $channel === 'paypal'
             ? ['-04:00' => ['paypal']]
@@ -3464,7 +3357,7 @@ class FinanceController extends Controller
                 $sourceFilters['summary_payment_channels'] = $platforms;
             }
             $projection = app(\App\Portals\Finance\FinanceSummaryProjection::class)
-                ->stream($channel, $sourceFilters, $transactions);
+                ->stream($channel, $sourceFilters, $transactions, paymentChannels: $selected, aggregateTransactions: $aggregateTransactions);
             $source = $projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, $transactions,
                 fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters, $transactions), $options);
             foreach ($source as $row) {
@@ -3527,13 +3420,10 @@ class FinanceController extends Controller
                 } : null;
                 // Transaction rows use Beijing dates and include logistics costs, exactly
                 // the loss report's source semantics. Settlement rows omit those costs.
-                $projection = $report === 'losses' && $reuse
-                    ? app(\App\Portals\Finance\FinanceSummaryProjection::class)->stream($channel, $filters, true)
-                    : null;
                 $channelRows = $report === 'summary'
                     ? $this->settlementMonthRows($service, $channel, $sourceFilters, $paymentChannels, options: $sourceOptions)
-                    : ($projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, false,
-                        fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters), $sourceOptions));
+                    : app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, false,
+                        fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters), $sourceOptions);
                 foreach ($channelRows as $row) {
                     if (filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'credit_card', 'combined'], true)
                         && ($data['channel'] === 'xuzong'
@@ -3705,7 +3595,7 @@ class FinanceController extends Controller
 
     private function reportTabUrls(array $filters): array
     {
-        $common = \Illuminate\Support\Arr::only($filters, ['month', 'channel', 'team', 'subscription']);
+        $common = \Illuminate\Support\Arr::only($filters, ['month', 'month_from', 'month_to', 'channel', 'team', 'subscription']);
         $transactionFilters = $common;
         $settlementFilters = $common;
         if (filled($filters['owner'] ?? null)) {

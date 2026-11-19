@@ -5,12 +5,12 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync('public/assets/erp/finance-snapshot-status.js', 'utf8');
 
-async function poll({ initial = 'pending', response = { state: 'ready' }, editing = false, noticePresent = true } = {}) {
+async function poll({ initial = 'pending', displayedVersion = '', response = { state: 'ready' }, editing = false, noticePresent = true } = {}) {
     const scheduled = [];
     const replacements = [];
     const messages = [];
     const message = { replaceChildren: (...args) => messages.push(args) };
-    const notice = { dataset: { financeSnapshotStatus: initial, financeSnapshotTime: '', financeSnapshotVersion: '' }, querySelector: () => message };
+    const notice = { dataset: { financeSnapshotStatus: initial, financeSnapshotTime: '', financeSnapshotVersion: displayedVersion }, querySelector: () => message };
     const form = { addEventListener() {}, contains: () => editing };
     const document = {
         hidden: false,
@@ -35,6 +35,18 @@ test('pending transaction page loads ready results without a timestamp', async (
 
 test('ready page without a new version does not reload repeatedly', async () => {
     const { replacements, scheduled } = await poll({ initial: 'ready' });
+    assert.equal(replacements.length, 0);
+    assert.equal(scheduled.length, 1);
+});
+
+test('complete previous snapshots are shown while a long range updates', async () => {
+    const { replacements } = await poll({ response: { state: 'updating', has_results: true, version: 'complete' } });
+    assert.equal(replacements.length, 1);
+});
+
+test('the same updating version does not cause a reload loop', async () => {
+    const { replacements, scheduled } = await poll({ initial: 'updating', displayedVersion: 'complete',
+        response: { state: 'updating', has_results: true, version: 'complete' } });
     assert.equal(replacements.length, 0);
     assert.equal(scheduled.length, 1);
 });
