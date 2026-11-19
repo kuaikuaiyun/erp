@@ -4,6 +4,18 @@
         $roles = \Illuminate\Support\Arr::get($menuItem, 'roles', []);
         $permission = \Illuminate\Support\Arr::get($menuItem, 'permission');
 
+        $uri = trim((string) parse_url((string) \Illuminate\Support\Arr::get($menuItem, 'uri', ''), PHP_URL_PATH), '/');
+        $adminPrefix = trim((string) config('admin.route.prefix'), '/');
+        if ($adminPrefix !== '' && str_starts_with($uri, $adminPrefix.'/')) {
+            $uri = substr($uri, strlen($adminPrefix) + 1);
+        }
+        $isAccountMenu = $permission === 'organization.accounts'
+            || $uri === 'organization/accounts' || str_starts_with($uri, 'organization/accounts/')
+            || $uri === 'auth/users' || str_starts_with($uri, 'auth/users/');
+        if ($isAccountMenu && !$administrator->isAdministrator()) {
+            return false;
+        }
+
         if (!$administrator->visible($roles) || !$administrator->can($permission)) {
             return false;
         }
