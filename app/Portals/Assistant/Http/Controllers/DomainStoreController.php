@@ -1283,8 +1283,12 @@ class DomainStoreController extends Controller
 
         $ownerUserId = old('owner_user_id', $store?->owner_user_id);
         $ownerUserId = $ownerUserId === null || $ownerUserId === '' ? null : (int) $ownerUserId;
-        $operationDepartmentId = old('operation_department_id', $store?->owner_operation_department_id);
-        $operationDepartmentId = $operationDepartmentId === null || $operationDepartmentId === ''
+        $operationDepartmentId = old('operation_department_id',
+            $store?->exists && $store->owner_user_id === null && $store->owner_operation_department_id === null
+                ? 'reserve'
+                : $store?->owner_operation_department_id);
+        $ownerIsReserve = $operationDepartmentId === 'reserve';
+        $operationDepartmentId = $ownerIsReserve || $operationDepartmentId === null || $operationDepartmentId === ''
             ? null
             : (int) $operationDepartmentId;
 
@@ -1310,7 +1314,7 @@ class DomainStoreController extends Controller
         }
 
         $ownerEffectiveAt = old('owner_effective_at');
-        if (($ownerEffectiveAt === null || $ownerEffectiveAt === '') && $store?->exists) {
+        if (($ownerEffectiveAt === null || $ownerEffectiveAt === '') && $store?->exists && !$ownerIsReserve) {
             $ownerEffectiveAt = $store->ownerHistories()
                 ->where('effective_from', '<=', now()->utc())
                 ->orderByDesc('effective_from')
@@ -1326,6 +1330,7 @@ class DomainStoreController extends Controller
             'ownerCandidatesByDepartment' => $candidatesByDepartment,
             'ownerOperationDepartmentId' => $operationDepartmentId,
             'ownerUserId' => $ownerUserId,
+            'ownerIsReserve' => $ownerIsReserve,
             'currentOwnerOutsideScope' => $currentOwner,
             'ownerEffectiveAt' => (string) ($ownerEffectiveAt ?? ''),
         ];
@@ -1343,6 +1348,14 @@ class DomainStoreController extends Controller
             return $existingStore?->owner_user_id === null
                 ? null
                 : (int) $existingStore->owner_user_id;
+        }
+
+        if ($request->input('operation_department_id') === 'reserve') {
+            $request->validate(['owner_user_id' => ['prohibited']], [], [
+                'owner_user_id' => __('assistant.domain_stores.fields.owner_user'),
+            ]);
+
+            return null;
         }
 
         $validated = $request->validate([
@@ -1400,9 +1413,13 @@ class DomainStoreController extends Controller
 
     private function ownerOperationDepartmentIdForRequest(Request $request, ?AssistantDomainStore $existingStore, ?int $ownerUserId): ?int
     {
+        if ($ownerUserId === null) {
+            return null;
+        }
+
         $value = $request->input('operation_department_id');
 
-        if ($value === null || $value === '') {
+        if ($value === null || $value === '' || $value === 'reserve') {
             return $ownerUserId === null
                 ? null
                 : ($existingStore?->owner_operation_department_id === null ? null : (int) $existingStore->owner_operation_department_id);

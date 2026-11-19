@@ -50,11 +50,12 @@
     ];
     $ownerAssignmentJavascriptConfig = [
         'candidates' => $ownerCandidatesByDepartment ?? [],
-        'selectedDepartmentId' => $ownerOperationDepartmentId ?? null,
+        'selectedDepartmentId' => ($ownerIsReserve ?? false) ? 'reserve' : ($ownerOperationDepartmentId ?? null),
         'selectedOwnerId' => $ownerUserId ?? null,
         'translations' => [
             'chooseOwner' => $t('form.owner_user_placeholder'),
             'empty' => $t('form.owner_candidates_empty'),
+            'reserve' => $t('form.owner_reserve'),
         ],
     ];
 @endphp
@@ -568,20 +569,21 @@
                 <div class="box box-solid assistant-form-section assistant-form-owner-section">
                     <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.operation_owner') }}</h3></div>
                     <div class="box-body row assistant-form-grid">
-                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror" data-store-required-field="operation_department_id" data-store-required-message="请填写或选择运营部门">
+                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror" data-store-required-field="operation_department_id" data-store-required-message="{{ $t('javascript.owner_department_required') }}">
                             <label for="operation_department_id">{{ $t('fields.owner_operation_department') }} <span class="text-red">*</span></label>
                             <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
-                                <option value="">请选择运营部门</option>
+                                <option value="">{{ $t('form.owner_department_choose') }}</option>
+                                <option value="reserve" @selected($ownerIsReserve ?? false)>{{ $t('form.owner_reserve') }}</option>
                                 @foreach ($ownerOperationDepartments as $department)
                                     <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ str_repeat('-- ', (int) ($department->tree_depth ?? 0)) }}{{ $department->name }}</option>
                                 @endforeach
                             </select>
                             @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror" data-store-required-field="owner_user_id" data-store-required-message="请填写或选择店铺归属人">
-                            <label for="owner_user_id">{{ $t('fields.owner_user') }} <span class="text-red">*</span></label>
+                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror" data-store-required-field="owner_user_id" data-store-required-message="{{ $t('javascript.owner_choose_required') }}">
+                            <label for="owner_user_id">{{ $t('fields.owner_user') }} <span class="text-red" data-owner-required-marker @if($ownerIsReserve ?? false) hidden @endif>*</span></label>
                             <select id="owner_user_id" name="owner_user_id" class="form-control" data-owner-user @disabled($ownerOperationDepartmentId === null && empty($currentOwnerOutsideScope))>
-                                <option value="">{{ $t('form.owner_user_placeholder') }}</option>
+                                <option value="">{{ ($ownerIsReserve ?? false) ? $t('form.owner_reserve') : $t('form.owner_user_placeholder') }}</option>
                                 @if ($ownerOperationDepartmentId !== null)
                                     @foreach (($ownerCandidatesByDepartment[$ownerOperationDepartmentId] ?? []) as $candidate)
                                         <option value="{{ $candidate['id'] }}" @selected((int) $ownerUserId === (int) $candidate['id'])>
@@ -597,14 +599,14 @@
                             @error('owner_user_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         <div class="form-group assistant-owner-form-field @error('owner_effective_at') has-error @enderror">
-                            <label for="owner_effective_at">归属生效时间</label>
+                            <label for="owner_effective_at">{{ $t('form.owner_effective_at') }}</label>
                             <input id="owner_effective_at" name="owner_effective_at" type="datetime-local" class="form-control" value="{{ $ownerEffectiveAt ?? old('owner_effective_at') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
-                            <span class="help-block">留空即以当前上海时间生效；仅会影响该时间起的新订单归属。</span>
+                            <span class="help-block">{{ $t('form.owner_effective_at_hint') }}</span>
                             @error('owner_effective_at')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         <div class="assistant-owner-form-note">
                             <i class="fa fa-info-circle" aria-hidden="true"></i>
-                            <span>{{ $t('form.owner_assignment_hint') }}</span>
+                            <span>{{ $t('form.owner_assignment_hint') }} {{ $t('form.owner_reserve_hint') }}</span>
                         </div>
                     </div>
                 </div>
@@ -660,5 +662,5 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js?v=20261118-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261119-1"></script>
 @endpush

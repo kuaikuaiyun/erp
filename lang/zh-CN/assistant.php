@@ -83,6 +83,11 @@ return [
             'owner_department_unassigned' => '未分配助理二级部门',
             'owner_outside_scope' => '当前归属已超出可选运营部门范围',
             'owner_operation_department_placeholder' => '暂不设置归属人',
+            'owner_reserve' => '备用',
+            'owner_department_choose' => '请选择运营部门',
+            'owner_reserve_hint' => '选择“备用”可暂不填写运营部门和归属人，后续确定后再补录。',
+            'owner_effective_at' => '归属生效时间',
+            'owner_effective_at_hint' => '留空即以当前上海时间生效；归属从该时间起生效。',
             'owner_user_placeholder' => '请选择运营归属人',
             'owner_candidates_empty' => '该运营部门暂无可选的在职成员',
             'owner_assignment_hint' => '运营部门和店铺归属人仅用于记录运营归属，不会改变店铺记录的查看、编辑或删除权限。',
@@ -337,7 +342,7 @@ return [
             'team_empty' => '暂无团队快捷选项',
             'owner_assignment' => '店铺真实归属状态',
             'owner_assigned' => '已分配',
-            'owner_unassigned' => '未分配',
+            'owner_unassigned' => '备用',
         ],
 
         'email_purchase_status' => [
@@ -563,7 +568,7 @@ return [
             'team_empty' => '暂无团队快捷选项',
             'owner_assignment' => '店铺真实归属状态',
             'owner_assigned' => '已分配',
-            'owner_unassigned' => '未分配',
+            'owner_unassigned' => '备用',
         ],
         'overview' => [
             'stores' => '店铺数',

@@ -18,7 +18,7 @@
         <div class="assistant-history-change-list">
             <div class="assistant-history-change">
                 <span class="assistant-history-change-name">真实归属人：</span>
-                <span class="assistant-history-change-after">{{ $ownerHistory->owner_name_snapshot ?: '未分配' }}</span>
+                <span class="assistant-history-change-after">{{ $ownerHistory->owner_name_snapshot ?: __('assistant.domain_stores.form.owner_reserve') }}</span>
             </div>
             <div class="assistant-history-change">
                 <span class="assistant-history-change-name">操作人：</span>

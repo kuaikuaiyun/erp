@@ -445,7 +445,7 @@
                             <td><span class="assistant-field-value">{{ $store->project ?: $t('common.empty') }}</span></td>
                             <td>
                                 <span class="assistant-owner-history-value">
-                                    <span class="assistant-field-value">{{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}</span>
+                                    <span class="assistant-field-value">{{ $store->owner_user_id === null ? $t('form.owner_reserve') : ($store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty')) }}</span>
                                     <button type="button" class="btn btn-link btn-xs assistant-history-trigger assistant-owner-history-trigger" data-toggle="modal" data-target="#assistant-history-modal" data-history-url="{{ route('assistant.domain-stores.history', ['domainStore' => $store, 'scope' => 'owner']) }}" data-history-title="真实归属人历史 · {{ $store->shop_name }}" title="查看真实归属人历史" aria-label="查看 {{ $store->shop_name }} 的真实归属人历史"><i class="fa fa-history" aria-hidden="true"></i></button>
                                 </span>
                             </td>
@@ -752,7 +752,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js?v=20261118-1"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261119-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261117-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261102-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>

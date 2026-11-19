@@ -50,6 +50,16 @@
             : String(config.selectedOwnerId);
         var selectedOwnerId = departmentId === initialDepartmentId ? initialOwnerId : '';
         var rows = candidates[String(departmentId)] || [];
+        var isReserve = departmentId === 'reserve';
+        var requiredMarker = form.querySelector('[data-owner-required-marker]');
+        if (requiredMarker) requiredMarker.hidden = isReserve;
+
+        if (isReserve) {
+            ownerSelect.innerHTML = '';
+            appendOption(ownerSelect, '', translations.reserve, true);
+            ownerSelect.disabled = true;
+            return;
+        }
 
         ownerSelect.innerHTML = '';
         appendOption(ownerSelect, '', departmentId && !rows.length ? translations.empty : translations.chooseOwner, !selectedOwnerId);
@@ -75,6 +85,11 @@
             return;
         }
 
+        var config = formConfig(form);
+        if (departmentSelect.value === 'reserve' || config.selectedDepartmentId === 'reserve') {
+            var effectiveAt = form.querySelector('[name="owner_effective_at"]');
+            if (effectiveAt) effectiveAt.value = '';
+        }
         populateOwners(form, departmentSelect, ownerSelect);
     });
 })(window, document);

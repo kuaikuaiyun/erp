@@ -64,6 +64,11 @@ return [
             'owner_department_unassigned' => 'No Assistant secondary department assigned',
             'owner_outside_scope' => 'Current owner is outside the selectable Operations scope',
             'owner_operation_department_placeholder' => 'Leave owner unassigned',
+            'owner_reserve' => 'Reserve',
+            'owner_department_choose' => 'Select an Operations department',
+            'owner_reserve_hint' => 'Select Reserve to save without an owner or Operations department, then assign them later.',
+            'owner_effective_at' => 'Ownership effective time',
+            'owner_effective_at_hint' => 'Leave blank to use the current Shanghai time. Ownership applies from that time onward.',
             'owner_user_placeholder' => 'Choose an Operations owner',
             'owner_candidates_empty' => 'No eligible active users in this Operations department',
             'owner_assignment_hint' => 'The Operations department and actual store user are operational metadata only and do not change record access permissions.',
@@ -264,7 +269,7 @@ return [
             'team_empty' => 'No team shortcuts are available',
             'owner_assignment' => 'Actual owner status',
             'owner_assigned' => 'Assigned',
-            'owner_unassigned' => 'Unassigned',
+            'owner_unassigned' => 'Reserve',
         ],
 
         'email_purchase_status' => [
@@ -488,7 +493,7 @@ return [
             'team_empty' => 'No team shortcuts are available',
             'owner_assignment' => 'Actual owner status',
             'owner_assigned' => 'Assigned',
-            'owner_unassigned' => 'Unassigned',
+            'owner_unassigned' => 'Reserve',
         ],
         'overview' => [
             'stores' => 'Stores',

@@ -11,7 +11,7 @@
             @foreach ($ownerHistories as $ownerHistory)
                 <div class="assistant-history-change">
                     <span class="assistant-history-change-name">{{ match ($ownerHistory->event) { 'baseline' => '初始归属', 'cleared' => '取消归属', 'assigned' => '设置归属', default => '转移归属' } }}：</span>
-                    <span class="assistant-history-change-after">{{ $ownerHistory->owner_name_snapshot ?: '未分配' }}</span>
+                    <span class="assistant-history-change-after">{{ $ownerHistory->owner_name_snapshot ?: __('assistant.domain_stores.form.owner_reserve') }}</span>
                     <span class="text-muted">生效时间 {{ $ownerHistory->effective_from?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}；操作人 {{ $ownerHistory->actor_name_snapshot ?: '系统' }}</span>
                 </div>
             @endforeach
