@@ -16,7 +16,10 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -28,12 +31,16 @@ trait AssetRemindersEnvironment
     protected array $scheduleOverrides = [];
     protected bool $sendTimeout = false;
     protected bool $attendanceFailure = false;
+    protected array $webhookResponse = ['errcode' => 0, 'errmsg' => 'ok'];
+    protected array $apiFailures = [];
 
     protected function setUp(): void
     {
         $this->accountsSetUp();
         $this->travelTo(Carbon::parse('2026-11-19 10:00:00', 'Asia/Shanghai'));
         (require database_path('migrations/2026_11_19_000100_install_asset_reminders.php'))->up();
+        (require database_path('migrations/2026_11_19_000200_add_webhook_to_asset_reminder_groups.php'))->up();
+        (require database_path('migrations/2026_11_19_000300_add_departments_to_asset_reminder_rules.php'))->up();
         Schema::create('operation_task_recaps', function (Blueprint $t) {
             $t->id(); $t->unsignedBigInteger('user_id'); $t->date('data_date');
             $t->string('workflow_status')->default('pending_leader'); $t->timestamp('submitted_at')->nullable();
@@ -44,6 +51,11 @@ trait AssetRemindersEnvironment
         Http::preventStrayRequests();
         Http::fake(function ($request) {
             $path = parse_url($request->url(), PHP_URL_PATH);
+            if (isset($this->apiFailures[$path])) {
+                $failure = $this->apiFailures[$path];
+                if ($failure === 'timeout') throw new ConnectionException('secret-test reminder-token webhook-test-token SECtestSigningKey');
+                return Http::response($failure['body'], $failure['status'] ?? 200);
+            }
             if ($path === '/v1.0/oauth2/accessToken') return Http::response(['accessToken' => 'reminder-token', 'expireIn' => 7200]);
             if ($path === '/topapi/attendance/getsimplegroups') return Http::response($this->attendanceFailure ? ['errcode' => 88] : ['errcode' => 0, 'result' => ['groups' => [['group_id' => 12, 'group_name' => 'Weekdays', 'type' => 'FIXED', 'work_day_list' => [0, 10, 10, 10, 10, 10, 0]]], 'has_more' => false]]);
             if ($path === '/topapi/attendance/schedule/listbyusers') {
@@ -55,9 +67,9 @@ trait AssetRemindersEnvironment
                 }
                 return Http::response(['errcode' => 0, 'result' => $rows]);
             }
-            if ($path === '/v1.0/robot/groupMessages/send') {
-                if ($this->sendTimeout) throw new ConnectionException('secret-test reminder-token must not leak');
-                return Http::response(['processQueryKey' => 'process-1']);
+            if ($path === '/robot/send') {
+                if ($this->sendTimeout) throw new ConnectionException('webhook-test-token SECtestSigningKey must not leak');
+                return Http::response($this->webhookResponse);
             }
             throw new \LogicException('Unexpected reminder HTTP request');
         });
@@ -66,7 +78,8 @@ trait AssetRemindersEnvironment
     protected function groupValues(array $overrides = []): array
     {
         return array_replace(['department_id' => $this->teamA->id, 'name' => 'Daily group', 'company_id' => $this->company->id,
-            'robot_code' => 'robot-test', 'conversation_id' => 'cid-test', 'enabled' => true, 'remark' => 'Reminder test'], $overrides);
+            'webhook' => 'https://oapi.dingtalk.com/robot/send?access_token=webhook-test-token', 'webhook_secret' => '',
+            'enabled' => true, 'remark' => 'Reminder test'], $overrides);
     }
 
     protected function reminderGroup(): int
@@ -99,6 +112,72 @@ trait AssetRemindersEnvironment
 class AssetRemindersTest extends TestCase
 {
     use AssetRemindersEnvironment;
+
+    public function test_three_round_limit_and_default_link_preserve_existing_configuration(): void
+    {
+        $group = $this->reminderGroup();
+        $values = $this->ruleValues($group);
+        unset($values['entry_url']);
+        $values['work_times'] = ['16:00', '10:00', '13:00'];
+        $id = $this->postJson($this->remindersUrl.'/rules', $values)->assertOk()->json('id');
+        $stored = DB::table('asset_reminder_rules')->find($id);
+        $this->assertSame('https://www.kuaiyun8888.com/kky/', $stored->entry_url);
+        $this->assertSame('["10:00","13:00","16:00"]', $stored->work_times);
+        $values['version'] = 1; $values['entry_url'] = 'https://example.com/custom';
+        foreach (['work_times', 'rest_times'] as $key) {
+            $invalid = $values; $invalid[$key] = ['10:00', '11:00', '12:00', '13:00'];
+            $this->putJson($this->remindersUrl.'/rules/'.$id, $invalid)->assertUnprocessable();
+        }
+        $this->putJson($this->remindersUrl.'/rules/'.$id, $values)->assertOk();
+        $this->assertSame('https://example.com/custom', DB::table('asset_reminder_rules')->find($id)->entry_url);
+        DB::table('asset_reminder_rules')->where('id', $id)->update(['work_times' => '["10:00","11:00","12:00","13:00"]']);
+        $this->getJson($this->remindersUrl.'/rules/'.$id)->assertOk()->assertJsonPath('record.work_times', '["10:00","11:00","12:00","13:00"]');
+    }
+
+    public function test_multiple_departments_share_one_rule_and_deduplicate_members(): void
+    {
+        $group = $this->reminderGroup();
+        $values = $this->ruleValues($group);
+        unset($values['department_id']);
+        $values['department_ids'] = [$this->teamA->id, $this->teamB->id];
+        $response = $this->postJson($this->remindersUrl.'/rules', $values)->assertOk();
+        $id = $response->json('id');
+        $this->assertSame(1, DB::table('asset_reminder_rules')->count());
+        $member = $this->hrMember($this->teamA);
+        $member->roles()->attach($this->teamB->id, ['position' => 'member']);
+        $other = $this->hrMember($this->teamB);
+        $rule = DB::table('asset_reminder_rules')->find($id);
+        $summary = app(ReminderRecapService::class)->summary([$rule], $this->company, Carbon::parse('2026-11-18'), false);
+        $this->assertSame(2, $summary['count']);
+        $this->get($this->remindersUrl.'?department_id='.$this->teamB->id)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+        $preview = $this->getJson($this->remindersUrl.'/rules/'.$id.'/preview')->assertOk();
+        $this->assertStringContainsString($other->name, $preview->json('message'));
+        $this->postJson($this->remindersUrl.'/rules/'.$id.'/test', ['confirmed' => true])->assertOk();
+        $this->assertCount(2, json_decode(DB::table('asset_reminder_runs')->first()->department_ids, true));
+        $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group, ['department_id' => $this->teamB->id]))->assertUnprocessable();
+        $values['version'] = 1; $values['work_times'] = ['15:00'];
+        $this->putJson($this->remindersUrl.'/rules/'.$id, $values)->assertOk();
+        $this->assertSame('["15:00"]', DB::table('asset_reminder_rules')->find($id)->work_times);
+        DB::table('asset_computer_department_bindings')->where('target_department_id', $this->teamB->id)->delete();
+        $this->getJson($this->remindersUrl.'/rules/'.$id)->assertNotFound();
+        $this->getJson($this->remindersUrl.'/runs?group_id='.$group)->assertOk()->assertJsonPath('total', 0);
+        $this->putJson($this->remindersUrl.'/groups/'.$group, $this->groupValues(['version' => 1]))->assertForbidden();
+    }
+
+    public function test_multi_department_validation_and_stop_are_atomic(): void
+    {
+        $group = $this->reminderGroup();
+        foreach ([[], [$this->teamA->id, $this->teamA->id], [$this->teamA->id, $this->outside->id]] as $ids) {
+            $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group, ['department_ids' => $ids]))->assertUnprocessable();
+        }
+        $this->assertSame(0, DB::table('asset_reminder_rules')->count());
+        $values = $this->ruleValues($group, ['department_ids' => [$this->teamA->id, $this->teamB->id]]);
+        $id = $this->postJson($this->remindersUrl.'/rules', $values)->assertOk()->json('id');
+        $this->deleteJson($this->remindersUrl.'/rules/'.$id)->assertOk();
+        $this->assertFalse((bool) DB::table('asset_reminder_rules')->find($id)->enabled);
+        $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
+    }
 
     public function test_page_configuration_and_menu_installation_are_repeatable(): void
     {
@@ -144,7 +223,7 @@ class AssetRemindersTest extends TestCase
         $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group))->assertUnprocessable();
         $this->putJson($this->remindersUrl.'/rules/'.$rule->id, $this->ruleValues($group, ['version' => 2]))->assertConflict();
         $this->putJson($this->remindersUrl.'/rules/'.$rule->id, $this->ruleValues($group, ['version' => 1, 'work_times' => ['09:00']]))->assertOk();
-        $this->putJson($this->remindersUrl.'/groups/'.$group, $this->groupValues(['version' => 1, 'conversation_id' => 'another-cid']))->assertOk();
+        $this->putJson($this->remindersUrl.'/groups/'.$group, $this->groupValues(['version' => 1, 'webhook' => 'https://oapi.dingtalk.com/robot/send?access_token=another-token']))->assertOk();
         $this->deleteJson($this->remindersUrl.'/groups/'.$group)->assertUnprocessable();
         $this->deleteJson($this->remindersUrl.'/rules/'.$rule->id)->assertOk();
         $this->assertFalse((bool) DB::table('asset_reminder_rules')->find($rule->id)->enabled);
@@ -190,27 +269,17 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(0, $service->summary([$rule], $this->company, $date)['monthly_count']);
     }
 
-    public function test_resting_and_not_yet_hired_people_are_excluded(): void
+    public function test_department_members_need_no_binding_and_future_hires_remain_excluded(): void
     {
         $rule = $this->reminderRule($this->reminderGroup());
-        $this->boundMember($this->teamA, 'rest-person');
+        $this->hrMember($this->teamA);
         $future = $this->hrMember($this->teamA); $future->hired_at = '2026-11-19'; $future->save();
         $this->scheduleOverrides['rest-person|2026-11-18'] = 'Y';
         $summary = app(ReminderRecapService::class)->summary([$rule], $this->company, Carbon::parse('2026-11-18', 'Asia/Shanghai'));
-        $this->assertSame(0, $summary['count']);
+        $this->assertSame(1, $summary['count']);
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/schedule/listbyusers'));
     }
 
-    public function test_unknown_schedule_or_missing_binding_cannot_produce_a_partial_missing_list(): void
-    {
-        $rule = $this->reminderRule($this->reminderGroup());
-        $this->boundMember($this->teamA, 'unknown');
-        $this->scheduleOverrides['unknown|2026-11-18'] = 'missing';
-        $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertUnprocessable();
-        $this->assertSame(0, DB::table('asset_reminder_days')->count());
-        $this->hrMember($this->teamA);
-        $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertUnprocessable();
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
-    }
 
     public function test_group_week_rules_use_sunday_index_and_reject_ambiguous_rules(): void
     {
@@ -228,7 +297,7 @@ class AssetRemindersTest extends TestCase
         $rule = $this->reminderRule($this->reminderGroup(), ['type' => 'advertising']);
         $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertOk()->assertDontSee('monthly_count');
         $this->assertSame(0, DB::table('asset_reminder_days')->count());
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
         $this->postJson($this->remindersUrl.'/rules/'.$rule->id.'/test')->assertUnprocessable();
         $this->postJson($this->remindersUrl.'/rules/'.$rule->id.'/test', ['confirmed' => true])->assertOk();
         $this->assertTrue((bool) DB::table('asset_reminder_runs')->first()->is_test);
@@ -282,5 +351,131 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
         $this->assertSame(1, DB::table('asset_reminder_runs')->count());
         $this->assertFalse((bool) DB::table('asset_reminder_rules')->find($rule->id)->enabled);
+    }
+
+    public function test_webhook_credentials_are_encrypted_and_never_returned_by_page_options_or_details(): void
+    {
+        $values = $this->groupValues(['webhook_secret' => 'SECtestSigningKey']);
+        $id = app(ReminderService::class)->save($this->hrActor, 'groups', $values, null);
+        $stored = DB::table('asset_reminder_groups')->find($id);
+        $this->assertNotSame($values['webhook'], $stored->webhook);
+        $this->assertNotSame($values['webhook_secret'], $stored->webhook_secret);
+        $this->assertSame($values['webhook'], Crypt::decryptString($stored->webhook));
+        $this->assertSame($values['webhook_secret'], Crypt::decryptString($stored->webhook_secret));
+        $this->assertNull($stored->robot_code);
+        $this->assertNull($stored->conversation_id);
+        foreach ([$this->remindersUrl, $this->remindersUrl.'/options', $this->remindersUrl.'/groups/'.$id] as $url) {
+            $response = $this->get($url, ['Accept' => 'application/json'])->assertOk();
+            foreach ([$values['webhook'], 'webhook-test-token', $values['webhook_secret'], $stored->webhook, $stored->webhook_secret, $stored->webhook_hash] as $private) {
+                $response->assertDontSee($private, false);
+            }
+            $response->assertDontSee('robot_code')->assertDontSee('conversation_id');
+        }
+        $this->getJson($this->remindersUrl.'/groups/'.$id)->assertJsonPath('record.webhook_configured', true)->assertJsonPath('record.webhook_secret_configured', true);
+        DB::table('admin_role_users')->where('user_id', $this->hrActor->id)->update(['position' => 'member']);
+        $this->hrActor->unsetRelation('roles')->unsetRelation('departments');
+        $this->getJson($this->remindersUrl.'/groups/'.$id)->assertOk()->assertDontSee('webhook-test-token')->assertDontSee('SECtestSigningKey');
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $values + ['version' => 1])->assertForbidden();
+    }
+
+    public function test_blank_fields_preserve_credentials_and_explicit_clear_removes_only_the_signing_secret(): void
+    {
+        $id = app(ReminderService::class)->save($this->hrActor, 'groups', $this->groupValues(['webhook_secret' => 'SECtestSigningKey']), null);
+        $stored = DB::table('asset_reminder_groups')->find($id);
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 1, 'webhook' => '', 'webhook_secret' => '']))->assertOk();
+        $updated = DB::table('asset_reminder_groups')->find($id);
+        $this->assertSame($stored->webhook, $updated->webhook);
+        $this->assertSame($stored->webhook_secret, $updated->webhook_secret);
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 2, 'webhook' => '', 'webhook_secret' => 'SECnewKey', 'clear_webhook_secret' => true]))->assertUnprocessable();
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 2, 'webhook' => '', 'clear_webhook_secret' => true]))->assertOk();
+        $updated = DB::table('asset_reminder_groups')->find($id);
+        $this->assertSame($stored->webhook, $updated->webhook);
+        $this->assertNull($updated->webhook_secret);
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 3, 'webhook' => 'https://oapi.dingtalk.com/robot/send?access_token=replacement-token', 'webhook_secret' => 'SECnewKey']))->assertOk();
+        $updated = DB::table('asset_reminder_groups')->find($id);
+        $this->assertSame('SECnewKey', Crypt::decryptString($updated->webhook_secret));
+        $this->assertStringContainsString('replacement-token', Crypt::decryptString($updated->webhook));
+    }
+
+    public function test_only_original_official_webhook_urls_are_accepted_and_duplicates_are_blocked(): void
+    {
+        foreach (['', 'http://oapi.dingtalk.com/robot/send?access_token=token', 'https://example.com/robot/send?access_token=token',
+            'https://oapi.dingtalk.com@127.0.0.1/robot/send?access_token=token', 'https://oapi.dingtalk.com.evil.example/robot/send?access_token=token',
+            'https://oapi.dingtalk.com:8443/robot/send?access_token=token', 'https://oapi.dingtalk.com/robot/send?access_token=token&timestamp=1&sign=temporary',
+            'https://oapi.dingtalk.com/robot/send?access_token=token#fragment'] as $url) {
+            $this->postJson($this->remindersUrl.'/groups', $this->groupValues(['webhook' => $url]))->assertUnprocessable();
+        }
+        $this->postJson($this->remindersUrl.'/groups', $this->groupValues(['webhook_secret' => 'not-a-signing-key']))->assertUnprocessable();
+        $this->reminderGroup();
+        $this->postJson($this->remindersUrl.'/groups', $this->groupValues(['department_id' => $this->teamB->id]))->assertUnprocessable();
+        $this->assertSame(1, DB::table('asset_reminder_groups')->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_incremental_migration_stops_legacy_destinations_and_preserves_rules_and_history(): void
+    {
+        $id = $this->reminderGroup();
+        $rule = $this->reminderRule($id, ['type' => 'advertising']);
+        $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
+        $history = (array) DB::table('asset_reminder_runs')->first();
+        $legacy = (array) DB::table('asset_reminder_groups')->find($id);
+        unset($legacy['webhook'], $legacy['webhook_secret'], $legacy['webhook_hash']);
+        $legacy['robot_code'] = 'old-robot'; $legacy['conversation_id'] = 'old-conversation';
+        // Recreate the original schema inside this in-memory fixture to exercise a populated upgrade.
+        Schema::drop('asset_reminder_groups');
+        (require database_path('migrations/2026_11_19_000100_install_asset_reminders.php'))->up();
+        DB::table('asset_reminder_groups')->insert($legacy);
+        $migration = require database_path('migrations/2026_11_19_000200_add_webhook_to_asset_reminder_groups.php');
+        $migration->up();
+        $migration->up();
+        $stored = DB::table('asset_reminder_groups')->find($id);
+        $this->assertFalse((bool) $stored->enabled);
+        $this->assertSame(2, (int) $stored->version);
+        $this->assertSame('old-conversation', $stored->conversation_id);
+        $this->assertSame($history, (array) DB::table('asset_reminder_runs')->first());
+        $this->assertTrue((bool) DB::table('asset_reminder_rules')->find($rule->id)->enabled);
+        $this->getJson($this->remindersUrl.'/groups/'.$id)->assertOk()->assertJsonPath('record.webhook_configured', false)->assertDontSee('old-robot')->assertDontSee('old-conversation');
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 2, 'webhook' => '']))->assertUnprocessable();
+        $this->postJson($this->remindersUrl.'/rules/'.$rule->id.'/test', ['confirmed' => true])->assertUnprocessable();
+        $this->assertSame(1, Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send'))->count());
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 2]))->assertOk();
+        $migration->up();
+        $this->assertTrue((bool) DB::table('asset_reminder_groups')->find($id)->enabled);
+        $this->assertSame(3, (int) DB::table('asset_reminder_groups')->find($id)->version);
+    }
+
+
+
+
+
+
+    public function test_runtime_scope_failure_is_shown_without_exposing_internal_details(): void
+    {
+        $group = $this->reminderGroup();
+        $rule = $this->reminderRule($group);
+        DB::table('asset_reminder_groups')->where('id', $group)->update(['updated_by' => 999999]);
+        $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertUnprocessable()
+            ->assertJsonPath('message', __('asset_reminders.check_group_authorization'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
+    }
+
+    public function test_unexpected_database_errors_use_a_reference_and_log_metadata_without_sql_or_bindings(): void
+    {
+        $rule = $this->reminderRule($this->reminderGroup());
+        Schema::drop('operation_task_recaps');
+        Log::spy();
+        $response = $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertUnprocessable();
+        $message = $response->json('message');
+        $this->assertSame(1, preg_match('/诊断编号：([0-9a-f-]{36})/', $message, $matches));
+        foreach (['SQLSTATE', 'select', 'operation_task_recaps', 'secret-test', 'reminder-token'] as $private) {
+            $response->assertDontSee($private, false);
+        }
+        Log::shouldHaveReceived('warning')->once()->withArgs(function ($event, $metadata) use ($matches, $rule) {
+            return $event === 'asset_reminder.check_failed' && $metadata['diagnostic_id'] === $matches[1]
+                && $metadata['rule_id'] === $rule->id && $metadata['stage'] === 'preview'
+                && isset($metadata['sqlstate'], $metadata['database_code'])
+                && ! isset($metadata['exception'], $metadata['sql'], $metadata['bindings'], $metadata['message']);
+        });
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
     }
 }

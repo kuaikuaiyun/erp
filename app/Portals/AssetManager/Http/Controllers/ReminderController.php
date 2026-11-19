@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\AssetManager\ReminderAttendanceService;
+use App\Portals\AssetManager\ReminderCheckException;
 use App\Portals\AssetManager\ReminderService;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -38,12 +39,16 @@ class ReminderController extends Controller
         $actor = $context['user'];
         $query = $this->service->query($actor, 'rules');
         foreach (['department_id', 'type', 'enabled'] as $key) {
-            if ($request->filled($key)) { $query->where($key, $filters[$key]); }
+            if ($request->filled($key)) {
+                if ($key === 'department_id') { $query->where(fn ($q) => $q->where('department_id', $filters[$key])->orWhereJsonContains('department_ids', (int) $filters[$key])); }
+                else { $query->where($key, $filters[$key]); }
+            }
         }
         $rows = $query->orderByDesc('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString();
         $departments = Department::whereIn('id', $this->service->ids($actor))->with('parent:id,name')->orderBy('sort')->orderBy('name')->get()
             ->mapWithKeys(fn ($d) => [$d->id => ($d->parent ? $d->parent->name.' / ' : '').$d->name]);
         $groups = $this->service->query($actor, 'groups')->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->orderBy('name')->paginate(20, ['*'], 'group_page')->withQueryString();
+        $groups->setCollection($groups->getCollection()->map(fn ($group) => $this->service->publicGroup($group)));
         $groupNames = $this->service->query($actor, 'groups')->whereIn('id', $rows->pluck('group_id'))->pluck('name', 'id');
         return view('portals.asset-manager.reminders', $context + compact('rows', 'filters', 'departments', 'groups') + [
             'canManage' => $this->service->ids($actor, true) !== [],
@@ -59,7 +64,7 @@ class ReminderController extends Controller
         return response()->json([
             'departments' => Department::whereIn('id', $this->service->ids($actor, true))->with('parent:id,name')->get()->map(fn ($d) => ['id' => $d->id, 'name' => ($d->parent ? $d->parent->name.' / ' : '').$d->name]),
             'companies' => $this->service->companies($actor),
-            'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get(),
+            'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get()->map(fn ($group) => $this->service->publicGroup($group)),
             'today' => now('Asia/Shanghai')->toDateString(), 'yesterday' => now('Asia/Shanghai')->subDay()->toDateString(),
         ])->header('Cache-Control', 'no-store');
     }
@@ -79,7 +84,8 @@ class ReminderController extends Controller
     public function show(Request $request, string $kind, int $id)
     {
         $c = $this->context($request);
-        return response()->json(['record' => $this->service->record($c['user'], $kind, $id)])->header('Cache-Control', 'no-store');
+        $record = $this->service->record($c['user'], $kind, $id);
+        return response()->json(['record' => $kind === 'groups' ? $this->service->publicGroup($record) : $record])->header('Cache-Control', 'no-store');
     }
 
     public function save(Request $request, string $kind, ?int $id = null)
@@ -115,8 +121,8 @@ class ReminderController extends Controller
         try {
             $data = $this->service->build([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), 1, false, true);
             return response()->json(['message' => $data['text']])->header('Cache-Control', 'no-store');
-        } catch (\Throwable) {
-            return response()->json(['message' => __('asset_reminders.check_failed')], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => ReminderCheckException::from($e, ['stage' => 'preview', 'rule_id' => $id])->getMessage()], 422)->header('Cache-Control', 'no-store');
         }
     }
 
@@ -128,8 +134,8 @@ class ReminderController extends Controller
         try {
             $data = $this->service->deliver([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), now('Asia/Shanghai')->format('H:i'), 1, true, $c['user']);
             return response()->json($data + ['message' => __('asset_reminders.test_sent')]);
-        } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => ReminderCheckException::from($e, ['stage' => 'test', 'rule_id' => $id])->getMessage()], 422)->header('Cache-Control', 'no-store');
         }
     }
 
@@ -141,8 +147,8 @@ class ReminderController extends Controller
         $query = $this->service->db()->table('asset_reminder_runs')->where('group_id', $group->id);
         $allowed = $this->service->ids($c['user']);
         // Logs may contain merged department names; visibility requires the complete batch scope.
-        foreach ($this->service->db()->table('asset_reminder_rules')->whereNotIn('department_id', $allowed)->distinct()->pluck('department_id') as $forbidden) {
-            $query->whereJsonDoesntContain('department_ids', (int) $forbidden);
+        foreach ($this->service->db()->table('asset_reminder_rules')->get() as $rule) {
+            foreach (array_diff($this->service->ruleDepartments($rule), $allowed) as $forbidden) { $query->whereJsonDoesntContain('department_ids', (int) $forbidden); }
         }
         $rows = $query->orderByDesc('id')->paginate(20);
         return response()->json($rows)->header('Cache-Control', 'no-store');

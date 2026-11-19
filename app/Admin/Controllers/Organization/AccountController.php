@@ -67,6 +67,7 @@ class AccountController extends Controller
                 'status' => (int) ($payload['status'] ?? 1),
                 'hired_at' => $payload['hired_at'] ?? null,
             ]);
+            $account->company_id = $payload['company_id'] ?? null;
             $account->employment_status = $payload['employment_status'];
             $account->resigned_at = $payload['resigned_at'] ?? null;
             $account->save();
@@ -95,6 +96,7 @@ class AccountController extends Controller
 
         DB::connection($this->connectionName())->transaction(function () use ($request, $payload, $account): void {
             $account->name = $payload['name'];
+            if (array_key_exists('company_id', $payload)) $account->company_id = $payload['company_id'];
             $account->hired_at = $payload['hired_at'] ?? null;
             $account->resigned_at = $payload['resigned_at'] ?? null;
             $account->employment_status = $payload['employment_status'];
@@ -366,6 +368,10 @@ class AccountController extends Controller
         $form->text('name', __('organization.accounts.name'))
             ->rules('required|max:255')
             ->attribute('maxlength', 255);
+        $form->select('company_id', __('organization.accounts.company'))
+            ->options($this->companyOptions($account))
+            ->placeholder(__('organization.accounts.company_placeholder'))
+            ->help(__('organization.accounts.company_help'));
         $form->date('hired_at', __('organization.accounts.hired_at'))
             ->rules('nullable|date')
             ->help(__('organization.accounts.hired_at_help'));
@@ -411,6 +417,21 @@ class AccountController extends Controller
         return $form;
     }
 
+    private function companyOptions(?AdminUser $account = null): array
+    {
+        return \App\Models\DingTalkCompany::withTrashed()
+            ->where(function ($query) use ($account): void {
+                $query->where(function ($active): void {
+                    $active->where('enabled', true)->whereNull('deleted_at');
+                });
+                if ($account?->company_id) $query->orWhere('id', $account->company_id);
+            })->orderBy('name')->get()->mapWithKeys(function ($company): array {
+                $suffix = $company->trashed() ? __('organization.accounts.company_archived')
+                    : (!$company->enabled ? __('organization.accounts.company_disabled') : '');
+                return [$company->id => $company->name.$suffix];
+            })->all();
+    }
+
     private function requestMemberships(Request $request): array
     {
         return (array) $request->input('memberships', []);
@@ -430,6 +451,13 @@ class AccountController extends Controller
         return [
             'username' => [$account?->isAdministrator() ? 'nullable' : 'required', 'string', 'max:190', $usernameRule],
             'name' => ['required', 'string', 'max:255'],
+            'company_id' => ['bail', 'nullable', 'integer', function ($attribute, $value, $fail) use ($account): void {
+                $company = \App\Models\DingTalkCompany::withTrashed()->find($value);
+                $unchanged = $account && (int) $account->company_id === (int) $value;
+                if (!$company || (!$unchanged && (!$company->enabled || $company->trashed()))) {
+                    $fail(__('organization.accounts.company_invalid'));
+                }
+            }],
             'hired_at' => ['nullable', 'date'],
             'resigned_at' => ['nullable', 'date'],
             'employment_status' => ['required', Rule::in(['employed', 'resigned'])],
@@ -446,6 +474,7 @@ class AccountController extends Controller
     private function accountMessages(): array
     {
         return [
+            'company_id.integer' => __('organization.accounts.company_invalid'),
             'username.required' => __('organization.validation.username_required'),
             'resigned_at.date' => __('organization.accounts.resigned_at_invalid'),
             'employment_status.required' => __('organization.accounts.employment_status_required'),

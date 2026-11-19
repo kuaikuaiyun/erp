@@ -1,7 +1,7 @@
 @extends('portal.layout')
 @section('page_title', __('asset_reminders.title'))
 @push('styles')
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261119-2">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261119-7">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_reminders.title') }} <small>{{ __('asset_reminders.subtitle') }}</small></h1></section>
@@ -17,13 +17,13 @@
             <div class="ar-tools ar-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> {{ __('asset_reminders.query') }}</button><a class="btn btn-default" href="{{ url('/asset-manager/reminders') }}">{{ __('asset_reminders.reset') }}</a></div>
         </form><div class="box-footer ar-hint">{{ __('asset_reminders.scope_hint') }} @unless($canManage){{ __('asset_reminders.readonly') }}@endunless</div>
     </div>
-    <div class="box box-default"><div class="box-header with-border ar-heading"><h3 class="box-title">{{ __('asset_reminders.rules') }}</h3>@if($canManage)<button type="button" class="btn btn-primary btn-sm" data-ar-create="rules"><i class="fa fa-plus"></i> {{ __('asset_reminders.add_rule') }}</button>@endif</div>
+    <div class="box box-default"><div class="box-header with-border ar-heading"><h3 class="box-title">{{ __('asset_reminders.rules') }}</h3><div class="ar-tools"><button type="button" class="btn btn-default btn-sm" data-ar-guide="robot"><i class="fa fa-book"></i> {{ __('asset_reminders.guides.robot.title') }}</button><button type="button" class="btn btn-default btn-sm" data-ar-guide="tool"><i class="fa fa-book"></i> {{ __('asset_reminders.guides.tool.title') }}</button>@if($canManage)<button type="button" class="btn btn-primary btn-sm" data-ar-create="rules"><i class="fa fa-plus"></i> {{ __('asset_reminders.add_rule') }}</button>@endif</div></div>
         <div class="ar-section-note"><details class="ar-help"><summary>{{ __('asset_reminders.usage_help') }}</summary><p class="ar-hint">{{ __('asset_reminders.calendar_hint') }}</p></details></div>
         <div class="ar-table-wrap"><div class="table-responsive"><table class="table table-bordered table-hover ar-table"><thead><tr>
             @foreach(['department_id','type','group_id','attendance_group_name','work_times','rest_times','starts_on','enabled','last_error'] as $field)<th>{{ __('asset_reminders.fields.'.$field) }}</th>@endforeach<th>{{ __('asset_reminders.actions') }}</th>
         </tr></thead><tbody>
         @forelse($rows as $row)<tr>
-            <td>{{ $departments[$row->department_id]??$row->department_id }}</td><td>{{ __('asset_reminders.types.'.$row->type) }}</td><td>{{ $groupNames[$row->group_id]??$row->group_id }}</td><td>{{ $row->attendance_group_name }}</td>
+            <td>{{ implode(' / ', array_map(fn ($id) => $departments[$id] ?? $id, json_decode($row->department_ids ?? 'null', true) ?: [$row->department_id])) }}</td><td>{{ __('asset_reminders.types.'.$row->type) }}</td><td>{{ $groupNames[$row->group_id]??$row->group_id }}</td><td>{{ $row->attendance_group_name }}</td>
             <td>{{ implode(' / ',json_decode($row->work_times,true)) ?: '—' }}</td><td>{{ implode(' / ',json_decode($row->rest_times,true)) ?: '—' }}</td><td>{{ $row->starts_on }}</td><td><span class="ar-badge {{ $row->enabled?'is-on':'' }}">{{ __('asset_reminders.'.($row->enabled?'enabled':'disabled')) }}</span></td>
             <td class="ar-error-cell">{{ $row->last_error ?: '—' }}<small>{{ $row->last_checked_at ? \App\Portals\OperationTasks\Support\OperationTaskTime::format($row->last_checked_at) : __('asset_reminders.never') }}</small></td>
             <td class="ar-actions"><button type="button" class="btn btn-default btn-xs" data-ar-view="rules" data-id="{{ $row->id }}">{{ __('asset_reminders.view') }}</button>
@@ -40,7 +40,8 @@
     <div class="box box-default"><div class="box-header with-border ar-heading"><h3 class="box-title">{{ __('asset_reminders.groups') }}</h3>@if($canManage)<button type="button" class="btn btn-primary btn-sm" data-ar-create="groups"><i class="fa fa-plus"></i> {{ __('asset_reminders.add_group') }}</button>@endif</div>
         <div class="box-body ar-groups-body"><details class="ar-help"><summary>{{ __('asset_reminders.usage_help') }}</summary><p class="ar-hint">{{ __('asset_reminders.config_hint') }}</p></details><div class="ar-group-grid">
         @forelse($groups as $group)<article class="ar-group"><div class="ar-heading"><strong><i class="fa fa-comments-o"></i> {{ $group->name }}</strong><span class="ar-badge {{ $group->enabled?'is-on':'' }}">{{ __('asset_reminders.'.($group->enabled?'enabled':'disabled')) }}</span></div>
-            <p>{{ $departments[$group->department_id]??$group->department_id }}</p><p class="ar-hint">{{ $companyNames[$group->company_id]??$group->company_id }} · {{ $group->remark }}</p><div class="ar-tools">
+            <p>{{ $departments[$group->department_id]??$group->department_id }}</p><p class="ar-hint">{{ $companyNames[$group->company_id]??$group->company_id }} · {{ $group->remark }}</p>
+            <p class="ar-hint">{{ __('asset_reminders.fields.webhook') }}：{{ __('asset_reminders.'.($group->webhook_configured?'configured':'not_configured')) }} · {{ __('asset_reminders.fields.webhook_secret') }}：{{ __('asset_reminders.'.($group->webhook_secret_configured?'configured':'not_configured')) }}</p><div class="ar-tools">
                 <button type="button" class="btn btn-default btn-sm" data-ar-view="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.view') }}</button>
                 <button type="button" class="btn btn-default btn-sm" data-ar-runs="{{ $group->id }}">{{ __('asset_reminders.runs') }}</button>
                 @if(in_array((int)$group->department_id,$writeIds,true))<button type="button" class="btn btn-primary btn-sm" data-ar-edit="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.edit') }}</button><button type="button" class="btn btn-default btn-sm" data-ar-remove="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.remove') }}</button>@endif
@@ -53,9 +54,21 @@
     <div class="ar-modal-body"><div id="ar-error" class="alert alert-danger" role="alert" hidden></div><div id="ar-fields"></div></div>
     <footer><button type="button" class="btn btn-default" data-ar-close>{{ __('asset_reminders.close') }}</button><button type="submit" class="btn btn-primary" id="ar-save">{{ __('asset_reminders.save') }}</button></footer>
 </form></dialog>
+@foreach(['robot','tool'] as $guide)
+<template id="ar-guide-{{ $guide }}"><div class="ar-guide">
+    <p class="ar-guide-intro">{{ __('asset_reminders.guides.'.$guide.'.intro') }}</p>
+    @foreach(__('asset_reminders.guides.'.$guide.'.steps') as $number => $step)
+    <section class="ar-guide-step"><h4><span>{{ $number + 1 }}</span>{{ $step['title'] }}</h4><p>{{ $step['body'] }}</p>
+        @foreach($step['images'] as $file)
+        <figure><img src="{{ asset('assets/erp/reminder-guides/'.$file) }}" alt="{{ $step['title'] }}" loading="lazy" decoding="async"></figure>
+        @endforeach
+    </section>
+    @endforeach
+</div></template>
+@endforeach
 @endsection
 @push('scripts')
-@php($reminderConfig = ['base'=>url('/asset-manager/reminders'),'text'=>__('asset_reminders'),'departments'=>$departments,'companies'=>$companyNames,'groups'=>$groupNames])
+@php($reminderConfig = ['defaultEntryUrl'=>\App\Portals\AssetManager\ReminderService::DEFAULT_ENTRY_URL,'base'=>url('/asset-manager/reminders'),'text'=>__('asset_reminders'),'departments'=>$departments,'companies'=>$companyNames,'groups'=>$groupNames])
 <script>window.AssetRemindersConfig=@json($reminderConfig);</script>
-<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261119-1"></script>
+<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261119-7"></script>
 @endpush

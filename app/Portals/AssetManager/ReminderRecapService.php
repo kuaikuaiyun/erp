@@ -3,16 +3,13 @@
 namespace App\Portals\AssetManager;
 
 use App\Models\AdminUser;
-use App\Models\DingTalkBinding;
 use App\Models\DingTalkCompany;
 use App\Models\OperationTaskRecap;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 
 class ReminderRecapService
 {
-    public function __construct(private ReminderAttendanceService $attendance) {}
 
     private function db()
     {
@@ -28,24 +25,17 @@ class ReminderRecapService
         if ($date->toDateString() < $rule->starts_on) {
             return [];
         }
+        $departments = array_map('intval', json_decode($rule->department_ids ?? 'null', true) ?: [$rule->department_id]);
+        sort($departments);
         $users = AdminUser::query()->where('status', 1)->where('employment_status', '!=', 'resigned')
             ->whereDoesntHave('roles', fn ($q) => $q->where('slug', 'administrator'))
-            ->whereHas('departments', fn ($q) => $q->where('id', $rule->department_id))
+            ->whereHas('departments', fn ($q) => $q->whereIn('admin_roles.id', $departments))
             ->where(fn ($q) => $q->whereNull('hired_at')->orWhereDate('hired_at', '<=', $date->toDateString()))
             ->where(fn ($q) => $q->whereNull('resigned_at')->orWhereDate('resigned_at', '>', $date->toDateString()))
             ->orderBy('id')->get();
-        $bindings = DingTalkBinding::with('identity')->whereIn('account_id', $users->modelKeys())->where('active', true)->get()
-            ->filter(fn ($b) => $b->identity && $b->identity->active && $b->identity->corp_id === $company->corp_id)->groupBy('account_id');
-        $ids = [];
-        foreach ($users as $user) {
-            if ($bindings->get($user->id, collect())->count() !== 1) {
-                throw new RuntimeException(__('asset_reminders.binding_missing', ['name' => $user->name]));
-            }
-            $ids[$user->id] = $bindings[$user->id][0]->identity->user_id;
-        }
-        $working = $this->attendance->workingUsers($company, $rule->operator_userid, array_values($ids), $date);
-        $snapshot = $users->filter(fn ($user) => $working[$ids[$user->id]])->map(fn ($user) => [
+        $snapshot = $users->map(fn ($user) => [
             'id' => (int) $user->id, 'name' => $user->name ?: $user->username,
+            'department_id' => min(array_intersect($departments, $user->departments->modelKeys())),
         ])->values()->all();
         if ($persist) {
             $this->db()->table('asset_reminder_days')->insertOrIgnore([
@@ -76,7 +66,7 @@ class ReminderRecapService
                     if ($day->isSameDay($date) && ! isset($today[$user['id']])) {
                         // Stable department ordering makes cross-department grouping deterministic.
                         $today[$user['id']] = $user;
-                        $departments[$rule->department_id][] = $user;
+                        $departments[$user['department_id'] ?? $rule->department_id][] = $user;
                     }
                 }
             }

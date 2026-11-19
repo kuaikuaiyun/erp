@@ -116,10 +116,18 @@ class DepartmentController extends Controller
                 'department' => $option,
                 'children' => $memberDepartmentOptions->where('parent_id', $option->getKey())->values(),
             ])->values();
+        $memberCompanyOptions = \App\Models\DingTalkCompany::withTrashed()->orderBy('name')->get()
+            ->mapWithKeys(function ($company): array {
+                $suffix = $company->trashed() ? __('organization.accounts.company_archived')
+                    : (!$company->enabled ? __('organization.accounts.company_disabled') : '');
+                return [$company->id => $company->name.$suffix];
+            })->all();
         $memberFilters = $request->validate([
+            'member_company_id' => ['bail', 'nullable', 'string', Rule::in(array_merge(['unassigned'], array_map('strval', array_keys($memberCompanyOptions))))],
             'search' => ['nullable', 'string', 'max:100'],
             'member_department_id' => ['nullable', 'integer', Rule::in($memberDepartmentOptions->pluck('id')->all())],
         ]);
+        $selectedMemberCompanyId = (string) ($memberFilters['member_company_id'] ?? '');
         $search = trim((string) ($memberFilters['search'] ?? ''));
         $selectedMemberDepartmentId = (int) ($memberFilters['member_department_id'] ?? 0);
         $userModel = config('admin.database.users_model');
@@ -135,6 +143,10 @@ class DepartmentController extends Controller
             ->when($selectedMemberDepartmentId > 0, function ($query) use ($selectedMemberDepartmentId): void {
                 $query->whereHas('departments', fn ($departments) => $departments->whereKey($selectedMemberDepartmentId));
             })
+            ->when($selectedMemberCompanyId !== '', function ($query) use ($selectedMemberCompanyId): void {
+                if ($selectedMemberCompanyId === 'unassigned') $query->whereNull('company_id');
+                else $query->where('company_id', (int) $selectedMemberCompanyId);
+            })
             ->orderBy('name')->orderBy('username')->paginate(20)->withQueryString();
 
         return $content
@@ -144,6 +156,8 @@ class DepartmentController extends Controller
                 'department' => $department,
                 'members' => $department->departmentMembers->sortBy(fn (AdminUser $user) => $user->name ?: $user->username)->values(),
                 'candidateUsers' => $candidateUsers,
+                'memberCompanyOptions' => $memberCompanyOptions,
+                'selectedMemberCompanyId' => $selectedMemberCompanyId,
                 'search' => $search,
                 'memberDepartmentOptions' => $memberDepartmentOptions,
                 'memberDepartmentGroups' => $memberDepartmentGroups,

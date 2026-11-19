@@ -8,8 +8,10 @@ use App\Models\DingTalkCompany;
 use App\Models\DingTalkCompanyGrant;
 use App\Models\Portal;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -18,6 +20,7 @@ use RuntimeException;
 
 class ReminderService
 {
+    public const DEFAULT_ENTRY_URL = 'https://www.kuaiyun8888.com/kky/';
     public function __construct(
         private AssetComputerDepartmentBindingService $bindings,
         private ReminderAttendanceService $attendance,
@@ -51,7 +54,16 @@ class ReminderService
     public function query(AdminUser $actor, string $kind, bool $write = false): Builder
     {
         abort_unless(in_array($kind, ['groups', 'rules'], true), 404);
-        return $this->db()->table('asset_reminder_'.$kind)->whereIn('department_id', $this->ids($actor, $write));
+        $query = $this->db()->table('asset_reminder_'.$kind)->whereIn('department_id', $this->ids($actor, $write));
+        if ($kind === 'rules') {
+            $allowed = $this->ids($actor, $write);
+            foreach ($this->db()->table('asset_reminder_rules')->pluck('department_ids') as $json) {
+                foreach (json_decode($json ?? '[]', true) as $department) {
+                    if (! in_array((int) $department, $allowed, true)) { $query->whereJsonDoesntContain('department_ids', (int) $department); }
+                }
+            }
+        }
+        return $query;
     }
 
     public function record(AdminUser $actor, string $kind, int $id, bool $write = false): object
@@ -67,9 +79,38 @@ class ReminderService
         return $row;
     }
 
+    public function publicGroup(object $group): object
+    {
+        $safe = clone $group;
+        $safe->webhook_configured = ! empty($safe->webhook);
+        $safe->webhook_secret_configured = ! empty($safe->webhook_secret);
+        unset($safe->webhook, $safe->webhook_secret, $safe->webhook_hash, $safe->robot_code, $safe->conversation_id);
+        return $safe;
+    }
+
+    public function ruleDepartments(object $rule): array
+    {
+        return array_map('intval', json_decode($rule->department_ids ?? 'null', true) ?: [$rule->department_id]);
+    }
+
     public function save(AdminUser $actor, string $kind, array $input, ?int $id): int
     {
+        $lock = Cache::lock('asset-reminder:configuration', 300);
+        if (! $lock->get()) { throw new ReminderCheckException('busy'); }
+        try { return $this->saveConfiguration($actor, $kind, $input, $id); }
+        finally { $lock->release(); }
+    }
+
+    private function saveConfiguration(AdminUser $actor, string $kind, array $input, ?int $id): int
+    {
         abort_unless(in_array($kind, ['groups', 'rules'], true), 404);
+        if ($kind === 'rules' && isset($input['department_ids'])) {
+            $input = Validator::make($input, ['department_ids' => ['required', 'array', 'min:1'], 'department_ids.*' => ['required', 'integer', 'distinct', Rule::in($this->ids($actor, true))]] + [], __('asset_reminders.validation'), __('asset_reminders.fields'))->validate() + $input;
+            $input['department_ids'] = array_map('intval', $input['department_ids']);
+            sort($input['department_ids']);
+            $input['department_id'] = $input['department_ids'][0];
+        }
+        if ($kind === 'rules' && ! $id && ! isset($input['entry_url'])) { $input['entry_url'] = self::DEFAULT_ENTRY_URL; }
         $old = $id ? $this->record($actor, $kind, $id, true) : null;
         $common = [
             'department_id' => ['required', 'integer', Rule::in($this->ids($actor, true))],
@@ -77,37 +118,66 @@ class ReminderService
         ];
         $rules = $kind === 'groups' ? [
             'name' => ['required', 'string', 'max:100'], 'company_id' => ['required', 'integer'],
-            'robot_code' => ['required', 'string', 'max:190', 'regex:/^[A-Za-z0-9_-]+$/'],
-            'conversation_id' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z0-9_+=\/-]+$/'],
+            'webhook' => ['nullable', 'string', 'max:1000'],
+            'webhook_secret' => ['nullable', 'string', 'max:256', 'regex:/\ASEC[A-Za-z0-9]+\z/D'],
+            'clear_webhook_secret' => ['sometimes', 'boolean'],
             'remark' => ['nullable', 'string', 'max:500'],
         ] : [
             'group_id' => ['required', 'integer'], 'type' => ['required', Rule::in(['recap', 'advertising'])],
-            'attendance_group_id' => ['required', 'integer', 'min:1'], 'operator_userid' => ['required', 'string', 'max:190'],
-            'work_times' => ['present', 'array', 'max:10'], 'work_times.*' => ['required', 'date_format:H:i', 'distinct'],
-            'rest_times' => ['present', 'array', 'max:10'], 'rest_times.*' => ['required', 'date_format:H:i', 'distinct'],
+            'attendance_group_id' => ['required', 'integer', 'min:1'],
+            'work_times' => ['present', 'array', 'max:3'], 'work_times.*' => ['required', 'date_format:H:i', 'distinct'],
+            'rest_times' => ['present', 'array', 'max:3'], 'rest_times.*' => ['required', 'date_format:H:i', 'distinct'],
             'starts_on' => ['required', 'date_format:Y-m-d'], 'entry_url' => ['required', 'url:http,https', 'max:1000'],
         ];
         $data = Validator::make($input, $common + $rules, __('asset_reminders.validation'), __('asset_reminders.fields'))->validate();
         unset($data['version']);
-        if ($old && (int) $old->department_id !== (int) $data['department_id']) {
+        if ($kind === 'groups' && $old && (int) $old->department_id !== (int) $data['department_id']) {
             throw ValidationException::withMessages(['department_id' => __('asset_reminders.department_locked')]);
         }
         if ($kind === 'groups') {
             $this->company($actor, (int) $data['company_id']);
             // A shared group can only be edited by someone managing every affected department.
-            if ($old && $this->db()->table('asset_reminder_rules')->where('group_id', $id)->whereNotIn('department_id', $this->ids($actor, true))->exists()) {
-                abort(403, __('asset_reminders.scope_revoked'));
+            if ($old) {
+                foreach ($this->db()->table('asset_reminder_rules')->where('group_id', $id)->get() as $reference) {
+                    abort_if(array_diff($this->ruleDepartments($reference), $this->ids($actor, true)) !== [], 403, __('asset_reminders.scope_revoked'));
+                }
             }
-            if ($this->db()->table('asset_reminder_groups')->where('company_id', $data['company_id'])->where('robot_code', $data['robot_code'])
-                ->where('conversation_id', $data['conversation_id'])->when($id, fn ($q) => $q->where('id', '!=', $id))->exists()) {
-                throw ValidationException::withMessages(['conversation_id' => __('asset_reminders.group_duplicate')]);
+            $webhook = trim($data['webhook'] ?? '');
+            $secret = trim($data['webhook_secret'] ?? '');
+            $clearSecret = (bool) ($data['clear_webhook_secret'] ?? false);
+            unset($data['webhook'], $data['webhook_secret'], $data['clear_webhook_secret']);
+            if ($webhook !== '') {
+                try { $webhook = $this->client->normalizeWebhook($webhook); }
+                catch (RuntimeException $e) { throw ValidationException::withMessages(['webhook' => $e->getMessage()]); }
+                $data['webhook_hash'] = hash('sha256', $webhook);
+                if ($this->db()->table('asset_reminder_groups')->where('webhook_hash', $data['webhook_hash'])->when($id, fn ($q) => $q->where('id', '!=', $id))->exists()) {
+                    throw ValidationException::withMessages(['webhook' => __('asset_reminders.group_duplicate')]);
+                }
+                $data['webhook'] = Crypt::encryptString($webhook);
+            } elseif (empty($old?->webhook)) {
+                throw ValidationException::withMessages(['webhook' => __('asset_reminders.webhook_missing')]);
+            }
+            if ($clearSecret && $secret !== '') {
+                throw ValidationException::withMessages(['webhook_secret' => __('asset_reminders.secret_conflict')]);
+            }
+            if ($secret !== '') {
+                $data['webhook_secret'] = Crypt::encryptString($secret);
+            } elseif ($clearSecret) {
+                $data['webhook_secret'] = null;
             }
         } else {
+            $selected = $input['department_ids'] ?? ($old ? $this->ruleDepartments($old) : [(int) $data['department_id']]);
+            $data['department_id'] = $selected[0];
+            $data['department_ids'] = json_encode($selected);
+            foreach ($this->db()->table('asset_reminder_rules')->where('type', $data['type'])->when($id, fn ($q) => $q->where('id', '!=', $id))->get() as $existing) {
+                if (array_intersect($selected, $this->ruleDepartments($existing))) { throw ValidationException::withMessages(['department_ids' => __('asset_reminders.rule_duplicate')]); }
+            }
             $group = $this->record($actor, 'groups', (int) $data['group_id'], true);
             $company = $this->company($actor, (int) $group->company_id);
             $attendance = $this->attendance->group($company, (int) $data['attendance_group_id']);
             $this->attendance->dayType($attendance, now('Asia/Shanghai'));
             $data['attendance_group_name'] = $attendance['group_name'];
+            if (! $old) { $data['operator_userid'] = ''; } // Unused legacy NOT NULL column.
             if ($old && ($old->starts_on !== $data['starts_on'] || $old->type !== $data['type'])) {
                 throw ValidationException::withMessages(['starts_on' => __('asset_reminders.start_locked')]);
             }
@@ -142,6 +212,8 @@ class ReminderService
             }
             return $this->db()->table('asset_reminder_'.$kind)->insertGetId($data + ['created_at' => now('UTC'), 'version' => 1]);
             });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages([$kind === 'groups' ? 'webhook' : 'type' => __('asset_reminders.'.($kind === 'groups' ? 'group_duplicate' : 'rule_duplicate'))]);
         } finally { foreach ($locks as $lock) { $lock->release(); } }
     }
 
@@ -167,20 +239,23 @@ class ReminderService
     {
         $portal = Portal::where('code', 'asset-manager')->first();
         if (! $portal || ! $portal->isEnabled() || ! $portal->menus()->where('code', 'asset_manager_reminders')->where('is_enabled', true)->exists()) {
-            throw new RuntimeException(__('asset_reminders.scope_revoked'));
+            throw new ReminderCheckException('check_portal_unavailable');
         }
         $actor = AdminUser::find($rule->updated_by);
-        if (! $actor || (int) $actor->status !== 1 || ! $actor->can('asset-manager.computers') || ! in_array((int) $rule->department_id, $this->ids($actor, true), true)) {
-            throw new RuntimeException(__('asset_reminders.scope_revoked'));
+        if (! $actor || (int) $actor->status !== 1 || ! $actor->can('asset-manager.computers') || array_diff($this->ruleDepartments($rule), $this->ids($actor, true)) !== []) {
+            throw new ReminderCheckException('check_rule_authorization');
         }
         $group = $this->record($actor, 'groups', (int) $rule->group_id, true);
         $editor = AdminUser::find($group->updated_by);
         if (! $editor || (int) $editor->status !== 1 || ! $editor->can('asset-manager.computers') || ! in_array((int) $group->department_id, $this->ids($editor, true), true)) {
-            throw new RuntimeException(__('asset_reminders.scope_revoked'));
+            throw new ReminderCheckException('check_group_authorization');
         }
         $company = $this->company($editor, (int) $group->company_id);
+        if (empty($group->webhook)) {
+            throw new ReminderCheckException('webhook_missing');
+        }
         if (! $allowDisabled && (! $group->enabled || ! $rule->enabled)) {
-            throw new RuntimeException(__('asset_reminders.disabled'));
+            throw new ReminderCheckException('disabled');
         }
         return [$group, $company];
     }
@@ -197,7 +272,7 @@ class ReminderService
         foreach ($rules as $rule) {
             [$candidate] = $this->runtime($rule, $draft);
             if ($rule->type !== $rules[0]->type || (int) $candidate->id !== (int) $group->id) {
-                throw new RuntimeException(__('asset_reminders.invalid_batch'));
+                throw new ReminderCheckException('invalid_batch');
             }
         }
         $title = __('asset_reminders.message.'.$rules[0]->type.'_title', ['round' => __('asset_reminders.rounds.'.$round, [], 'zh-CN')], 'zh-CN');
@@ -219,24 +294,39 @@ class ReminderService
             $lines[] = '['.__('asset_reminders.message.'.$rules[0]->type.'_link', [], 'zh-CN').']('.str_replace(['(', ')', '[', ']', "\n", "\r"], ['%28', '%29', '%5B', '%5D', '', ''], $url).')';
         }
         $text = '### '.$title."\n\n".implode("\n\n", $lines);
-        // Split at Unicode boundaries; a partial batch is uncertain and never automatically replayed.
-        $parts = []; $part = '';
-        foreach (preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) as $character) {
-            if (strlen($part.$character) > 12000) { $parts[] = $part; $part = ''; }
-            $part .= $character;
+        // Every Webhook part repeats its title/link so keyword checks and the entry survive splitting.
+        $parts = []; $part = ''; $heading = '### '.$title."\n\n";
+        $links = array_filter($lines, fn ($line) => str_starts_with($line, '['));
+        $suffix = "\n\n".implode("\n\n", $links);
+        $body = implode("\n\n", array_filter($lines, fn ($line) => ! str_starts_with($line, '[')));
+        $limit = 12000 - strlen($heading.$suffix) - strlen(__('asset_reminders.message.test', [], 'zh-CN')) - 2;
+        if ($limit < 4) { throw new ReminderCheckException('message_too_long'); }
+        foreach (preg_split('/(?<=、)|(?<=\n)/u', $body, -1, PREG_SPLIT_NO_EMPTY) as $segment) {
+            if ($part !== '' && strlen($part.$segment) > $limit) {
+                $parts[] = $heading.$part.$suffix; $part = '';
+            }
+            // Prefer complete names/lines; only an individually oversized segment needs a UTF-8 split.
+            if (strlen($segment) > $limit) {
+                foreach (preg_split('//u', $segment, -1, PREG_SPLIT_NO_EMPTY) as $character) {
+                    if (strlen($part.$character) > $limit) { $parts[] = $heading.$part.$suffix; $part = ''; }
+                    $part .= $character;
+                }
+            } else {
+                $part .= $segment;
+            }
         }
-        if ($part !== '') { $parts[] = $part; }
+        if ($part !== '') { $parts[] = $heading.$part.$suffix; }
         return compact('title', 'text', 'parts', 'summary');
     }
 
     public function deliver(array $rules, Carbon $date, string $slot, int $round, bool $test = false, ?AdminUser $actor = null): array
     {
         $first = $rules[0]; $ids = array_map(fn ($r) => (int) $r->id, $rules);
-        $departments = array_values(array_unique(array_map(fn ($r) => (int) $r->department_id, $rules)));
+        $departments = array_values(array_unique(array_merge(...array_map(fn ($r) => $this->ruleDepartments($r), $rules))));
         $key = hash('sha256', implode('|', [$first->group_id, $first->type, $date->toDateString(), $slot, $round, $test ? (string) \Illuminate\Support\Str::uuid() : 'scheduled']));
         $lock = Cache::lock('asset-reminder:delivery:'.$first->group_id, 300);
         if (! $lock->get()) {
-            throw new RuntimeException(__('asset_reminders.busy'));
+            throw new ReminderCheckException('busy');
         }
         $runId = null;
         try {
@@ -266,27 +356,26 @@ class ReminderService
                     foreach ($rules as $rule) {
                         $fresh = $this->db()->table('asset_reminder_rules')->where('id', $rule->id)->first();
                         if (! $fresh || (int) $fresh->version !== (int) $rule->version) {
-                            throw new RuntimeException(__('asset_reminders.conflict'));
+                            throw new ReminderCheckException('conflict');
                         }
                         [$group, $company] = $this->runtime($fresh, $test);
                     }
-                    $process = $this->client->send($company, $group, $payload['title'], $part);
-                    $this->db()->table('asset_reminder_runs')->where('id', $runId)->update(['process_key' => $process, 'updated_at' => now('UTC')]);
+                    $this->client->send($group, $payload['title'], $part);
                 }
                 $status = 'accepted';
             }
             $this->db()->table('asset_reminder_runs')->where('id', $runId)->update(['status' => $status, 'updated_at' => now('UTC')]);
             return ['status' => $status, 'id' => $runId];
         } catch (\Throwable $e) {
+            $diagnostic = ReminderCheckException::from($e, ['stage' => 'delivery', 'rule_ids' => $ids]);
             if ($runId) {
                 $row = $this->db()->table('asset_reminder_runs')->where('id', $runId)->first();
-                $message = $e instanceof RuntimeException || $e instanceof \Symfony\Component\HttpKernel\Exception\HttpException ? $e->getMessage() : __('asset_reminders.failed');
                 $this->db()->table('asset_reminder_runs')->where('id', $runId)->update([
                     'status' => $row->status === 'sending' ? 'uncertain' : 'failed',
-                    'error' => mb_substr($message, 0, 1000), 'updated_at' => now('UTC'),
+                    'error' => mb_substr($diagnostic->getMessage(), 0, 1000), 'updated_at' => now('UTC'),
                 ]);
             }
-            throw new RuntimeException(__('asset_reminders.delivery_failed'));
+            throw $diagnostic;
         } finally {
             $lock->release();
         }
@@ -314,9 +403,10 @@ class ReminderService
                     $batches[$rule->group_id.'|'.$rule->type.'|'.$index][] = $rule;
                 }
                 $this->db()->table('asset_reminder_rules')->where('id', $rule->id)->update(['last_error' => null, 'last_checked_at' => now('UTC')]);
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 $errors++;
-                $this->db()->table('asset_reminder_rules')->where('id', $rule->id)->update(['last_error' => __('asset_reminders.check_failed'), 'last_checked_at' => now('UTC')]);
+                $diagnostic = ReminderCheckException::from($e, ['stage' => 'scheduled_check', 'rule_id' => (int) $rule->id]);
+                $this->db()->table('asset_reminder_rules')->where('id', $rule->id)->update(['last_error' => mb_substr($diagnostic->getMessage(), 0, 1000), 'last_checked_at' => now('UTC')]);
             }
         }
         foreach ($batches as $rules) {

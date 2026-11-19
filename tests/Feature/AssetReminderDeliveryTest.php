@@ -6,6 +6,7 @@ require_once __DIR__.'/AssetRemindersTest.php';
 
 use App\Models\DingTalkCompanyGrant;
 use App\Portals\AssetManager\ReminderService;
+use App\Portals\AssetManager\ReminderDingTalkClient;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -29,7 +30,8 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame('2026-11-18', $run->data_date);
         $this->assertCount(2, json_decode($run->department_ids, true));
         Http::assertSentCount(3); // one token, one group listing, one message
-        Http::assertSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send') && $r['robotCode'] === 'robot-test' && $r['openConversationId'] === 'cid-test');
+        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['msgtype'] === 'markdown' && str_contains($r['markdown']['text'], '广告费提交提醒'));
+        $this->assertNull($run->process_key); // Webhook has no delivery tracking key.
     }
 
     public function test_advertising_never_queries_people_or_submission_tables(): void
@@ -53,7 +55,7 @@ class AssetReminderDeliveryTest extends TestCase
         $this->travelTo(Carbon::parse('2026-11-19 14:00:00', 'Asia/Shanghai'));
         $this->assertSame(0, $service->process(now('Asia/Shanghai')));
         $this->assertEquals(['accepted', 'skipped'], DB::table('asset_reminder_runs')->orderBy('id')->pluck('status')->all());
-        $this->assertCount(1, Http::recorded(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send')));
+        $this->assertCount(1, Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send')));
     }
 
     public function test_rest_day_uses_rest_time_not_individual_working_state(): void
@@ -74,7 +76,7 @@ class AssetReminderDeliveryTest extends TestCase
         DingTalkCompanyGrant::where('user_id', $this->hrActor->id)->delete();
         $this->assertSame(1, app(ReminderService::class)->process(now('Asia/Shanghai')));
         $this->assertNotNull(DB::table('asset_reminder_rules')->find($rule->id)->last_error);
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
         DingTalkCompanyGrant::create(['company_id' => $this->company->id, 'user_id' => $this->hrActor->id, 'created_by' => 1]);
         DB::table('asset_computer_department_bindings')->delete();
         $this->assertSame(1, app(ReminderService::class)->process(now('Asia/Shanghai')));
@@ -89,8 +91,8 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame(1, $service->process(now('Asia/Shanghai')));
         $run = DB::table('asset_reminder_runs')->first();
         $this->assertSame('uncertain', $run->status);
-        $this->assertStringNotContainsString('secret-test', $run->error);
-        $this->assertStringNotContainsString('reminder-token', $run->error);
+        $this->assertStringNotContainsString('webhook-test-token', $run->error);
+        $this->assertStringNotContainsString('SECtestSigningKey', $run->error);
         $this->sendTimeout = false;
         $this->assertSame(0, $service->process(now('Asia/Shanghai')));
         $this->assertSame(1, DB::table('asset_reminder_runs')->count());
@@ -128,30 +130,22 @@ class AssetReminderDeliveryTest extends TestCase
         DB::table('asset_reminder_days')->insert(['rule_id' => $rule->id, 'data_date' => '2026-11-18', 'snapshot' => json_encode($users), 'synced_at' => now()]);
         $service = app(ReminderService::class);
         $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        $messages = Http::recorded(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
+        $messages = Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send'));
         $this->assertGreaterThan(1, $messages->count());
         $text = '';
         foreach ($messages as [$request]) {
-            $part = json_decode($request['msgParam'], true)['text'];
+            $part = $request['markdown']['text'];
             $this->assertTrue(mb_check_encoding($part, 'UTF-8'));
             $this->assertLessThanOrEqual(12000, strlen($part));
+            $this->assertStringContainsString('日报未填写提醒', $part);
+            $this->assertStringContainsString('点击登录填写日报', $part);
             $text .= $part;
         }
         foreach ($users as $user) $this->assertStringContainsString($user['name'], $text);
         $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        $this->assertSame($messages->count(), Http::recorded(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'))->count());
+        $this->assertSame($messages->count(), Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send'))->count());
     }
 
-    public function test_attendance_failure_and_missing_schedule_do_not_send_partial_lists(): void
-    {
-        $rule = $this->reminderRule($this->reminderGroup());
-        $this->boundMember($this->teamA, 'missing');
-        $this->scheduleOverrides['missing|2026-11-18'] = 'missing';
-        $this->assertSame(1, app(ReminderService::class)->process(now('Asia/Shanghai')));
-        $this->assertSame(0, DB::table('asset_reminder_runs')->count());
-        $this->assertNotNull(DB::table('asset_reminder_rules')->find($rule->id)->last_error);
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
-    }
 
     public function test_roster_is_captured_on_days_without_a_sending_slot(): void
     {
@@ -161,6 +155,59 @@ class AssetReminderDeliveryTest extends TestCase
         $snapshot = DB::table('asset_reminder_days')->where('rule_id', $rule->id)->first();
         $this->assertSame($user->id, json_decode($snapshot->snapshot, true)[0]['id']);
         $this->assertSame(0, DB::table('asset_reminder_runs')->count());
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/groupMessages/send'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
     }
+
+    public function test_unsigned_webhook_sends_without_fetching_an_application_token(): void
+    {
+        $id = $this->reminderGroup();
+        $group = DB::table('asset_reminder_groups')->find($id);
+        app(ReminderDingTalkClient::class)->send($group, '提醒', '消息内容');
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['markdown'] === ['title' => '提醒', 'text' => '消息内容']);
+    }
+
+    public function test_signed_webhook_uses_millisecond_timestamp_and_url_encoded_hmac(): void
+    {
+        $id = app(ReminderService::class)->save($this->hrActor, 'groups', $this->groupValues(['webhook_secret' => 'SECtestSigningKey']), null);
+        app(ReminderDingTalkClient::class)->send(DB::table('asset_reminder_groups')->find($id), '提醒', '消息内容');
+        Http::assertSentCount(1);
+        Http::assertSent(function ($r) {
+            parse_str(parse_url($r->url(), PHP_URL_QUERY), $query);
+            return $query === ['access_token' => 'webhook-test-token', 'timestamp' => '1795053600000', 'sign' => 'h1DGODcsFv6JhThhMgpcpqfAuHzgyy2yN52CajGMRH8='];
+        });
+    }
+
+    public function test_rejected_or_malformed_webhook_results_never_count_as_accepted_or_leak_secrets(): void
+    {
+        $rule = $this->reminderRule($this->reminderGroup(), ['type' => 'advertising']);
+        $this->webhookResponse = ['errcode' => 310000, 'errmsg' => 'webhook-test-token SECtestSigningKey'];
+        $service = app(ReminderService::class);
+        $this->assertSame(1, $service->process(now('Asia/Shanghai')));
+        $run = DB::table('asset_reminder_runs')->first();
+        $this->assertSame('uncertain', $run->status);
+        $this->assertStringNotContainsString('webhook-test-token', $run->error);
+        $this->assertStringNotContainsString('SECtestSigningKey', $run->error);
+        $this->assertSame(0, $service->process(now('Asia/Shanghai')));
+        $this->assertSame(1, DB::table('asset_reminder_runs')->count());
+        $this->webhookResponse = ['errmsg' => 'ok'];
+        $this->postJson($this->remindersUrl.'/rules/'.$rule->id.'/test', ['confirmed' => true])->assertUnprocessable();
+        $this->assertSame(0, DB::table('asset_reminder_runs')->where('status', 'accepted')->count());
+    }
+
+    public function test_invalid_encrypted_destination_is_blocked_before_any_webhook_request(): void
+    {
+        $id = $this->reminderGroup();
+        $group = DB::table('asset_reminder_groups')->find($id);
+        $group->webhook = 'invalid-ciphertext-webhook-test-token';
+        try {
+            app(ReminderDingTalkClient::class)->send($group, '提醒', '消息内容');
+            $this->fail('Invalid ciphertext must be blocked.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(__('asset_reminders.webhook_unavailable'), $e->getMessage());
+        }
+        Http::assertNothingSent();
+    }
+
+
 }

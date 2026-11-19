@@ -14,6 +14,7 @@ class AdminUser extends Administrator
     public const STATUS_ACTIVE = 1;
 
     protected $casts = [
+        'company_id' => 'integer',
         'hired_at' => 'date',
         'resigned_at' => 'date',
     ];
@@ -26,6 +27,11 @@ class AdminUser extends Administrator
     public function dingTalkBindings(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(DingTalkBinding::class, 'account_id');
+    }
+
+    public function company(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(DingTalkCompany::class, 'company_id')->withTrashed();
     }
 
     public function departments(): BelongsToMany
