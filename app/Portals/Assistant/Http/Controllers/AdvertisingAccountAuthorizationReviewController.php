@@ -72,10 +72,10 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
         abort_unless(in_array($submission->status, [DailyAdvertisingAccountAuthorization::STATUS_PENDING, DailyAdvertisingAccountAuthorization::STATUS_PROCESSING], true), 422, '该广告账号授权需求已经处理，请刷新页面查看最新状态。');
         $data = $request->validate([
-            'decision' => ['required', 'in:processed,rejected'],
+            'decision' => ['nullable', 'in:processed,rejected'],
             'response_text' => ['required', 'string', 'max:5000'],
         ], ['response_text.required' => '请填写处理结果或驳回原因。']);
-        $status = $data['decision'] === DailyAdvertisingAccountAuthorization::STATUS_REJECTED
+        $status = ($data['decision'] ?? DailyAdvertisingAccountAuthorization::STATUS_PROCESSED) === DailyAdvertisingAccountAuthorization::STATUS_REJECTED
             ? DailyAdvertisingAccountAuthorization::STATUS_REJECTED
             : DailyAdvertisingAccountAuthorization::STATUS_PROCESSED;
         $submission->update([

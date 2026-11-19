@@ -83,12 +83,12 @@ class AccountOpeningReviewController extends Controller
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
         abort_unless(in_array($submission->status, [DailyAccountOpening::STATUS_PENDING, DailyAccountOpening::STATUS_PROCESSING], true), 422, '该开户需求已经处理，请刷新页面查看最新状态。');
         $validated = $request->validate([
-            'decision' => ['required', 'in:processed,rejected'],
+            'decision' => ['nullable', 'in:processed,rejected'],
             'response_text' => ['required', 'string', 'max:5000'],
         ], [
             'response_text.required' => '请填写处理结果或驳回原因。',
         ]);
-        $status = $validated['decision'] === DailyAccountOpening::STATUS_REJECTED
+        $status = ($validated['decision'] ?? DailyAccountOpening::STATUS_PROCESSED) === DailyAccountOpening::STATUS_REJECTED
             ? DailyAccountOpening::STATUS_REJECTED
             : DailyAccountOpening::STATUS_PROCESSED;
         $submission->update([

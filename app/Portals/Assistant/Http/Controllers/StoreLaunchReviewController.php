@@ -43,8 +43,8 @@ class StoreLaunchReviewController extends Controller
         $context=$this->context($request); if($context instanceof Response)abort($context->getStatusCode());
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null)abort_unless(in_array((int)$submission->operation_department_id,$visible,true),403);
         abort_unless(in_array($submission->status, [DailyStoreLaunch::STATUS_PENDING, DailyStoreLaunch::STATUS_PROCESSING], true), 422, '该下店需求已经处理，请刷新页面查看最新状态。');
-        $data=$request->validate(['decision'=>['required','in:processed,rejected'],'response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写处理结果或驳回原因。']);
-        $status=$data['decision']===DailyStoreLaunch::STATUS_REJECTED?DailyStoreLaunch::STATUS_REJECTED:DailyStoreLaunch::STATUS_PROCESSED;
+        $data=$request->validate(['decision'=>['nullable','in:processed,rejected'],'response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写处理结果或驳回原因。']);
+        $status=($data['decision']??DailyStoreLaunch::STATUS_PROCESSED)===DailyStoreLaunch::STATUS_REJECTED?DailyStoreLaunch::STATUS_REJECTED:DailyStoreLaunch::STATUS_PROCESSED;
         $submission->update(['status'=>$status,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
         return back()->with('success',$status===DailyStoreLaunch::STATUS_REJECTED?'下店需求已驳回。':'下店需求已回复并标记为已处理。');
     }
