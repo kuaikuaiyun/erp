@@ -60,6 +60,10 @@ $(function(){
 });
 </script>
 @php
+    $imageReportTitle = $reportProject['code'] === 'danbao-general' ? '单包百货运营报表' : '单包服装运营报表';
+    $imageSourceTitle = $fashionReportIndexRoute === 'operation-dashboard.fashion-operation-reports.index' ? '业绩看板' : '助理系统';
+    $imageTitle = $imageSourceTitle.' · '.$imageReportTitle.'（列表）';
+    $imageFilename = $imageReportTitle.'_列表_'.$filters['date_from'].'_'.$filters['date_to'].'.png';
     $imageTeamMode = ($filters['display_mode'] ?? 'performance') === 'team';
     $imageRows = $rows->map(function (array $row, int $index) use ($imageTeamMode, $teamBands): array {
         $row['_team_band'] = $imageTeamMode ? (int) ($teamBands[$index] ?? 0) : null;
@@ -103,6 +107,8 @@ $(function(){
     var teamMode=@json($imageTeamMode);
     var filterSummary={{ Illuminate\Support\Js::from($imageFilterSummary) }};
     var totalSummary={{ Illuminate\Support\Js::from($imageTotalSummary) }};
+    var imageTitle={{ Illuminate\Support\Js::from($imageTitle) }};
+    var imageFilename={{ Illuminate\Support\Js::from($imageFilename) }};
     var tableTotal={{ Illuminate\Support\Js::from($imageTableTotal) }};
     var headers=['运营部门','人名','订单量','总业绩($)','客单价($)','各媒体 / 广告费','广告费($)','总 ROI'];
     var widths=[180,145,110,150,130,420,140,110],padding=34,lineHeight=24;
@@ -127,13 +133,13 @@ $(function(){
                 var tableWidth=widths.reduce(function(total,width){return total+width;},0),headerTop=150,tableHeaderHeight=48,totalHeight=headerTop+tableHeaderHeight+prepared.reduce(function(total,row){return total+row.height;},0)+padding;
                 var ratio=Math.min(2,30000/Math.max(tableWidth+padding*2,totalHeight)),canvas=document.createElement('canvas');canvas.width=Math.ceil((tableWidth+padding*2)*ratio);canvas.height=Math.ceil(totalHeight*ratio);
                 var ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.fillStyle='#f4f8fb';ctx.fillRect(0,0,tableWidth+padding*2,totalHeight);
-                ctx.textBaseline='top';ctx.fillStyle='#173d5f';ctx.font='700 30px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.fillText('助理系统 · 服装运营报表（列表）',padding,22);
+                ctx.textBaseline='top';ctx.fillStyle='#173d5f';ctx.font='700 30px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.fillText(imageTitle,padding,22);
                 ctx.fillStyle='#526f84';ctx.font='500 17px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.fillText(filterSummary,padding,67);
                 ctx.fillText(totalSummary,padding,98);
                 ctx.fillStyle='#acd4e9';ctx.fillRect(padding,130,tableWidth,4);
                 var x=padding;ctx.font='700 16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';headers.forEach(function(header,index){ctx.fillStyle='#dcecf6';ctx.fillRect(x,headerTop,widths[index],tableHeaderHeight);ctx.strokeStyle='#b7ccd9';ctx.strokeRect(x+.5,headerTop+.5,widths[index]-1,tableHeaderHeight-1);ctx.fillStyle='#244f6d';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(header,x+widths[index]/2,headerTop+tableHeaderHeight/2);x+=widths[index];});
                 var y=headerTop+tableHeaderHeight;prepared.forEach(function(row){x=padding;row.cells.forEach(function(lines,index){ctx.fillStyle=row.total?'#d9e9f3':(row.band===0?'#f1f7fb':'#fff6eb');ctx.fillRect(x,y,widths[index],row.height);ctx.strokeStyle=row.total?'#9fbccc':'#c4d5df';ctx.strokeRect(x+.5,y+.5,widths[index]-1,row.height-1);var tier=index===7?roiColors(row.roi):null;if(tier){ctx.fillStyle=tier.bg;ctx.fillRect(x+18,y+(row.height-30)/2,widths[index]-36,30);}ctx.fillStyle=tier?tier.fg:'#294b61';ctx.font=(row.total||index===1||index===2||index===3||index===7?'700 ':'500 ')+'16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.textAlign=[0,1,2,3,4,6,7].indexOf(index)>=0?'center':'left';ctx.textBaseline='top';var start=y+(row.height-lines.length*lineHeight)/2,tx=ctx.textAlign==='center'?x+widths[index]/2:x+9;lines.forEach(function(line,lineIndex){ctx.fillText(line,tx,start+lineIndex*lineHeight);});x+=widths[index];});y+=row.height;});
-                var link=document.createElement('a');link.download='服装运营报表_列表_{{ $filters['date_from'] }}_{{ $filters['date_to'] }}.png';link.href=canvas.toDataURL('image/png');document.body.appendChild(link);link.click();link.remove();
+                var link=document.createElement('a');link.download=imageFilename;link.href=canvas.toDataURL('image/png');document.body.appendChild(link);link.click();link.remove();
             }catch(error){window.alert('图片生成失败，请刷新页面后重试。');if(window.console)console.error(error);}finally{button.disabled=false;label.textContent=original;}
         },30);
     });
