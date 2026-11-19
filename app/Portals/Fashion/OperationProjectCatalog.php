@@ -80,6 +80,17 @@ final class OperationProjectCatalog
         return $code !== 'fuzhuang' && array_key_exists($code, self::all());
     }
 
+    /** @return array{gross_margin_rate:float,store_fee_rate:float,usd_to_rmb_rate:float}|null */
+    public static function performanceFormula(string $code): ?array
+    {
+        return match ($code) {
+            'danbao-general' => ['gross_margin_rate' => 0.625, 'store_fee_rate' => 0.01, 'usd_to_rmb_rate' => 7.0],
+            'baokuan-fashion' => ['gross_margin_rate' => 0.50, 'store_fee_rate' => 0.01, 'usd_to_rmb_rate' => 7.0],
+            'baokuan-general' => ['gross_margin_rate' => 0.45, 'store_fee_rate' => 0.015, 'usd_to_rmb_rate' => 7.0],
+            default => null,
+        };
+    }
+
     /** @return list<string> */
     public static function storeProjectNames(array $project): array
     {
