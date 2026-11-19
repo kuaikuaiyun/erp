@@ -630,6 +630,8 @@
         var currentId = input.getAttribute('data-sku-suggestions-current-id');
         var linkSkusInput = form ? form.querySelector('[data-product-request-link-skus]') : null;
         var skuValuesInput = form ? form.querySelector('[data-product-request-sku-values]') : null;
+        var systemSkusInput = form ? form.querySelector('[data-product-request-system-skus]') : null;
+        var systemSkuValuesInput = form ? form.querySelector('[data-product-request-system-sku-values]') : null;
         var checkButton = form ? form.querySelector('[data-sku-check]') : null;
         if (!panel || !list || !form) { return; }
         var skuValues = {};
@@ -648,6 +650,8 @@
         // fetchedItems 为当前链接查询结果；extraItems 为按名称复用时带入的来源记录 SKU（需在使用前完成赋值）
         var fetchedItems = [];
         var fetchedSkuValues = {};
+        // 复用来源的 SKU 价格、重量需跨后续同链接查询一直保留，不能被接口返回的空集合覆盖。
+        var reusedSkuValues = {};
         var extraItems = [];
 
         // 运营 SKU 编辑框内容实时渲染为标签，便于逐行查看
@@ -788,6 +792,12 @@
                     weightField.disabled = !checkbox.checked;
                     updateSummary();
                 });
+            } else if (checkbox) {
+                checkbox.addEventListener('change', function () {
+                    priceField.disabled = !checkbox.checked;
+                    weightField.disabled = !checkbox.checked;
+                    syncSystemSkuSelection();
+                });
             }
             if (editable) {
                 var edit = document.createElement('input');
@@ -848,6 +858,27 @@
                 if (value !== '' && values.indexOf(value) === -1) { values.push(value); }
             });
             linkSkusInput.value = values.join(',');
+            syncSystemSkuSelection();
+        }
+
+        // 右侧系统 SKU 的勾选仅决定本次提报记录采用哪些 SKU；链接 SKU 库仍会完整保留。
+        function syncSystemSkuSelection() {
+            var selected = [];
+            var values = {};
+            list.querySelectorAll('[data-system-sku]').forEach(function (row) {
+                var checkbox = row.querySelector('[data-system-sku-select]');
+                var sku = (row.getAttribute('data-system-sku') || '').trim();
+                if (!checkbox || !checkbox.checked || sku === '') { return; }
+                selected.push(sku);
+                var price = row.querySelector('[data-sku-price]');
+                var weight = row.querySelector('[data-sku-weight]');
+                values[sku] = {
+                    price: price ? price.value.trim() : '',
+                    weight: weight ? weight.value.trim() : ''
+                };
+            });
+            if (systemSkusInput) { systemSkusInput.value = selected.join(','); }
+            if (systemSkuValuesInput) { systemSkuValuesInput.value = JSON.stringify(values); }
         }
 
         // fetchedItems/extraItems 已在上方声明并初始化，这里直接合并渲染
@@ -897,10 +928,11 @@
             Object.keys(map).forEach(function (sku) {
                 var row = map[sku] || {};
                 // 复用来源的数值只属于右侧系统 SKU，不能覆盖左侧运营填写值。
-                if (!fetchedSkuValues[sku]) { fetchedSkuValues[sku] = {}; }
-                if (row.price) { fetchedSkuValues[sku].price = row.price; }
-                if (row.weight) { fetchedSkuValues[sku].weight = row.weight; }
+                if (!reusedSkuValues[sku]) { reusedSkuValues[sku] = {}; }
+                if (row.price !== undefined && row.price !== null && String(row.price).trim() !== '') { reusedSkuValues[sku].price = row.price; }
+                if (row.weight !== undefined && row.weight !== null && String(row.weight).trim() !== '') { reusedSkuValues[sku].weight = row.weight; }
             });
+            fetchedSkuValues = Object.assign({}, fetchedSkuValues, reusedSkuValues);
             list.querySelectorAll('.sku-suggestion-item').forEach(function (rowEl) {
                 var cb = rowEl.querySelector('[data-sku-select]');
                 if (!cb) { return; }
@@ -944,8 +976,16 @@
             var query = '?supplier_url=' + encodeURIComponent(value) + (currentId ? '&current_id=' + encodeURIComponent(currentId) : '');
             fetch(url + query, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (response) { return response.ok ? response.json() : { items: [] }; })
-                .then(function (payload) { fetchedItems = payload.items || []; fetchedSkuValues = payload.values || {}; render(); })
-                .catch(function () { fetchedItems = []; fetchedSkuValues = {}; render(); });
+                .then(function (payload) {
+                    fetchedItems = payload.items || [];
+                    fetchedSkuValues = Object.assign({}, payload.values || {}, reusedSkuValues);
+                    render();
+                })
+                .catch(function () {
+                    fetchedItems = [];
+                    fetchedSkuValues = Object.assign({}, reusedSkuValues);
+                    render();
+                });
         }
 
         if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }

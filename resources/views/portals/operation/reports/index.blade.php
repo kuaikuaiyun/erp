@@ -186,5 +186,10 @@ add.addEventListener('click',function(){var i=Date.now(),tr=document.createEleme
     window.setInterval(checkStatus,30000);
     checkStatus();
 })();
+(function(){
+    function configureAccountNumberInput(input){if(!input)return;input.setAttribute('inputmode','text');input.setAttribute('pattern','[0-9]+(-[0-9]+)*');input.setAttribute('title','账户编号只能填写数字和中横线，例如 460-046-8347');}
+    document.querySelectorAll('input[name*="[account_number]"]').forEach(configureAccountNumberInput);
+    document.addEventListener('focusin',function(event){if(event.target.matches('input[name*="[account_number]"]'))configureAccountNumberInput(event.target);});
+})();
 </script>
 @endpush

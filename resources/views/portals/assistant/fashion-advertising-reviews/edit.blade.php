@@ -20,7 +20,7 @@
      <td><input type="hidden" name="entries[{{$index}}][id]" value="{{$entry->id}}"><input class="form-control" name="entries[{{$index}}][agency]" value="{{old("entries.$index.agency",$entry->agency)}}" required></td>
      <td><input class="form-control" name="entries[{{$index}}][media]" value="{{old("entries.$index.media",$entry->media)}}" required></td>
      <td><input class="form-control" name="entries[{{$index}}][account_name]" value="{{old("entries.$index.account_name",$entry->account_name)}}" required></td>
-     <td><input class="form-control" inputmode="numeric" pattern="[0-9]+" title="账户编号只能填写数字" name="entries[{{$index}}][account_number]" value="{{old("entries.$index.account_number",$entry->account_number)}}" required></td>
+     <td><input class="form-control" inputmode="text" pattern="[0-9]+(-[0-9]+)*" title="账户编号只能填写数字和中横线，例如 460-046-8347" name="entries[{{$index}}][account_number]" value="{{old("entries.$index.account_number",$entry->account_number)}}" required></td>
      <td><input class="form-control" name="entries[{{$index}}][store_domain]" value="{{old("entries.$index.store_domain",$entry->store_domain)}}"></td>
      <td><input class="form-control money-input js-book" type="number" min="0" step="0.01" name="entries[{{$index}}][book_spend_usd]" value="{{old("entries.$index.book_spend_usd",$entry->book_spend_usd)}}" required></td>
      <td><input class="form-control money-input js-rate" type="number" min="0" step="0.0001" name="entries[{{$index}}][settlement_coefficient]" value="{{old("entries.$index.settlement_coefficient",$entry->settlement_coefficient)}}" required></td>

@@ -17,6 +17,8 @@
     <input type="hidden" name="reuse_source_id" value="{{ $draft ? (int) ($draftPayload['reuse_source_id'] ?? 0) : old('reuse_source_id') }}">
     <input type="hidden" name="link_skus" value="{{ old('link_skus', $draft ? implode(',', (array) ($draftPayload['system_skus'] ?? [])) : '') }}" data-product-request-link-skus>
     <input type="hidden" name="sku_value_rows" value="{{ old('sku_value_rows', $draft ? json_encode($draftPayload['sku_values'] ?? []) : '') }}" data-product-request-sku-values>
+    <input type="hidden" name="system_skus" value="" data-product-request-system-skus>
+    <input type="hidden" name="system_sku_value_rows" value="" data-product-request-system-sku-values>
     {{-- 运营 SKU 隐藏域：面板左列编辑后由 JS 同步写入，随表单提交保存 --}}
     <input type="hidden" name="skus" value="{{ old('skus', $draft ? $draftField('skus') : $productRequest->skus) }}" data-sku-edit-source>
 
@@ -200,4 +202,3 @@
     .product-request-link-changed-hint { margin-bottom: 6px; padding: 6px 10px; background: #fff3cd; border: 1px solid #ffe58f; border-radius: 4px; color: #8a6d3b; font-size: 12px; }
     .product-request-link-changed-hint .fa { margin-right: 4px; }
 </style>
-
