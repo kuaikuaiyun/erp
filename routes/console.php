@@ -21,6 +21,7 @@ if ($financeScheduleOnly) {
 }
 
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
+require __DIR__.'/asset_reminders_schedule.php';
 
 Schedule::command('dingtalk:reconcile')->everyMinute()->withoutOverlapping(10);
 Schedule::command('dingtalk:directory-sync')->everyMinute()->withoutOverlapping(10);

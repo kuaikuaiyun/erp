@@ -7,6 +7,19 @@ use App\Portals\AssetManager\Http\Controllers\ComputerDepartmentBindingControlle
 use App\Portals\AssetManager\Http\Controllers\DisciplineController;
 use Illuminate\Support\Facades\Route;
 
+Route::prefix('asset-manager/reminders')->name('asset-manager.reminders.')->controller(\App\Portals\AssetManager\Http\Controllers\ReminderController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::get('/options', 'options')->name('options');
+    Route::get('/attendance', 'attendance')->middleware('throttle:20,1')->name('attendance');
+    Route::get('/runs', 'runs')->name('runs');
+    Route::get('/rules/{id}/preview', 'preview')->whereNumber('id')->name('preview');
+    Route::post('/rules/{id}/test', 'test')->whereNumber('id')->middleware('throttle:3,1')->name('test');
+    Route::get('/{kind}/{id}', 'show')->whereIn('kind', ['groups', 'rules'])->whereNumber('id')->name('show');
+    Route::post('/{kind}', 'save')->whereIn('kind', ['groups', 'rules'])->name('store');
+    Route::put('/{kind}/{id}', 'save')->whereIn('kind', ['groups', 'rules'])->whereNumber('id')->name('update');
+    Route::delete('/{kind}/{id}', 'remove')->whereIn('kind', ['groups', 'rules'])->whereNumber('id')->name('destroy');
+});
+
 Route::prefix('asset-manager/accounts')->name('asset-manager.accounts.')->group(function () {
     $accounts = AccountController::class;
     $ding = AccountDingTalkController::class;
