@@ -285,7 +285,7 @@
     <p class="help-block" id="credit-merchant-empty" hidden>当前平台暂无可用商户。</p>
     <a id="credit-add-merchant" href="{{ route('finance.home', ['balance_tab' => 'credit-card']) }}" hidden>到工作台新增商户</a>
     </div>
-    <p id="credit-conflux-auto-match" hidden>订单明细和结算账单可单独或一起上传。系统自动识别商户并归户。</p>
+    <span id="credit-conflux-auto-match" hidden></span>
     <div id="credit-import-settlement-type-field" hidden>
         <label for="credit-import-settlement-type">账单结算类型</label>
         <select id="credit-import-settlement-type" name="settlement_type" class="form-control" disabled>
@@ -294,8 +294,14 @@
                 <option value="{{ $type }}" @selected(old('settlement_type') === $type)>{{ $type }}</option>
             @endforeach
         </select>
-        <p class="help-block">正常结算和停结算账单请分批上传。金额变动可只填订单号和需要变动的字段，同订单金额合并后累计，负数冲减、空白不变，时间沿用订单时间；重复导入会再次累计。</p>
     </div>
+    @if($cardChannel === 'ye')
+    <div><label for="ye-import-settlement-currency">结算币种</label><select id="ye-import-settlement-currency" name="settlement_currency" class="form-control">
+        @foreach(['USD', 'GBP'] as $currency)
+            <option value="{{ $currency }}" @selected(old('settlement_currency', 'USD') === $currency)>{{ $currency }}</option>
+        @endforeach
+    </select></div>
+    @endif
     <div id="credit-import-timezone-field"><label for="credit-import-timezone">文件时区</label><select id="credit-import-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => old('timezone', $cardChannel === 'ye' ? 'Asia/Shanghai' : $filters['timezone'])])</select></div>
 </div>
 @endif
@@ -315,16 +321,15 @@
 @if($channel === 'paypal')
 <p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'import_kind' => 'tongtu_costs']) }}">下载通途成本模板（XLSX）</a></p>
 @endif
+@if($cardChannel === 'worldpay' || ($cardChannel !== 'worldpay' && $channel !== 'credit_card'))
 <p class="settlement-note" style="padding:0 20px">
 @if($cardChannel === 'worldpay')
     支持 Worldpay 官方文件及只填订单号和变动金额的简表账单。账单同订单金额合并后累计，负数冲减、空白不变，重复导入会再次累计；时间沿用原订单。系统自动匹配订单明细、登记保证金返还，并跳过扣返款明细和商户结算费用汇总。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
-@elseif($channel === 'credit_card')
-    ConfluxAPI 可一次选择多份文件，系统每批最多 5 份依次导入，单个文件最大 20 MB。正常结算和停结算请选择不同的队列。
-@endif
-@if($cardChannel !== 'worldpay' && $channel !== 'credit_card')
+@else
 支持 XLSX、CSV，最大 10 MB。
 @endif
 </p>
+@endif
 <footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
 @if(in_array($cardChannel, ['ye', 'worldpay'], true))
 <details class="box"><summary class="box-header">导入物流和采购成本</summary>

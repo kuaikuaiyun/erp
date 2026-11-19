@@ -19,14 +19,15 @@
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
     <input type="hidden" name="view" value="transactions">
     <input type="hidden" name="per_page" value="{{ $paginator->perPage() }}">
-    <div class="form-group"><label>会计月份（北京时间）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
+    <div class="form-group"><label>会计月份（按通道时区）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
     <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach</select></div>
     <input type="hidden" name="channel" value="{{ $tab }}">
-    <div class="form-group"><label for="report-currency">结算货币</label><input id="report-currency" name="currency" list="report-currencies" value="{{ $filters['currency'] ?? '' }}" class="form-control" placeholder="全部结算货币，可输入或选择" maxlength="3" pattern="[A-Z]{3}"><datalist id="report-currencies">@foreach($currencyOptions as $currency)<option value="{{ $currency }}">@endforeach</datalist></div>
-    <div class="form-group"><label for="report-team">区域</label><input id="report-team" list="report-teams" name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" placeholder="全部区域，可输入或选择" maxlength="100"><datalist id="report-teams">@foreach($teamOptions as $team)<option value="{{ $team }}">@endforeach</datalist></div>
-    <div class="form-group"><label for="report-subscription">订阅类型</label><input id="report-subscription" list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions" data-options-url="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'subscription_options' => 1]) }}">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
-    @include('portals.finance.partials.filter-conditions')
-    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button>
+    <div class="form-group"><label for="report-currency">结算货币</label><select id="report-currency" name="currency" class="form-control"><option value="">全部结算货币</option>@foreach($currencyOptions as $currency)<option value="{{ $currency }}" @selected(($filters['currency'] ?? '') === $currency)>{{ $currency }}</option>@endforeach</select></div>
+    @if($tab !== 'combined')
+        <div class="form-group"><label for="report-team">区域</label><select id="report-team" name="team" class="form-control"><option value="">全部区域</option>@foreach($teamOptions as $team)<option value="{{ $team }}" @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
+        <div class="form-group"><label for="report-subscription">订阅类型</label><select id="report-subscription" name="subscription" class="form-control"><option value="">全部订阅类型</option>@foreach($subscriptionOptions as $type)<option value="{{ $type }}" @selected(($filters['subscription'] ?? '') === $type)>{{ $type }}</option>@endforeach</select></div>
+    @endif
+    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a>
         @if($reportStatus['state'] === 'ready' || $reportSnapshot !== null)
             <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'report_snapshot' => $reportSnapshot, 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
         @else
@@ -48,8 +49,8 @@
         @endif
     </p>
 @endif
-<p class="finance-report-help">按支付账户、区域和订阅类型汇总，结算货币取渠道实际返回的币种；PayPal 和徐总信用卡当前为美元（USD），叶总支付和 Worldpay 可能为其他币种。金额和结算金额按对应结算货币统计；物流和采购成本按会计月份的“通道 + 结算货币”人民币汇率折算，未导入成本或缺少汇率时留空。</p>
-<p class="finance-report-help">顶部“缺失数据汇总”统计当前筛选下区域缺失的数据；PayPal、徐总信用卡和 Shopify 同时包含订阅类型缺失的数据。美元结算值缺失时，对应汇总金额留空。</p>
+<p class="finance-report-help">{{ $tab === 'combined' ? '合计汇总 PayPal、徐总信用卡、叶总支付和 Worldpay，通道列显示各自的实际来源。' : '按支付账户、区域和订阅类型汇总。' }}结算货币取渠道实际返回的币种；PayPal 和徐总信用卡当前为美元（USD），叶总支付和 Worldpay 可能为其他币种。金额和结算金额按对应结算货币统计；物流和采购成本按会计月份的“通道 + 结算货币”人民币汇率折算，未导入成本或缺少汇率时留空。</p>
+<p class="finance-report-help">顶部“缺失数据汇总”统计当前筛选下区域缺失的数据；PayPal 和徐总信用卡同时包含订阅类型缺失的数据。美元结算值缺失时，对应汇总金额留空。</p>
 <div class="box">
     <nav class="finance-summary-tabs finance-channel-tabs" aria-label="交易汇总通道">
         @foreach($summaryTabs as $key => $label)
@@ -60,6 +61,13 @@
         <table class="table finance-table summary-grid">
             <thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead>
             <tbody>
+                <tr class="finance-total-summary">
+                    <td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($totalSummary) }}" aria-label="选择全部数据汇总"></td>
+                    @foreach($columns as $field => $label)
+                        @php($value = $totalSummary[$field] ?? null)
+                        <td>{{ $value === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) || ! is_numeric($value) ? $value : \App\Portals\Finance\FinanceCatalog::reportAmount($value, in_array($field, ['orders', 'failed_orders'], true) ? 0 : 3)) }}</td>
+                    @endforeach
+                </tr>
                 <tr class="finance-missing-summary">
                     <td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($missingSummary) }}" aria-label="选择缺失数据汇总"></td>
                     @foreach($columns as $field => $label)
@@ -81,28 +89,3 @@
 </div>
 </div>
 @endsection
-@push('scripts')
-<script>
-(function () {
-    var input = document.getElementById('report-subscription');
-    var options = document.getElementById('report-subscriptions');
-    var requested = false;
-    input.addEventListener('focus', function () {
-        if (requested) return;
-        requested = true;
-        fetch(options.dataset.optionsUrl, {headers: {Accept: 'application/json'}})
-            .then(function (response) {
-                if (!response.ok) throw new Error('Subscription options unavailable');
-                return response.json();
-            })
-            .then(function (values) {
-                var known = new Set(Array.from(options.options, function (option) { return option.value; }));
-                values.forEach(function (value) {
-                    if (!known.has(value)) options.appendChild(new Option(value, value));
-                });
-            })
-            .catch(function () { requested = false; });
-    });
-})();
-</script>
-@endpush

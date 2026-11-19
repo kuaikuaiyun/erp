@@ -121,8 +121,11 @@ class FinanceCreditSettlementLayout
         };
     }
 
-    public static function importPayload(string $channel, array $values): array
+    public static function importPayload(string $channel, array $values, ?string $defaultSettlementCurrency = null): array
     {
+        if ($channel === 'ye' && blank($values['settlement_currency'] ?? null)) {
+            $values['settlement_currency'] = $defaultSettlementCurrency ?: 'USD';
+        }
         $payload = ['_card_channel' => $channel];
         foreach (self::columns($channel) as $field => $label) {
             $value = $values[$field] ?? '';

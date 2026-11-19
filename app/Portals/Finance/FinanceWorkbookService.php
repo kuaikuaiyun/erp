@@ -352,6 +352,12 @@ class FinanceWorkbookService
         $headers = $definition['headers'];
         $records = [];
         foreach ($rows as $row => $payload) {
+            // Conflux order exports may omit their settlement currency.  The
+            // platform currently settles these imports in USD; preserve an
+            // explicit value for manual imports and future synchronizations.
+            if (($payload['_card_channel'] ?? null) === 'ye' && blank($payload['结算币种'] ?? null)) {
+                $payload['结算币种'] = 'USD';
+            }
             $value = static fn (string $key) => isset($definition[$key]) ? trim((string) ($payload[$headers[$definition[$key]]] ?? '')) : '';
             $reference = $value('reference');
             if ($reference === '' || mb_strlen($reference) > 191) {
