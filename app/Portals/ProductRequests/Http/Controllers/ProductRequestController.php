@@ -2914,13 +2914,19 @@ class ProductRequestController extends Controller
 
         // 运营填写且勾选的 SKU 必须填写采购价与重量（未勾选的 SKU 不要求）
         $validator = Validator::make($request->all(), []);
-        $validator->after(function (\Illuminate\Validation\Validator $validator) use ($request): void {
+        $validator->after(function (\Illuminate\Validation\Validator $validator) use ($request, $productRequest): void {
             $checkedSkus = collect((array) $request->input('selected_skus', []))
                 ->map(fn (mixed $value): string => trim((string) $value))
                 ->filter(fn (string $value): bool => $value !== '')
                 ->unique();
-            // 未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个
-            if ($checkedSkus->isEmpty()) {
+            // 系统 SKU 不作为 selected_skus[] 提交，保存时会由服务端自动保留。
+            $supplierUrl = trim((string) $request->input('supplier_url', ''));
+            $systemSkus = [];
+            if ($supplierUrl !== '' && $productRequest) {
+                $supplierHash = $this->workflow->supplierUrlHash($this->workflow->normalizeSupplierUrl($supplierUrl));
+                $systemSkus = $this->linkSkuSet($supplierHash, $productRequest->getKey());
+            }
+            if ($checkedSkus->isEmpty() && $systemSkus === []) {
                 $validator->errors()->add('selected_skus', __('product_requests.procurement.sku_check_required'));
                 return;
             }

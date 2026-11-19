@@ -94,7 +94,7 @@ class FashionStoreAnalyticsController extends Controller
         return $this->authorization->scopeDomainStores(AssistantDomainStore::query(), $user)
             ->with('ownerUser:id,name,username')
             ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
-            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->when($project['code'] !== 'danbao-general', fn (Builder $q) => $q->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')"))
             ->when($filters['shop_name'] !== '', fn (Builder $q) => $q->where('shop_name', 'like', '%'.$filters['shop_name'].'%'))
             ->when($filters['domain'] !== '', fn (Builder $q) => $q->where('domain', 'like', '%'.$filters['domain'].'%'))
             ->when($filters['platform'] !== '', fn (Builder $q) => $filters['platform'] === 'xshoppy'

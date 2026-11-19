@@ -175,7 +175,7 @@ return [
         'sku_value_price_placeholder' => '采购价 RMB',
         'sku_value_weight_placeholder' => '重量 g',
         'sku_value_required' => '请填写勾选 SKU「:sku」的采购价和重量',
-        'sku_check_required' => '未勾选系统中已录入的 SKU 时，请至少勾选一个运营填写的 SKU',
+        'sku_check_required' => '当前链接没有系统已录入的 SKU，请至少勾选一个运营填写的 SKU',
         'reuse_empty' => '未找到可复用记录。',
         'reuse_match_supplier_url' => '按 1688 主链接匹配',
         'reuse_match_standard_name' => '按标准中文名模糊匹配',

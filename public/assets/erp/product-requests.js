@@ -950,19 +950,23 @@
 
         if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
         form.erpSkuSuggestions = fetchSuggestions;
-        // 提交拦截：未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个（审核不通过除外）
-        form.addEventListener('submit', function (event) {
-            var submitter = event.submitter || null;
-            // 保存草稿：允许不勾选任何 SKU 直接保存
-            if (submitter && submitter.name === 'action' && submitter.value === 'draft') { return; }
-            var resultInput = form.querySelector('input[name="result"]');
-            if (resultInput && resultInput.value === 'rejected') { return; }
-            if (!panel.querySelector('input[name="selected_skus[]"]:checked')) {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                notify('error', panel.getAttribute('data-sku-check-required') || '请至少勾选一个 SKU');
-            }
-        }, true);
+        // 只有当前链接没有系统 SKU 时，才要求勾选至少一个运营 SKU（审核不通过除外）。
+        if (form.dataset.skuSubmitValidationReady !== '1') {
+            form.dataset.skuSubmitValidationReady = '1';
+            form.addEventListener('submit', function (event) {
+                var submitter = event.submitter || null;
+                // 保存草稿：允许不勾选任何 SKU 直接保存
+                if (submitter && submitter.name === 'action' && submitter.value === 'draft') { return; }
+                var resultInput = form.querySelector('input[name="result"]');
+                if (resultInput && resultInput.value === 'rejected') { return; }
+                var hasSystemSku = panel.querySelector('[data-system-sku]') !== null;
+                if (!hasSystemSku && !panel.querySelector('input[name="selected_skus[]"]:checked')) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    notify('error', panel.getAttribute('data-sku-check-required') || '请至少勾选一个 SKU');
+                }
+            }, true);
+        }
         // 进入表单只展示左侧运营 SKU；右侧系统已录入 SKU 在点击查重复用后再加载显示
         render('点击「品名和 1688 查重」复用后，此处显示同 1688 链接已录入的 SKU');
         if (draftData && draftData.system_skus && draftData.system_skus.length) {
