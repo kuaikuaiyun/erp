@@ -156,7 +156,11 @@
                                             <button type="button" class="assistant-tag-remove" aria-label="{{ $t('javascript.remove_tag', ['name' => $tag]) }}" title="{{ $t('javascript.remove') }}"><i class="fa fa-times"></i></button>
                                         </span>
                                     @endforeach
-                                    <input id="team" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.team_placeholder') }}" @readonly(! $canManageQuickOptions)>
+                                    @if ($canManageQuickOptions)
+                                        <input id="team" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.team_placeholder') }}">
+                                    @else
+                                        <input id="team" type="hidden" class="assistant-tag-entry">
+                                    @endif
                                 </div>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-team-project-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
@@ -256,7 +260,11 @@
                                         <button type="button" class="assistant-tag-remove" aria-label="{{ $t('javascript.remove_tag', ['name' => $tag]) }}" title="{{ $t('javascript.remove') }}"><i class="fa fa-times"></i></button>
                                     </span>
                                 @endforeach
-                                <input id="erp" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.erp_placeholder') }}" @readonly(! $canManageQuickOptions)>
+                                @if ($canManageQuickOptions)
+                                    <input id="erp" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.erp_placeholder') }}">
+                                @else
+                                    <input id="erp" type="hidden" class="assistant-tag-entry">
+                                @endif
                             </div>
                             @if ($canManageQuickOptions)
                                 <button type="button" class="btn btn-default assistant-add-team-project-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
