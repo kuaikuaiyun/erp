@@ -60,7 +60,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ? ($canSeeAll ? null : $managedDepartmentIds)
             : $this->visibleDepartmentIds($context['user']));
         $submitterIds = FashionAdvertisingReport::query()->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
-            ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
+            ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
             ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
@@ -108,7 +108,7 @@ class FashionAppLovinPerformanceReportController extends Controller
 
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $reportQuery = FashionAdvertisingReport::query()
-            ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
+            ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->with(['adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"), 'performanceEntries', 'submitter.departments'])
             ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
@@ -167,7 +167,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 (string) $screenshot->account_number,
                 (string) $screenshot->account_key,
             ));
-        $historicalRevenueByGroup = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
+        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
             $groups = $report->adSpendEntries->map(function ($entry) use ($report, $stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
@@ -176,17 +176,32 @@ class FashionAppLovinPerformanceReportController extends Controller
                 // historical rows stay together instead of being split into duplicate report rows.
                 $storeId = (int) ($bindingByIdentity->get($identity, 0) ?: $entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
 
-                return ['store_id' => $storeId, 'domain' => trim((string) ($stores->get($storeId)?->domain ?: $entry->store_domain ?: ''))];
-            })->filter(fn (array $entry): bool => $entry['store_id'] > 0)->unique('store_id');
+                return [
+                    'store_id' => $storeId,
+                    'domain' => trim((string) ($stores->get($storeId)?->domain ?: $entry->store_domain ?: '')),
+                    'account_identity' => AppLovinGiftConsumption::accountIdentity(
+                        (int) $report->submitter_id,
+                        (string) $entry->account_number,
+                        $accountKey,
+                    ),
+                    'spend' => (float) $entry->actual_spend_usd,
+                ];
+            })->filter(fn (array $entry): bool => $entry['store_id'] > 0)->groupBy('store_id');
 
-            foreach ($groups as $group) {
-                $domain = mb_strtolower(trim((string) $group['domain']));
+            foreach ($groups as $entriesForStore) {
+                $domain = mb_strtolower(trim((string) $entriesForStore->first()['domain']));
                 $revenue = $report->performanceEntries
                     ->filter(fn ($entry): bool => mb_strtolower(trim((string) $entry->domain)) === $domain)
                     ->sum(fn ($entry): float => (float) $entry->revenue_usd);
                 if ($revenue <= 0 && $groups->count() === 1) $revenue = (float) $report->total_revenue_usd;
-                $groupKey = (int) $report->submitter_id.'|'.(int) $group['store_id'];
-                $totals[$groupKey] = ($totals[$groupKey] ?? 0.0) + $revenue;
+                $accounts = $entriesForStore->groupBy('account_identity')->map(fn ($rows): float => (float) $rows->sum('spend'));
+                $totalSpend = (float) $accounts->sum();
+                foreach ($accounts as $accountIdentityKey => $spend) {
+                    $share = $totalSpend > 0
+                        ? (float) $spend / $totalSpend
+                        : 1 / max(1, $accounts->count());
+                    $totals[$accountIdentityKey] = ($totals[$accountIdentityKey] ?? 0.0) + ($revenue * $share);
+                }
             }
 
             return $totals;
@@ -242,7 +257,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         })->values();
 
         $rows = $dailyRows->groupBy(fn (array $row) => $row['operator_id'].'|'.$row['store_id'])
-            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByGroup): array {
+            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('orders');
                 $revenue = round((float) $group->sum('revenue'), 2);
@@ -257,7 +272,9 @@ class FashionAppLovinPerformanceReportController extends Controller
 
                     return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
                 }), 2);
-                $historicalRevenue = round((float) ($historicalRevenueByGroup[(int) $first['operator_id'].'|'.(int) $first['store_id']] ?? 0), 2);
+                $historicalRevenue = round((float) $accountKeys->sum(
+                    fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+                ), 2);
 
                 return [...$first, 'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'orders' => $orders, 'revenue' => $revenue, 'ad_spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null,
@@ -322,7 +339,9 @@ class FashionAppLovinPerformanceReportController extends Controller
 
             return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
         }), 2);
-        $totals['historical_revenue'] = round((float) $rows->sum('historical_revenue'), 2);
+        $totals['historical_revenue'] = round((float) $totalAccountKeys->sum(
+            fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+        ), 2);
         $totals['estimated_total_roi'] = $totals['deducted_consumption'] > 0
             ? $totals['historical_revenue'] / $totals['deducted_consumption']
             : null;
