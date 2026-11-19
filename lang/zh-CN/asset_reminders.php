@@ -5,6 +5,7 @@ return [
     'date_format' => 'Y年n月j日',
     'rounds' => [1 => '一', 2 => '二', 3 => '三', 4 => '四', 5 => '五', 6 => '六', 7 => '七', 8 => '八', 9 => '九', 10 => '十'],
     'groups' => '接收群配置', 'rules' => '部门提醒规则', 'filters' => '筛选条件',
+    'usage_help' => '使用说明',
     'add_group' => '添加接收群', 'add_rule' => '添加提醒规则', 'edit' => '编辑', 'view' => '查看',
     'save' => '保存', 'close' => '关闭', 'stop' => '停用', 'remove' => '删除', 'actions' => '操作',
     'all' => '全部', 'enabled' => '启用', 'disabled' => '停用', 'query' => '查询', 'reset' => '重置',
