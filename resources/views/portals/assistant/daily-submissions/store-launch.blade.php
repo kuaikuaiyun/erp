@@ -1,105 +1,14 @@
 @extends('portal.layout')
 @include('portals.assistant.partials.legacy-operation-department-multi-upgrade')
 @section('page_title', '下店需求处理')
-
 @push('styles')
-<style>
-.launch-review{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09)}
-.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
-.status-pill{padding:3px 9px;border-radius:12px}
-.status-pill.pending{background:#fff2cc;color:#8a6500}
-.status-pill.processed{background:#dff5e6;color:#16823c}
-.status-pill.rejected{background:#fde2e2;color:#b42318}
-.decision-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-</style>
+<style>.launch-review{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09)}.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.status-pill{padding:3px 9px;border-radius:12px}.status-pill.pending{background:#fff2cc;color:#8a6500}.status-pill.processing{background:#dceeff;color:#1d6299}.status-pill.processed{background:#dff5e6;color:#16823c}.status-pill.rejected{background:#fde2e2;color:#b42318}.decision-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px dashed #c9dce8;min-width:360px}.mark-processing-form{margin-bottom:7px}td textarea[name="response_text"]{width:100%;min-width:360px;min-height:108px;padding:10px 12px;border:1px solid #a9c8dd;border-radius:6px;background:#fff;color:#243849;line-height:1.6;resize:vertical;box-shadow:inset 0 1px 2px rgba(31,67,98,.05)}td textarea[name="response_text"]:focus{border-color:#3c8dbc;box-shadow:0 0 0 2px rgba(60,141,188,.16)}</style>
 @endpush
-
 @section('content')
-<section class="content-header">
-    <h1>下店需求处理 <small>处理运营提交的建站需求并回复</small></h1>
-</section>
-<section class="content">
-    @if(session('success'))
-        <div class="alert alert-success">{{ session('success') }}</div>
-    @endif
-    @if($errors->any())
-        <div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>
-    @endif
-
-    <div class="box launch-review">
-        <div class="box-body">
-            <form class="filters">
-                <div>
-                    <label>运营部门</label>
-                    <select class="form-control" name="operation_department_id">
-                        <option value="">全部部门</option>
-                        @foreach($departments as $department)
-                            <option value="{{ $department->id }}" @selected((string) ($filters['operation_department_id'] ?? '') === (string) $department->id)>{{ $department->name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div>
-                    <label>状态</label>
-                    <select class="form-control" name="status">
-                        <option value="">全部</option>
-                        <option value="pending" @selected(($filters['status'] ?? '') === 'pending')>未处理</option>
-                        <option value="processed" @selected(($filters['status'] ?? '') === 'processed')>已处理</option>
-                        <option value="rejected" @selected(($filters['status'] ?? '') === 'rejected')>已驳回</option>
-                    </select>
-                </div>
-                <div>
-                    <label>运营人员</label>
-                    <input class="form-control" name="operator" value="{{ $filters['operator'] ?? '' }}">
-                </div>
-                <button class="btn btn-primary">查询</button>
-                <a class="btn btn-default" href="{{ route('assistant.daily-submissions.store-launches.index') }}">重置</a>
-            </form>
-        </div>
-    </div>
-
-    <div class="box launch-review">
-        <div class="table-responsive">
-            <table class="table table-bordered table-hover">
-                <thead>
-                    <tr><th>提交时间</th><th>运营部门/人员</th><th>项目</th><th>建站系统</th><th>邮箱</th><th>备注</th><th>状态/回复</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                @forelse($submissions as $item)
-                    <tr>
-                        <td>{{ $item->created_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td>
-                        <td>{{ $item->operation_department_name ?: '—' }}<br><small>{{ $item->operator_name }}</small></td>
-                        <td>{{ $item->project_name }}</td>
-                        <td>{{ $item->website_system_name }}</td>
-                        <td>{{ $item->email ?: '—' }}</td>
-                        <td style="white-space:pre-wrap">{{ $item->remark ?: '—' }}</td>
-                        <td><span class="status-pill {{ $item->status }}">{{ $item->statusLabel() }}</span><br><span style="white-space:pre-wrap">{{ $item->response_text ?: '—' }}</span></td>
-                        <td style="min-width:260px">
-                            @if($item->status === 'pending')
-                                <form method="post" action="{{ route('assistant.daily-submissions.store-launches.process', $item) }}">
-                                    @csrf
-                                    @method('PATCH')
-                                    <textarea class="form-control input-sm" name="response_text" rows="3" maxlength="5000" required placeholder="填写处理结果或驳回原因"></textarea>
-                                    <input type="hidden" name="decision" value="">
-                                    <div class="decision-actions">
-                                        <button type="submit" class="btn btn-xs btn-success" onclick="this.form.elements.decision.value='processed'"><i class="fa fa-check"></i> 回复并标记已处理</button>
-                                        <button type="submit" class="btn btn-xs btn-danger" onclick="this.form.elements.decision.value='rejected'; return confirm('确认驳回这条下店需求？')"><i class="fa fa-times"></i> 驳回</button>
-                                    </div>
-                                </form>
-                            @else
-                                {{ $item->processed_by_name ?: '—' }}<br>
-                                <small>{{ $item->processed_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</small>
-                            @endif
-                        </td>
-                    </tr>
-                @empty
-                    <tr><td colspan="8" class="text-center text-muted">暂无下店需求</td></tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
-        @if($submissions->hasPages())
-            <div class="box-footer">{{ $submissions->links() }}</div>
-        @endif
-    </div>
-</section>
+<section class="content-header"><h1>下店需求处理 <small>处理运营提交的建站需求并回复</small></h1></section><section class="content">
+@if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
+<div class="box launch-review"><div class="box-body"><form class="filters"><div><label>运营部门</label><select class="form-control" name="operation_department_id"><option value="">全部部门</option>@foreach($departments as $department)<option value="{{ $department->id }}" @selected((string)($filters['operation_department_id'] ?? '') === (string)$department->id)>{{ $department->name }}</option>@endforeach</select></div><div><label>状态</label><select class="form-control" name="status"><option value="">全部</option><option value="pending" @selected(($filters['status'] ?? '') === 'pending')>未处理</option><option value="processing" @selected(($filters['status'] ?? '') === 'processing')>处理中</option><option value="processed" @selected(($filters['status'] ?? '') === 'processed')>已处理</option><option value="rejected" @selected(($filters['status'] ?? '') === 'rejected')>已驳回</option></select></div><div><label>运营人员</label><input class="form-control" name="operator" value="{{ $filters['operator'] ?? '' }}"></div><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('assistant.daily-submissions.store-launches.index') }}">重置</a></form></div></div>
+<div class="box launch-review"><div class="table-responsive"><table class="table table-bordered table-hover"><thead><tr><th>提交时间</th><th>运营部门/人员</th><th>项目</th><th>建站系统</th><th>邮箱</th><th>备注</th><th>状态/回复</th><th>操作</th></tr></thead><tbody>
+@forelse($submissions as $item)<tr><td>{{ $item->created_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td><td>{{ $item->operation_department_name ?: '—' }}<br><small>{{ $item->operator_name }}</small></td><td>{{ $item->project_name }}</td><td>{{ $item->website_system_name }}</td><td>{{ $item->email ?: '—' }}</td><td style="white-space:pre-wrap">{{ $item->remark ?: '—' }}</td><td><span class="status-pill {{ $item->status }}">{{ $item->statusLabel() }}</span><br><span style="white-space:pre-wrap">{{ $item->response_text ?: '—' }}</span></td><td style="min-width:260px">@if($item->status === 'pending')<form class="mark-processing-form" method="post" action="{{ route('assistant.daily-submissions.store-launches.processing', $item) }}">@csrf @method('PATCH')<button type="submit" class="btn btn-xs btn-info" onclick="return confirm('确认将这条下店需求标记为处理中？')"><i class="fa fa-hourglass-half"></i> 处理中</button></form>@endif @if(in_array($item->status, ['pending', 'processing'], true))<form method="post" action="{{ route('assistant.daily-submissions.store-launches.process', $item) }}">@csrf @method('PATCH')<textarea class="form-control input-sm" name="response_text" rows="3" maxlength="5000" required placeholder="填写处理结果或驳回原因"></textarea><input type="hidden" name="decision" value=""><div class="decision-actions"><button type="submit" class="btn btn-xs btn-success" onclick="this.form.elements.decision.value='processed'"><i class="fa fa-check"></i> 回复并标记已处理</button><button type="submit" class="btn btn-xs btn-danger" onclick="this.form.elements.decision.value='rejected'; return confirm('确认驳回这条下店需求？')"><i class="fa fa-times"></i> 驳回</button></div></form>@else {{ $item->processed_by_name ?: '—' }}<br><small>{{ $item->processed_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</small>@endif</td></tr>@empty<tr><td colspan="8" class="text-center text-muted">暂无下店需求</td></tr>@endforelse
+</tbody></table></div>@if($submissions->hasPages())<div class="box-footer">{{ $submissions->links() }}</div>@endif</div></section>
 @endsection

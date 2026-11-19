@@ -1418,12 +1418,17 @@ class ProductRequestController extends Controller
                 $checkedSkus,
             )));
             $linkSkuValueMap = array_replace($skuValueMap, $systemSkuValueMap, $this->linkSkuValues($linkHash));
-            // 未勾选运营 SKU 而直接采用系统历史 SKU 时，也要把实际采用的 SKU 写入当前记录；
-            // 否则详情、仓库验收等后续流程无法得知本条记录使用了哪些 SKU。
-            $recordSkus = $checkedSkus !== [] ? $checkedSkus : ($selectedSystemSkus !== [] ? $selectedSystemSkus : $linkSkus);
-            $recordSkuValues = $checkedSkus === []
-                ? array_intersect_key(array_replace($systemSkuValueMap, $linkSkuValueMap), array_flip($recordSkus))
-                : $skuValueMap;
+            // 当前记录必须完整保存本次勾选的运营 SKU 与系统 SKU；详情、仓库验收等后续流程
+            // 均以 procurement_skus 为准，不能在同时勾选时遗漏系统 SKU。
+            $recordSkus = array_values(array_unique(array_merge($checkedSkus, $selectedSystemSkus)));
+            if ($recordSkus === []) {
+                $recordSkus = $linkSkus;
+            }
+            $recordSkuValues = array_intersect_key(array_replace(
+                $linkSkuValueMap,
+                $systemSkuValueMap,
+                $skuValueMap,
+            ), array_flip($recordSkus));
             $procurementSkus = implode(',', $recordSkus);
             if ($linkSkus !== []) {
                 $linkSkuPayload = [

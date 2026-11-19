@@ -37,6 +37,7 @@ document.addEventListener('change', function (event) {
     if (!select.matches('select[data-finance-page-size]')) return;
     var url = new window.URL(select.dataset.financePageUrl || window.location.href);
     url.searchParams.set(select.dataset.financePageSize, select.value);
+    url.searchParams.set('remember_page_size', '1');
     if (select.dataset.financePageName === 'page' && !select.dataset.financePageUrl) url.searchParams.delete('page');
     else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
@@ -51,10 +52,12 @@ function financeStartDownload(url) {
 document.addEventListener('click', function (event) {
     var monthExport = event.target.closest('[data-finance-month-export]');
     if (monthExport) {
-        var month = monthExport.form.elements.namedItem('month');
-        if (!month.reportValidity()) return;
+        if (!monthExport.form.reportValidity()) return;
         var exportUrl = new URL(monthExport.dataset.financeMonthExport, window.location.href);
-        exportUrl.searchParams.set('month', month.value);
+        ['month', 'month_from', 'month_to'].forEach(function (field) {
+            var input = monthExport.form.elements.namedItem(field);
+            if (input) exportUrl.searchParams.set(field, input.value);
+        });
         financeStartDownload(exportUrl.toString());
         return;
     }
@@ -71,6 +74,20 @@ document.addEventListener('click', function (event) {
 });
 document.querySelectorAll('[data-finance-notice]').forEach(function (notice) {
     window.setTimeout(function () { notice.remove(); }, 10000);
+});
+document.querySelectorAll('form').forEach(function (form) {
+    var start = form.querySelector('input[name="month_from"]');
+    var end = form.querySelector('input[name="month_to"]');
+    if (!start || !end) return;
+    function validateMonthRange() {
+        end.setCustomValidity(start.value && end.value && start.value > end.value
+            ? '结束月份不能早于开始月份，请先选好开始和结束月份再查询。' : '');
+    }
+    start.addEventListener('input', validateMonthRange);
+    start.addEventListener('change', validateMonthRange);
+    end.addEventListener('input', validateMonthRange);
+    end.addEventListener('change', validateMonthRange);
+    validateMonthRange();
 });
 </script>
 @endpush

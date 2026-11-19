@@ -1762,6 +1762,7 @@ class FinanceSettlementService
 
     public static function refundIncludingSplit(array $row): ?string
     {
+        if (array_key_exists('_summary_refund', $row)) return $row['_summary_refund'];
         $refund = $row['refund'] ?? null;
         if ($row['channel'] === 'paypal') {
             foreach (['frozen_refund' => 'refund', 'refund_top_up' => 'refund_fee'] as $field => $legacy) {

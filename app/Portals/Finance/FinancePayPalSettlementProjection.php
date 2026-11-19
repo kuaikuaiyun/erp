@@ -4,6 +4,7 @@ namespace App\Portals\Finance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class FinancePayPalSettlementProjection
@@ -30,6 +31,20 @@ class FinancePayPalSettlementProjection
         $published = $db->table('finance_paypal_settlement_projections')->where('id', 1)->first();
         if ($published && hash_equals((string) $published->source_revision, $revision)) {
             return true;
+        }
+
+        // Continuous imports can invalidate an expensive full-history build.
+        // Cool down failed and successful attempts alike, preserving the last
+        // published generation while the scheduled worker waits for a retry.
+        $cooldown = max(1, (int) config('finance.summaries.paypal_rebuild_cooldown_seconds', 300));
+        try {
+            if (! Cache::add('finance:paypal-projection:attempt:'.hash('sha256', $db->getDatabaseName()),
+                now()->timestamp, now()->addSeconds($cooldown))) return false;
+        } catch (Throwable $exception) {
+            // Failing closed avoids a full rebuild on every request when the
+            // throttle store is unavailable. Retry on the next scheduler run.
+            report($exception);
+            return false;
         }
 
         $generation = (string) Str::uuid();

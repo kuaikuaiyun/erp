@@ -653,6 +653,7 @@
         // 复用来源的 SKU 价格、重量需跨后续同链接查询一直保留，不能被接口返回的空集合覆盖。
         var reusedSkuValues = {};
         var extraItems = [];
+        var reuseSelectionActive = false;
 
         // 运营 SKU 编辑框内容实时渲染为标签，便于逐行查看
         function renderSkuPreview() {
@@ -924,6 +925,7 @@
 
         // 复用记录时带入来源按 SKU 存储的采购价/重量，并回填到当前面板各行
         form.erpSkuSuggestionsApplyValues = function (map) {
+            reusedSkuValues = {};
             if (!map) { return; }
             Object.keys(map).forEach(function (sku) {
                 var row = map[sku] || {};
@@ -949,23 +951,23 @@
 
         // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）
         form.erpSkuSuggestionsAppend = function (skus, reportNo) {
-            var existing = [];
-            // 只与右侧系统 SKU 去重，不用左侧运营 SKU 过滤系统完整集合。
-            list.querySelectorAll('[data-system-sku]').forEach(function (row) {
-                var value = (row.getAttribute('data-system-sku') || '').trim();
-                if (value !== '' && existing.indexOf(value) === -1) { existing.push(value); }
-            });
             var added = [];
             (skus || []).forEach(function (sku) {
                 var value = String(sku === null || typeof sku === 'undefined' ? '' : sku).trim();
-                if (value === '' || existing.indexOf(value) !== -1 || added.indexOf(value) !== -1) { return; }
+                if (value === '' || added.indexOf(value) !== -1) { return; }
                 added.push(value);
             });
+            reuseSelectionActive = true;
+            fetchedItems = [];
             extraItems = added.length ? [{ id: null, report_no: reportNo || null, skus: added }] : [];
             render();
         };
 
         function fetchSuggestions() {
+            if (reuseSelectionActive) {
+                render();
+                return;
+            }
             var value = input.value.trim();
             if (!/^https?:\/\//i.test(value)) {
                 panel.hidden = true;
@@ -988,7 +990,19 @@
                 });
         }
 
-        if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
+        if (checkButton) {
+            checkButton.addEventListener('click', function () {
+                reuseSelectionActive = false;
+                extraItems = [];
+                reusedSkuValues = {};
+                fetchSuggestions();
+            });
+        }
+        input.addEventListener('input', function () {
+            reuseSelectionActive = false;
+            extraItems = [];
+            reusedSkuValues = {};
+        });
         form.erpSkuSuggestions = fetchSuggestions;
         // 只有当前链接没有系统 SKU 时，才要求勾选至少一个运营 SKU（审核不通过除外）。
         if (form.dataset.skuSubmitValidationReady !== '1') {

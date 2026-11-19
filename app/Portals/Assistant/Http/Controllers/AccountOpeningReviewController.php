@@ -29,7 +29,7 @@ class AccountOpeningReviewController extends Controller
         $filters = $request->validate([
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
-            'status' => ['nullable', 'in:pending,processed,rejected'],
+            'status' => ['nullable', 'in:pending,processing,processed,rejected'],
             'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
@@ -58,8 +58,21 @@ class AccountOpeningReviewController extends Controller
             'departments' => $departments,
             'agencyOptions' => (clone $optionQuery)->whereNotNull('agency_name')->where('agency_name', '!=', '')->distinct()->orderBy('agency_name')->pluck('agency_name'),
             'mediaOptions' => $optionQuery->distinct()->orderBy('media')->pluck('media'),
-            'submissions' => $query->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
+            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
         ]);
+    }
+
+    public function markProcessing(Request $request, DailyAccountOpening $submission): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
+        abort_unless($submission->status === DailyAccountOpening::STATUS_PENDING, 422, '该开户需求已开始处理或已完成，请刷新页面查看最新状态。');
+
+        $submission->update(['status' => DailyAccountOpening::STATUS_PROCESSING]);
+
+        return back()->with('success', '开户需求已标记为处理中。');
     }
 
     public function process(Request $request, DailyAccountOpening $submission): RedirectResponse
@@ -68,14 +81,14 @@ class AccountOpeningReviewController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
-        abort_unless($submission->status === DailyAccountOpening::STATUS_PENDING, 422, '该开户需求已经处理，请刷新页面查看最新状态。');
+        abort_unless(in_array($submission->status, [DailyAccountOpening::STATUS_PENDING, DailyAccountOpening::STATUS_PROCESSING], true), 422, '该开户需求已经处理，请刷新页面查看最新状态。');
         $validated = $request->validate([
-            'decision' => ['required', 'in:processed,rejected'],
+            'decision' => ['nullable', 'in:processed,rejected'],
             'response_text' => ['required', 'string', 'max:5000'],
         ], [
             'response_text.required' => '请填写处理结果或驳回原因。',
         ]);
-        $status = $validated['decision'] === DailyAccountOpening::STATUS_REJECTED
+        $status = ($validated['decision'] ?? DailyAccountOpening::STATUS_PROCESSED) === DailyAccountOpening::STATUS_REJECTED
             ? DailyAccountOpening::STATUS_REJECTED
             : DailyAccountOpening::STATUS_PROCESSED;
         $submission->update([

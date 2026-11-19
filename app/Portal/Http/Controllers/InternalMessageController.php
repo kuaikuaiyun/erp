@@ -275,8 +275,12 @@ class InternalMessageController extends Controller
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
         abort_unless(in_array($context['portal']->code, ['yunying', 'daily-report', 'fuzhuang'], true), 403);
-        $operationIds = $this->operationUsers()->pluck('id')->map(fn ($id) => (int) $id);
-        abort_unless($context['user']->isAdministrator() || $operationIds->contains((int) $context['user']->getKey()), 403);
+
+        // portalContext() has already verified that the active account can enter
+        // the current operation portal and access its visible menu. Do not apply
+        // the legacy fixed department-tree check here: it excluded valid users
+        // of other operation systems (for example Shopify subscription teams).
+        // All message queries below remain scoped to the current recipient user.
         return $context;
     }
 }

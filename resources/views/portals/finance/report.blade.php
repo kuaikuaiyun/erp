@@ -11,16 +11,18 @@
 </style>
 @endpush
 @section('finance_content')
-@if($reportStatus['state'] !== 'ready' || isset($reportStatus['updated_at']))
-    @include('portals.finance.partials.report-snapshot-status', ['status' => $reportStatus, 'watchSnapshot' => true])
-@endif
 <div class="finance-report">
 @include('portals.finance.partials.summary-tabs', ['activeTab' => 'transactions'])
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
     <input type="hidden" name="view" value="transactions">
     <input type="hidden" name="per_page" value="{{ $paginator->perPage() }}">
-    <div class="form-group"><label>会计月份（按通道时区）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
-    <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach</select></div>
+    <div class="form-group"><label for="transaction-month-from">开始月份（按通道时区）</label><input id="transaction-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
+    <div class="form-group"><label for="transaction-month-to">结束月份（按通道时区）</label><input id="transaction-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+    @if($tab === 'combined')
+        @include('portals.finance.partials.transaction-account-multiselect')
+    @else
+    <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach @foreach($accountChannelOptions as $channelKey => $channelLabel)<option value="channel:{{ $channelKey }}" @selected(($filters['account_channel'] ?? '') === $channelKey)>{{ $channelLabel }}</option>@endforeach</select></div>
+    @endif
     <input type="hidden" name="channel" value="{{ $tab }}">
     <div class="form-group"><label for="report-currency">结算货币</label><select id="report-currency" name="currency" class="form-control"><option value="">全部结算货币</option>@foreach($currencyOptions as $currency)<option value="{{ $currency }}" @selected(($filters['currency'] ?? '') === $currency)>{{ $currency }}</option>@endforeach</select></div>
     @if($tab !== 'combined')
@@ -28,11 +30,7 @@
         <div class="form-group"><label for="report-subscription">订阅类型</label><select id="report-subscription" name="subscription" class="form-control"><option value="">全部订阅类型</option>@foreach($subscriptionOptions as $type)<option value="{{ $type }}" @selected(($filters['subscription'] ?? '') === $type)>{{ $type }}</option>@endforeach</select></div>
     @endif
     <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a>
-        @if($reportStatus['state'] === 'ready' || $reportSnapshot !== null)
-            <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'report_snapshot' => $reportSnapshot, 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
-        @else
-            <button type="button" class="btn btn-default" disabled>导出 Excel</button>
-        @endif
+        <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
         <button type="button" data-finance-month-export="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'download_missing' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出整月缺失明细 (Excel)</button>
         <button type="button" data-finance-month-export="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'download_missing' => 1, 'missing_format' => 'csv']) }}" class="btn btn-default">整月缺失明细 CSV</button>
         <span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
@@ -80,12 +78,12 @@
                         <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], in_array($field, ['orders', 'failed_orders'], true) ? 0 : 3)) }}</td>
                     @endforeach</tr>
                 @empty
-                    <tr><td colspan="{{ count($columns) + 1 }}">{{ $reportSnapshot === null && $reportStatus['state'] !== 'ready' ? '当前筛选的报表尚未生成' : '无符合条件的记录' }}</td></tr>
+                    <tr><td colspan="{{ count($columns) + 1 }}">无符合条件的记录</td></tr>
                 @endforelse
             </tbody>
         </table>
     </div>
-    <div class="box-body">@include('portals.finance.pagination', ['paginator' => $paginator, 'pageSizeUrl' => $reportSnapshot ? $paginator->url(1) : null])</div>
+    <div class="box-body">@include('portals.finance.pagination', ['paginator' => $paginator])</div>
 </div>
 </div>
 @endsection

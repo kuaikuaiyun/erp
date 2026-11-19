@@ -17,8 +17,13 @@ class FinanceSummaryDataVersion
             ->orderBy('month')->get(['month', 'revision']);
         // Pending dependency changes already represent changed source data, even before
         // the background worker has resolved them into individual period revisions.
-        $changes = $db->table('finance_summary_changes')->selectRaw('COUNT(*) AS total, MAX(id) AS last_id')->first();
-        $rates = $db->table('finance_monthly_exchange_rates')->orderBy('month')->orderBy('channel')->orderBy('currency')
+        $changes = $db->table('finance_summary_changes')
+            ->when($channel === 'paypal', fn ($query) => $query->whereNotIn('source', ['fashion', 'fashion_item']))
+            ->selectRaw('COUNT(*) AS total, MAX(id) AS last_id')->first();
+        $rates = $db->table('finance_monthly_exchange_rates')
+            ->when($channel === 'paypal', fn ($query) => $query->whereIn('channel', ['paypal', 'combined']))
+            ->when($channel === 'credit_card', fn ($query) => $query->where('channel', '<>', 'paypal'))
+            ->orderBy('month')->orderBy('channel')->orderBy('currency')
             ->get(['month', 'channel', 'currency', 'cny_rate']);
         $creditRates = $channel === 'credit_card' ? $periods->mapWithKeys(fn ($period) => [
             $period->month => app(FinanceCreditUsdRates::class)->fingerprint($period->month),

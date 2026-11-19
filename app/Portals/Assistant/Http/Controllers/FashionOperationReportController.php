@@ -235,7 +235,9 @@ class FashionOperationReportController extends Controller
 
         $departmentOptions = $fashionDepartmentIds->isNotEmpty()
             ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id)
-                && (int) $department->id !== $fashionRootDepartmentId)
+                // 部门树尚未配置子部门时，项目根部门本身也必须可筛选；
+                // 否则筛选菜单会被排空，只剩“全选/清空”按钮。
+                )
                 ->when($visibleDepartmentIds !== null, fn ($departments) => $departments->whereIn('id', $visibleDepartmentIds))
                 ->sortBy(fn (Department $department): string => str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
                     .mb_strtolower((string) $department->name))

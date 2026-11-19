@@ -57,8 +57,8 @@
 <details class="finance-accounting-fold" id="finance-advanced-rules"><summary>高级分类规则 <small>特殊分类时使用</small></summary><div class="box-body">
 <p class="finance-accounting-help">日常分类请在 <a href="{{ route('finance.settings', 'types') }}">PayPal类型分类</a> 维护。这里的规则优先匹配，数字越小越优先；修改后请更新对应月份的数据。</p>
 @foreach($rules->prepend(null) as $rule)
-<details class="finance-rule" @if(!$rule) open @endif><summary>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rule ? $rule->name : '添加规则')) }}</summary>
-<form method="post" action="{{ route('finance.accounting.save', 'rule') }}" class="finance-filter">@csrf
+<details class="finance-rule" id="finance-rule-{{ $rule->id ?? 'new' }}" @if(!$rule) open @endif><summary>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rule ? $rule->name : '添加规则')) }}</summary>
+<form method="post" action="{{ route('finance.accounting.save', 'rule') }}" class="finance-filter" id="finance-rule-form-{{ $rule->id ?? 'new' }}">@csrf
     @if($rule)<input type="hidden" name="id" value="{{ $rule->id }}">@endif
     <div class="form-group"><label>规则名称</label><input name="name" class="form-control" maxlength="100" required value="{{ $rule->name ?? '' }}"></div>
     <div class="form-group"><label>来源字段</label><select name="source_field" class="form-control">@foreach(\App\Portals\Finance\FinanceAccountingService::SOURCES as $source)<option value="{{ $source }}" @selected(($rule->source_field ?? '') === $source)>{{ __('finance.accounting.sources.'.$source) }}</option>@endforeach</select></div>
@@ -73,13 +73,55 @@
 </form></details>
 @endforeach
 </div></details>
-<details class="finance-accounting-fold"><summary>已结账记录 <small>{{ $locks->count() }} 个月</small></summary><div class="box-body finance-accounting-table">
+<details class="finance-accounting-fold" id="finance-closed-periods"><summary>已结账记录 <small>{{ $locks->count() }} 个月</small></summary><div class="box-body finance-accounting-table">
 <table class="table finance-table"><thead><tr><th>已结账月份</th><th>操作人</th><th>结账时间</th></tr></thead><tbody>@forelse($locks as $lock)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->month)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->locked_by)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->updated_at)) }}</td></tr>@empty<tr><td colspan="3">暂无已结账月份</td></tr>@endforelse</tbody></table>
 </div></details>
 @endsection
 @push('scripts')<script>
 (function(){
+    const key = 'finance:accounting:choices:v1:' + @json((string) $user->getKey());
+    const forms = {
+        'finance-monthly-rate': ['month', 'channel', 'currency'],
+        'finance-credit-usd-rate': ['usd_scope', 'usd_start', 'usd_end', 'usd_month', 'usd_currency'],
+        'finance-close-period': ['month'],
+    };
+    document.querySelectorAll('.finance-rule form[id]').forEach(form => {
+        forms[form.id] = Array.from(form.querySelectorAll('select[name]'), input => input.name);
+    });
+    const hasOldInput = @json(session()->hasOldInput());
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_) {}
+    function persist() {
+        const values = {};
+        Object.entries(forms).forEach(([id, names]) => {
+            const form = document.getElementById(id);
+            values[id] = {};
+            names.forEach(name => { values[id][name] = form.elements.namedItem(name).value; });
+        });
+        values.folds = {};
+        document.querySelectorAll('.finance-accounting-fold[id], .finance-rule[id]').forEach(fold => { values.folds[fold.id] = fold.open; });
+        try { localStorage.setItem(key, JSON.stringify(values)); } catch (_) {}
+    }
+    Object.entries(forms).forEach(([id, names]) => {
+        const form = document.getElementById(id);
+        names.forEach(name => {
+            const input = form.elements.namedItem(name);
+            const value = saved[id]?.[name];
+            if (!hasOldInput && typeof value === 'string'
+                && (input.tagName !== 'SELECT' || Array.from(input.options).some(option => option.value === value))) input.value = value;
+        });
+        form.addEventListener('change', persist);
+        form.addEventListener('input', persist);
+        form.addEventListener('submit', persist);
+    });
+    document.querySelectorAll('.finance-accounting-fold[id], .finance-rule[id]').forEach(fold => {
+        if (typeof saved.folds?.[fold.id] === 'boolean') fold.open = saved.folds[fold.id];
+        fold.addEventListener('toggle', persist);
+    });
+})();
+(function(){
     const scope = document.getElementById('credit-usd-scope');
+    const rates = @json($creditUsdRates);
     const fields = scope.form.querySelectorAll('[data-usd-scopes]');
     function showPeriodFields() {
         fields.forEach(field => {
@@ -92,6 +134,18 @@
     }
     scope.addEventListener('change', showPeriodFields);
     showPeriodFields();
+    function fillUsdRate(preserve) {
+        if (preserve) return;
+        const form = scope.form;
+        const currency = form.elements.usd_currency.value.toUpperCase();
+        const start = scope.value === 'month' ? form.elements.usd_month.value + '-01' : form.elements.usd_start.value;
+        const end = scope.value === 'range' ? form.elements.usd_end.value : start;
+        const rate = rates.find(rate => rate.scope === scope.value && rate.currency === currency
+            && rate.starts_on === start && (scope.value === 'month' || rate.ends_on === end));
+        form.elements.usd_rate.value = rate ? rate.usd_rate : '';
+    }
+    scope.form.addEventListener('change', event => { if (event.target.name !== 'usd_rate') fillUsdRate(false); });
+    fillUsdRate(@json(session()->hasOldInput('usd_rate')));
 })();
 (function(){
     var form=document.getElementById('finance-monthly-rate');
