@@ -112,6 +112,10 @@ Laravel 调度器每小时执行 `php artisan finance:paypal-balances:refresh`�
 
 部署时每分钟运行 `php artisan schedule:run`，或常驻运行 `php artisan schedule:work`。只运行财务调度时，在调度进程中设置 `ERP_FINANCE_SCHEDULER_ONLY=1`。调度器串行消费 `finance-orders` 队列，使用现有 jobs 表。该连接 `retry_after=960`，大于任务超时。
 
+汇总负载控制：网页默认仅登记和读取报表，不在 PHP-FPM 请求结束后直接执行 `finance:summaries:refresh`。生产环境必须保持上述 CLI 调度运行；缺少调度时，冷报表会保持待生成。兼容开关 `FINANCE_SUMMARY_WEB_REFRESH=true` 可恢复旧网页兜底，但高负载环境应保持关闭。部署修改配置后需按项目部署流程更新配置缓存。
+
+`config/finance.php` 的 `summaries` 配置控制每轮最多发布 2 个快照、快照阶段 45 秒启动预算、每轮最多匹配 100 条依赖变更及 PayPal 全量投影 300 秒重建冷却。预算在任务之间检查，不会中断正在执行的单条 SQL 或单个构建。未处理的依赖和快照留待后续轮次；大批纯服装变更仅失效信用卡月份。PayPal 明细投影最后执行，其失败或冷却不会阻止已就绪的其他通道汇总发布。冷却要求 Web 与调度器使用同一持久共享缓存；缓存故障时跳过全量重建并记录错误，保留上一版。
+
 订单列表刷新弹窗按账户展示排队、同步中、成功、失败或跳过，并每2秒轮询处理条数和失败原因。状态保存在应用缓存中24小时；生产环境需使用持久共享缓存（database、redis或单机file，不能使用array/null），Web和队列进程必须使用同一缓存配置。重复提交通过账户级原子锁沿用活动任务，后台失败保留已处理条数，状态接口按发起人和财务菜单权限检查访问。
 
 首次历史回补默认回推6个月，可通过 config/finance.php 的 relay.initial_months 调整；先按会计月份拆分，再按最多7天一段请求，每段依据接口 total_pages 逐页读取，不能把不足500条视作最后一页。接口实际每页仅100条时仍取完所有页，并校验累计条数等于 total_items，完成后才记录该月份成功进度。后续正常增量获取近5小时；已锁定月份保留现有快照并跳过。

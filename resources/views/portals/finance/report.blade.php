@@ -19,8 +19,13 @@
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
     <input type="hidden" name="view" value="transactions">
     <input type="hidden" name="per_page" value="{{ $paginator->perPage() }}">
-    <div class="form-group"><label>会计月份（按通道时区）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
-    <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach</select></div>
+    <div class="form-group"><label for="transaction-month-from">开始月份（按通道时区）</label><input id="transaction-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" max="{{ $filters['month_to'] }}" class="form-control" required></div>
+    <div class="form-group"><label for="transaction-month-to">结束月份（按通道时区）</label><input id="transaction-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" min="{{ $filters['month_from'] }}" class="form-control" required></div>
+    @if($tab === 'combined')
+        @include('portals.finance.partials.transaction-account-multiselect')
+    @else
+    <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach @foreach($accountChannelOptions as $channelKey => $channelLabel)<option value="channel:{{ $channelKey }}" @selected(($filters['account_channel'] ?? '') === $channelKey)>{{ $channelLabel }}</option>@endforeach</select></div>
+    @endif
     <input type="hidden" name="channel" value="{{ $tab }}">
     <div class="form-group"><label for="report-currency">结算货币</label><select id="report-currency" name="currency" class="form-control"><option value="">全部结算货币</option>@foreach($currencyOptions as $currency)<option value="{{ $currency }}" @selected(($filters['currency'] ?? '') === $currency)>{{ $currency }}</option>@endforeach</select></div>
     @if($tab !== 'combined')

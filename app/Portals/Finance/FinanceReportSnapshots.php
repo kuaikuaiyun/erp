@@ -85,14 +85,14 @@ class FinanceReportSnapshots
     }
 
     /**
-     * A deployment should run the scheduler every minute. If that external
-     * process is missing or stalled, one web request may wake it after the
-     * response has been sent. The cache gate prevents polling from spawning a
-     * refresh on every request while the database advisory lock prevents two
-     * command instances from doing the same work.
+     * Publication normally runs only in the CLI scheduler. An explicitly
+     * enabled legacy web fallback is gated across requests and still shares
+     * the database mutex with the CLI worker. It is off by default because
+     * deferred callbacks still occupy PHP-FPM workers after the response.
      */
     private function requestBackgroundRefresh(): void
     {
+        if (! config('finance.summaries.web_refresh', false)) return;
         $driver = $this->workbooks->database()->getDriverName();
         if (! in_array($driver, ['mysql', 'mariadb'], true)) {
             return;
@@ -120,7 +120,8 @@ class FinanceReportSnapshots
         }
         $failed = false;
         $builds = 0;
-        $buildLimit = 10;
+        $buildLimit = max(1, (int) config('finance.summaries.snapshots_per_run', 2));
+        $deadline = microtime(true) + max(1, (int) config('finance.summaries.snapshot_budget_seconds', 45));
         $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
             ->where('month', '<>', '')
             ->orderByDesc('used_at')->orderBy('scope')->get();
@@ -133,7 +134,12 @@ class FinanceReportSnapshots
                 $filters = json_decode($scope->filters, true, 512, JSON_THROW_ON_ERROR);
                 $revision = $this->revision($db, $scope->report, $scope->month, $filters, $tracksRevisions);
                 if (! $db->table('finance_report_snapshots')->where(['scope' => $scope->scope, 'revision' => $revision])->exists()) {
-                    if ($builds >= $buildLimit || ($tracksRevisions && ! $this->projectionsReady($db, $scope->month, $filters))) {
+                    // Source-file mode deliberately has no database projection
+                    // to publish. Only the background worker may build from
+                    // those sources; requiring a projection here stalls forever.
+                    if ($builds >= $buildLimit || microtime(true) >= $deadline || ($tracksRevisions
+                        && ! app(FinanceSummaryProjection::class)->usesSourceFiles()
+                        && ! $this->projectionsReady($db, $scope->month, $filters))) {
                         continue;
                     }
                     $builds++;
@@ -292,6 +298,7 @@ class FinanceReportSnapshots
             'updated_at' => $saved?->created_at,
         ];
         if (! $current) {
+            $status['detail'] = $this->pendingDetail($db, $month, $filters, $tracksRevisions);
             $this->requestBackgroundRefresh();
         }
         if ($statusOnly) {
@@ -306,6 +313,44 @@ class FinanceReportSnapshots
         }
 
         return [$this->payload($db, $saved->id), $saved->id, $status];
+    }
+
+    private function pendingDetail(Connection $db, string $month, array $filters, bool $tracksRevisions): string
+    {
+        try {
+            $worker = Cache::get('finance:summaries:worker-status');
+        } catch (Throwable) {
+            $worker = null;
+        }
+        $detail = '';
+        if ($tracksRevisions) {
+            if ($db->table('finance_summary_changes')->exists()) {
+                $detail = '等待关联订单、成本等依赖变更处理。';
+            } else {
+                $channels = match ($filters['channel'] ?? null) {
+                    'paypal' => ['paypal'],
+                    null, '', 'combined' => ['paypal', 'credit_card'],
+                    default => ['credit_card'],
+                };
+                $periods = $db->table('finance_summary_periods')->where('month', $month)
+                    ->whereIn('channel', $channels)->get()->keyBy('channel');
+                foreach ($channels as $channel) {
+                    $period = $periods->get($channel);
+                    $name = $channel === 'paypal' ? 'PayPal' : '信用卡（含叶总支付、Worldpay）';
+                    if (! $period) {
+                        $detail .= $name.'缺少月份登记。';
+                    } elseif ((int) $period->published === 0 || (int) $period->published !== (int) $period->revision) {
+                        $detail .= $name.'投影待发布（已发布 '.$period->published.' / 最新 '.$period->revision.'）。';
+                    }
+                }
+                if ($detail === '') $detail = '月份投影已就绪，等待汇总快照发布。';
+            }
+        } else {
+            $detail = '未启用完整版本跟踪，等待后台生成快照。';
+        }
+        return $detail.' 后台任务：'.(is_array($worker)
+            ? ($worker['stage'] ?? '未知').'（记录时间 '.($worker['at'] ?? '').'，北京时间；不代表当前仍在运行）。'
+            : '暂无执行记录（需部署诊断版本后观察）。');
     }
 
     private function queryRevision(Connection $db, string $report, string $month, array $filters): string

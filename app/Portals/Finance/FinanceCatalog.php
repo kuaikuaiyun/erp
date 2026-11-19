@@ -13,6 +13,18 @@ class FinanceCatalog
         'xuzong2-details' => 'xuzong-credit-source-2',
     ];
 
+    public static function settlementProjectName(string $name, ?string $channel = null): string
+    {
+        if ($channel === 'ye') return '叶总';
+        if ($channel === 'xuzong1') return '徐总1';
+        if ($channel === 'xuzong2') return '徐总2';
+        return match ($name) {
+            'SHANGYUN-v2' => '徐总2',
+            'xadanbao', 'xmdanbao', 'szdanbao', 'zzdanbao', 'pindanbao' => '叶总',
+            default => $name,
+        };
+    }
+
     public static function timezoneLabel(string $timezone): string
     {
         return match ($timezone) {

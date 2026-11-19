@@ -16,6 +16,38 @@ class FinanceTransactionSummary
         return ! in_array($tab, ['ye', 'worldpay'], true);
     }
 
+    /** Apply account labels to existing snapshots without altering filter identities. */
+    public function displayAccounts(array $items, string $tab): array
+    {
+        $result = [];
+        $yeGroups = [];
+        foreach ($items as $item) {
+            $channel = $item['_payment_channel'] ?? null;
+            $isYe = $tab === 'ye' || $channel === 'ye' || ($item['channel'] ?? '') === self::VIEWS['ye'];
+            if ($isYe && $tab === 'combined') {
+                $key = json_encode([$item['currency'], $item['month']], JSON_THROW_ON_ERROR);
+                if (! isset($yeGroups[$key])) {
+                    $yeGroups[$key] = ['position' => count($result), 'items' => []];
+                    $result[] = [];
+                }
+                $yeGroups[$key]['items'][] = $item;
+                continue;
+            }
+            $item['account'] = $isYe ? '叶总' : FinanceCatalog::settlementProjectName($item['account'], $channel);
+            $result[] = $item;
+        }
+        foreach ($yeGroups as $group) {
+            $first = $group['items'][0];
+            $merged = $this->totalSummary($group['items'], 'combined', $first['month']);
+            $merged['channel'] = self::VIEWS['ye'];
+            $merged['_payment_channel'] = 'ye';
+            $merged['account'] = '叶总';
+            $merged['account_group'] = json_encode(['ye', '@merged', $first['currency'], $first['month']], JSON_THROW_ON_ERROR);
+            $result[$group['position']] = $merged;
+        }
+        return $result;
+    }
+
     public function missingSummary(array $items, string $tab, string $month): array
     {
         $row = ['channel' => self::VIEWS[$tab], 'account' => '缺失数据汇总', 'currency' => self::SETTLEMENT_CURRENCY,

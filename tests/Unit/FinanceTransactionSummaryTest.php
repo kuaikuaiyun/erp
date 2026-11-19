@@ -7,6 +7,38 @@ use PHPUnit\Framework\TestCase;
 
 class FinanceTransactionSummaryTest extends TestCase
 {
+    public function test_transaction_account_labels_and_combined_ye_rollup_apply_to_saved_rows(): void
+    {
+        $summary = new FinanceTransactionSummary;
+        $base = ['currency' => 'USD', 'month' => '2026-11', 'orders' => 2, 'failed_orders' => 1,
+            'team' => '深圳', 'subscription' => '订阅', 'amount' => '10.1', 'settlement' => '9.9', 'fee' => '0.2'];
+        $items = [
+            $base + ['account' => 'SHANGYUN-v2', '_payment_channel' => 'xuzong2', 'channel' => '徐总信用卡', 'account_group' => 'card'],
+            $base + ['account' => 'xadanbao', '_payment_channel' => 'ye', 'channel' => '叶总支付', 'account_group' => 'ye1'],
+            $base + ['account' => 'Worldpay', '_payment_channel' => 'worldpay', 'channel' => 'Worldpay', 'account_group' => 'worldpay'],
+            $base + ['account' => '郑州单包', '_payment_channel' => 'ye', 'channel' => '叶总支付', 'account_group' => 'ye2'],
+        ];
+        $combined = $summary->displayAccounts($items, 'combined');
+        $this->assertCount(3, $combined);
+        $this->assertSame('徐总2', $combined[0]['account']);
+        $this->assertSame('叶总', $combined[1]['account']);
+        $this->assertSame(4, $combined[1]['orders']);
+        $this->assertSame(2, $combined[1]['failed_orders']);
+        $this->assertSame('20.20000000', $combined[1]['amount']);
+        $this->assertSame('0.40000000', $combined[1]['fee']);
+        $this->assertSame('Worldpay', $combined[2]['account']);
+        $detail = $summary->displayAccounts([$items[1], $items[3]], 'ye');
+        $this->assertCount(2, $detail);
+        $this->assertSame('叶总', $detail[0]['account']);
+        $this->assertSame('ye1', $detail[0]['account_group']);
+        $this->assertSame('深圳', $detail[0]['team']);
+        $differentCurrency = $items[3];
+        $differentCurrency['currency'] = 'EUR';
+        $this->assertCount(2, $summary->displayAccounts([$items[1], $differentCurrency], 'combined'));
+        $items[3]['_incomplete_usd_fields'] = ['settlement'];
+        $this->assertNull($summary->displayAccounts([$items[1], $items[3]], 'combined')[0]['settlement']);
+    }
+
     public function test_missing_summary_respects_channel_dimensions_and_keeps_currencies_separate(): void
     {
         $summary = new FinanceTransactionSummary;

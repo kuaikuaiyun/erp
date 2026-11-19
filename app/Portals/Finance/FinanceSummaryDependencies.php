@@ -7,17 +7,26 @@ class FinanceSummaryDependencies
     public function resolve(\Illuminate\Database\Connection $db): void
     {
         $pending = $db->table('finance_summary_changes');
-        if ($pending->count() > 1000) {
+        $sample = (clone $pending)->orderBy('id')->limit(1001)->pluck('id');
+        if ($sample->isEmpty()) return;
+        if ($sample->count() > 1000) {
             $lastId = $pending->max('id');
             // A large import can produce thousands of expensive dependency lookups.
             // Invalidate every existing period once and leave newer changes queued.
-            $db->transaction(function () use ($db, $lastId): void {
-                $db->table('finance_summary_periods')->increment('revision');
+            $sources = (clone $pending)->where('id', '<=', $lastId)->distinct()->pluck('source');
+            $creditOnly = $sources->every(fn ($source) => in_array($source, ['fashion', 'fashion_item'], true));
+            $db->transaction(function () use ($db, $lastId, $creditOnly): void {
+                $db->table('finance_summary_periods')->when($creditOnly, fn ($query) => $query->where('channel', 'credit_card'))->increment('revision');
                 $db->table('finance_summary_changes')->where('id', '<=', $lastId)->delete();
             });
+            return;
         }
 
-        $db->table('finance_summary_changes')->orderBy('id')->chunkById(200, function ($changes) use ($db): void {
+        // Bound the expensive matching work and leave concurrently arriving
+        // changes for a later run, instead of chasing a moving queue forever.
+        $batchLimit = max(1, min(1000, (int) config('finance.summaries.dependency_changes_per_run', 100)));
+        $lastId = $sample->take($batchLimit)->last();
+        $db->table('finance_summary_changes')->where('id', '<=', $lastId)->orderBy('id')->chunkById(100, function ($changes) use ($db): void {
             $db->transaction(function () use ($db, $changes): void {
                 $affected = [];
                 foreach ($changes->unique(fn ($change) => $change->source.':'.$change->payload) as $change) {

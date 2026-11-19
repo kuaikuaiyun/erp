@@ -25,6 +25,7 @@
         @case('failed') 上次更新失败，后台会重试。 @break
     @endswitch
     </span>
+    <span data-finance-snapshot-detail>{{ $status['detail'] ?? '' }}</span>
     @if(filled($status['updated_at'] ?? null))
         数据时间 {{ \Illuminate\Support\Carbon::parse($status['updated_at'])->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}（北京时间）
     @endif
@@ -34,5 +35,5 @@
 </details>
 @endif
 @if($watch)
-    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=4" defer></script>
+    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=6" defer></script>
 @endif

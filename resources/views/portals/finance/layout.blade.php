@@ -37,6 +37,7 @@ document.addEventListener('change', function (event) {
     if (!select.matches('select[data-finance-page-size]')) return;
     var url = new window.URL(select.dataset.financePageUrl || window.location.href);
     url.searchParams.set(select.dataset.financePageSize, select.value);
+    url.searchParams.set('remember_page_size', '1');
     if (select.dataset.financePageName === 'page' && !select.dataset.financePageUrl) url.searchParams.delete('page');
     else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
@@ -51,10 +52,12 @@ function financeStartDownload(url) {
 document.addEventListener('click', function (event) {
     var monthExport = event.target.closest('[data-finance-month-export]');
     if (monthExport) {
-        var month = monthExport.form.elements.namedItem('month');
-        if (!month.reportValidity()) return;
+        if (!monthExport.form.reportValidity()) return;
         var exportUrl = new URL(monthExport.dataset.financeMonthExport, window.location.href);
-        exportUrl.searchParams.set('month', month.value);
+        ['month', 'month_from', 'month_to'].forEach(function (field) {
+            var input = monthExport.form.elements.namedItem(field);
+            if (input) exportUrl.searchParams.set(field, input.value);
+        });
         financeStartDownload(exportUrl.toString());
         return;
     }
