@@ -308,6 +308,16 @@ class FinancePayPalSettlementOrders
         }
     }
 
+    /** Stream the fully calculated list rows for the background page projection. */
+    public function projectionRows(): iterable
+    {
+        $graph = $this->recordExportGraph ??= $this->orderGraph(null);
+        if ($graph === null) {
+            return;
+        }
+        yield from $this->matchingRows(['timezone' => 'Asia/Shanghai'], $graph[0], $graph, false);
+    }
+
     private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails, bool $matchCandidateDomains = false): iterable
     {
         if (filled($filters['account'] ?? null)) {
@@ -624,8 +634,10 @@ class FinancePayPalSettlementOrders
         unset($events, $index, $byId, $paymentIds, $invoiceRoots);
 
         $crossRates = [
-            'monthly' => $db->table('finance_monthly_exchange_rates')->get(['month', 'currency', 'cny_rate'])
-                ->groupBy('month')->map(fn ($rates) => $rates->pluck('cny_rate', 'currency')->put('CNY', '1')),
+            'monthly' => $db->table('finance_monthly_exchange_rates')->whereIn('channel', ['paypal', 'combined'])
+                ->orderByRaw("CASE WHEN channel = 'paypal' THEN 0 ELSE 1 END")
+                ->get(['month', 'currency', 'cny_rate'])->groupBy('month')
+                ->map(fn ($rates) => $rates->unique('currency')->pluck('cny_rate', 'currency')->put('CNY', '1')),
             'paypal' => $this->referenceExchangeRates($roots, $conversions),
         ];
         foreach ($unlinked as $event) {

@@ -77,11 +77,12 @@ class OperatorMaterialVideoNotificationServiceTest extends TestCase
         });
     }
 
-    public function test_it_notifies_each_department_manager_once_after_an_operator_uploads_a_video(): void
+    public function test_it_notifies_each_department_manager_and_material_reviewer_after_an_operator_uploads_a_video(): void
     {
         DB::table('admin_users')->insert([
             ['id' => 1, 'username' => 'operator', 'name' => '运营甲', 'status' => 1],
             ['id' => 2, 'username' => 'manager', 'name' => '主管乙', 'status' => 1],
+            ['id' => 3, 'username' => 'AI_ZKZ', 'name' => '张康正', 'status' => 1],
         ]);
         DB::table('admin_roles')->insert([
             ['id' => 10, 'name' => '运营一组', 'slug' => 'operation-team-1'],
@@ -104,10 +105,10 @@ class OperatorMaterialVideoNotificationServiceTest extends TestCase
         $count = app(OperatorMaterialVideoNotificationService::class)
             ->notifyManagers($product, $video, $uploader);
 
-        self::assertSame(1, $count);
+        self::assertSame(2, $count);
         self::assertSame(1, InternalMessage::query()->count());
-        self::assertSame(1, InternalMessageRecipient::query()->count());
-        self::assertSame(2, (int) InternalMessageRecipient::query()->value('recipient_user_id'));
+        self::assertSame(2, InternalMessageRecipient::query()->count());
+        self::assertSame([2, 3], InternalMessageRecipient::query()->orderBy('recipient_user_id')->pluck('recipient_user_id')->map(fn ($id) => (int) $id)->all());
         self::assertStringContainsString('kky-200-op1-min-261118-001', (string) InternalMessage::query()->value('content'));
     }
 }

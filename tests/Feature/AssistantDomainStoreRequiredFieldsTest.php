@@ -94,16 +94,16 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         self::assertCount(6, $rows);
     }
 
-    public function test_normal_save_and_import_both_require_team_project_and_user(): void
+    public function test_normal_save_and_import_both_require_team_and_project(): void
     {
         $row = $this->readRows([['team' => '', 'project' => '']])[0]['data'];
         self::assertTrue(Validator::make($row, $this->rules('storeRules'))->fails());
         self::assertTrue(Validator::make($row, $this->rules('importRules'))->fails());
     }
 
-    public function test_import_requires_owner_and_department_and_all_four_fields(): void
+    public function test_import_requires_owner_department_team_and_project(): void
     {
-        foreach (['team', 'project', 'user_name', 'owner_user_id', 'operation_department_id'] as $field) {
+        foreach (['team', 'project', 'owner_user_id', 'operation_department_id'] as $field) {
             $row = $this->readRows([[$field => '']])[0]['data'];
             $validator = Validator::make($row, $this->rules('importRules'));
             self::assertTrue($validator->fails(), $field);
@@ -111,8 +111,25 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         }
         $method = new \ReflectionMethod(DomainStoreController::class, 'batchRulesForFields');
         $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
-        self::assertTrue(Validator::make(['user_name' => ' '], $method->invoke($controller, ['user_name']))->fails());
+        self::assertFalse(Validator::make(['user_name' => null], $method->invoke($controller, ['user_name']))->fails());
         self::assertArrayNotHasKey('team', $method->invoke($controller, ['remark']));
+    }
+
+    public function test_user_is_optional_for_save_and_import(): void
+    {
+        foreach ([false, true] as $xlsx) {
+            $row = $this->readRows([['user_name' => '']], false, $xlsx)[0]['data'];
+            foreach (['storeRules', 'importRules'] as $method) {
+                foreach (['', null] as $value) {
+                    self::assertFalse(Validator::make(array_replace($row, ['user_name' => $value]), $this->rules($method))->fails());
+                }
+            }
+        }
+        $headers = app(AssistantDomainStoreSpreadsheetService::class)->importHeaders();
+        self::assertContains(__('assistant.domain_stores.fields.user_name'), $headers);
+        self::assertNotContains(__('assistant.domain_stores.import.required_header', ['header' => __('assistant.domain_stores.fields.user_name')]), $headers);
+        $source = file_get_contents(resource_path('views/portals/assistant/domain-stores/form.blade.php'));
+        self::assertStringNotContainsString('data-store-required-field="user_name"', $source);
     }
 
     public function test_forms_compile_and_batch_requirements_only_apply_to_selected_fields(): void

@@ -205,8 +205,8 @@
                 </div>
             </div>
 
-            <div class="box box-solid assistant-form-section"><div class="box-body row assistant-form-grid">                        <div class="form-group assistant-owner-form-field @error('user_name') has-error @enderror" data-store-required-field="user_name" data-store-required-message="请填写或选择使用人">
-                            <label for="user_name">使用人 <span class="text-red">*</span></label>
+            <div class="box box-solid assistant-form-section"><div class="box-body row assistant-form-grid">                        <div class="form-group assistant-owner-form-field @error('user_name') has-error @enderror">
+                            <label for="user_name">使用人</label>
                             <input id="user_name" name="user_name" type="text" class="form-control" value="{{ old('user_name', $store->user_name) }}" maxlength="100" placeholder="可自由填写使用人">
                             <span class="help-block">仅用于记录和核对，不参与权限或订单归属计算。</span>
                             @error('user_name')<span class="help-block">{{ $message }}</span>@enderror

@@ -196,33 +196,33 @@ class PerformanceReportController extends Controller
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $scopeOperatorIds)
             ->with('adSpendEntries')->get();
+        $performanceFormula = OperationProjectCatalog::performanceFormula($this->project['code']);
         $reportsByOperatorDate = $approvedReports->groupBy(fn (FashionAdvertisingReport $report) => (int) $report->submitter_id.'|'.$report->report_date->format('Y-m-d'));
-        $rows->setCollection($rows->getCollection()->map(function ($row) use ($operatorProfiles, $operatorDailyRevenue, $reportsByOperatorDate): object {
+        $rows->setCollection($rows->getCollection()->map(function ($row) use ($operatorProfiles, $operatorDailyRevenue, $reportsByOperatorDate, $performanceFormula): object {
             $operatorId = (int) $row->owner_user_id;
             $profile = $operatorProfiles->get($operatorId);
             $department = $profile?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $profile?->departments?->first();
             $dailyRevenue = (float) ($operatorDailyRevenue->get($operatorId.'|'.$row->report_date)->revenue ?? 0);
             $dailyReports = $reportsByOperatorDate->get($operatorId.'|'.$row->report_date, collect());
             $media = $dailyReports->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
-                ->map(function ($entries, string $name): array {
-                    $spend = round((float) $entries->sum('actual_spend_usd'), 2);
+                ->map(function ($entries, string $name) use ($performanceFormula): array {
+                    $spend = round((float) $entries->sum($performanceFormula ? 'book_spend_usd' : 'actual_spend_usd'), 2);
 
                     return ['name' => $name, 'spend' => $spend];
                 })->sortKeys()->values();
-            $adSpend = round((float) $media->sum('spend'), 2);
+            $financials = $this->performanceFinancials($dailyRevenue, $dailyReports->flatMap->adSpendEntries, $performanceFormula);
             $row->department_name = (string) ($department?->name ?: '未分配部门');
             $row->hired_at = $profile?->hired_at?->format('Y-m-d');
             $row->hire_days = $profile?->hired_at ? max(1, (int) $profile->hired_at->diffInDays(CarbonImmutable::parse($row->report_date)) + 1) : null;
             $row->media_metrics = $media;
-            $row->actual_ad_spend = $adSpend;
-            $row->total_roi = $adSpend > 0 ? $dailyRevenue / $adSpend : null;
+            foreach ($financials as $key => $value) $row->{$key} = $value;
 
             return $row;
         }));
 
         $orderCount = (int) ($summary->order_count ?? 0);
         $revenue = (float) ($summary->revenue ?? 0);
-        $summaryAdSpend = round((float) $approvedReports->flatMap->adSpendEntries->sum('actual_spend_usd'), 2);
+        $summaryFinancials = $this->performanceFinancials($revenue, $approvedReports->flatMap->adSpendEntries, $performanceFormula);
 
         return view('portals.fashion.performance-report.index', [
             ...$context,
@@ -243,12 +243,14 @@ class PerformanceReportController extends Controller
                 'revenue' => $revenue,
                 'average_order_value' => $orderCount > 0 ? $revenue / $orderCount : 0,
                 'store_count' => (int) ($summary->store_count ?? 0),
-                'ad_spend' => $summaryAdSpend,
-                'roi' => $summaryAdSpend > 0 ? $revenue / $summaryAdSpend : null,
+                'ad_spend' => $summaryFinancials['book_ad_spend'],
+                'roi' => $summaryFinancials['total_roi'],
+                ...$summaryFinancials,
             ],
             'operationProject' => $this->project,
             'siteBuilderOptions' => $siteBuilderOptions,
             'isShopifyPerformance' => false,
+            'performanceFormula' => $performanceFormula,
         ]);
     }
 
@@ -346,8 +348,9 @@ class PerformanceReportController extends Controller
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $scopeOperatorIds)
             ->with('adSpendEntries')->get();
+        $performanceFormula = OperationProjectCatalog::performanceFormula($this->project['code']);
         $reportsByOperatorDate = $approvedReports->groupBy(fn (FashionAdvertisingReport $report) => (int) $report->submitter_id.'|'.$report->report_date->format('Y-m-d'));
-        $rows->setCollection($rows->getCollection()->map(function ($row) use ($operatorProfiles, $operatorDailyRevenue, $reportsByOperatorDate): object {
+        $rows->setCollection($rows->getCollection()->map(function ($row) use ($operatorProfiles, $operatorDailyRevenue, $reportsByOperatorDate, $performanceFormula): object {
             $operatorId = (int) $row->owner_user_id;
             $profile = $operatorProfiles->get($operatorId);
             $department = $profile?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $profile?->departments?->first();
@@ -355,23 +358,22 @@ class PerformanceReportController extends Controller
             $dailyReports = $reportsByOperatorDate->get($operatorId.'|'.$row->report_date, collect());
             $media = $dailyReports->flatMap->adSpendEntries
                 ->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
-                ->map(function ($entries, string $name): array {
-                    return ['name' => $name, 'spend' => round((float) $entries->sum('actual_spend_usd'), 2)];
+                ->map(function ($entries, string $name) use ($performanceFormula): array {
+                    return ['name' => $name, 'spend' => round((float) $entries->sum($performanceFormula ? 'book_spend_usd' : 'actual_spend_usd'), 2)];
                 })->sortKeys()->values();
-            $adSpend = round((float) $media->sum('spend'), 2);
+            $financials = $this->performanceFinancials($dailyRevenue, $dailyReports->flatMap->adSpendEntries, $performanceFormula);
             $row->department_name = (string) ($department?->name ?: '未分配部门');
             $row->hired_at = $profile?->hired_at?->format('Y-m-d');
             $row->hire_days = $profile?->hired_at ? max(1, (int) $profile->hired_at->diffInDays(CarbonImmutable::parse($row->report_date)) + 1) : null;
             $row->media_metrics = $media;
-            $row->actual_ad_spend = $adSpend;
-            $row->total_roi = $adSpend > 0 ? $dailyRevenue / $adSpend : null;
+            foreach ($financials as $key => $value) $row->{$key} = $value;
 
             return $row;
         }));
 
         $orderCount = (int) ($summary->order_count ?? 0);
         $revenue = (float) ($summary->revenue ?? 0);
-        $summaryAdSpend = round((float) $approvedReports->flatMap->adSpendEntries->sum('actual_spend_usd'), 2);
+        $summaryFinancials = $this->performanceFinancials($revenue, $approvedReports->flatMap->adSpendEntries, $performanceFormula);
 
         return view('portals.fashion.performance-report.index', [
             ...$context,
@@ -392,13 +394,49 @@ class PerformanceReportController extends Controller
                 'revenue' => $revenue,
                 'average_order_value' => $orderCount > 0 ? $revenue / $orderCount : 0,
                 'store_count' => (int) ($summary->store_count ?? 0),
-                'ad_spend' => $summaryAdSpend,
-                'roi' => $summaryAdSpend > 0 ? $revenue / $summaryAdSpend : null,
+                'ad_spend' => $summaryFinancials['book_ad_spend'],
+                'roi' => $summaryFinancials['total_roi'],
+                ...$summaryFinancials,
             ],
             'operationProject' => $this->project,
             'siteBuilderOptions' => $siteBuilderOptions,
             'isShopifyPerformance' => true,
+            'performanceFormula' => $performanceFormula,
         ]);
+    }
+
+    /** @return array{book_ad_spend:float,service_fee:float,actual_ad_spend:float,store_fee:float,misc_fee_rmb:float,total_roi:?float,profit_rmb:?float} */
+    private function performanceFinancials(float $revenue, $entries, ?array $formula): array
+    {
+        $actualAdSpend = round((float) $entries->sum('actual_spend_usd'), 2);
+        if ($formula === null) {
+            return [
+                'book_ad_spend' => $actualAdSpend,
+                'service_fee' => 0.0,
+                'actual_ad_spend' => $actualAdSpend,
+                'store_fee' => 0.0,
+                'misc_fee_rmb' => 0.0,
+                'total_roi' => $actualAdSpend > 0 ? $revenue / $actualAdSpend : null,
+                'profit_rmb' => null,
+            ];
+        }
+
+        $bookAdSpend = round((float) $entries->sum('book_spend_usd'), 2);
+        $serviceFee = round($actualAdSpend - $bookAdSpend, 2);
+        $storeFee = $revenue * $formula['store_fee_rate'];
+        $miscFeeRmb = round((float) $entries->sum('misc_fee_rmb'), 2);
+        $profitRmb = (($revenue * $formula['gross_margin_rate']) - $bookAdSpend - $serviceFee - $storeFee)
+            * $formula['usd_to_rmb_rate'] - $miscFeeRmb;
+
+        return [
+            'book_ad_spend' => $bookAdSpend,
+            'service_fee' => $serviceFee,
+            'actual_ad_spend' => $actualAdSpend,
+            'store_fee' => round($storeFee, 2),
+            'misc_fee_rmb' => $miscFeeRmb,
+            'total_roi' => $actualAdSpend > 0 ? $revenue / $actualAdSpend : null,
+            'profit_rmb' => round($profitRmb, 2),
+        ];
     }
 
     private function shopifyRevenueSql(string $currencyExpression, string $amountExpression): string

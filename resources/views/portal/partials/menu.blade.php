@@ -15,13 +15,21 @@
         : $portalOrigin.'/'.ltrim($path, '/');
     $icon = $menu->icon ?: 'fa-circle-o';
     $currentPath = '/'.trim(request()->path(), '/');
-    $matchesCurrentPath = static function (string $candidatePath) use ($currentPath, $portal): bool {
+    $currentQuery = request()->query();
+    $matchesCurrentPath = static function (string $candidatePath) use ($currentPath, $currentQuery, $portal): bool {
         if (\Illuminate\Support\Str::startsWith($candidatePath, ['http://', 'https://', '#'])) {
             return false;
         }
 
         $candidatePath = app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal, $candidatePath);
         $menuPath = '/'.trim(parse_url($candidatePath, PHP_URL_PATH) ?: $candidatePath, '/');
+        parse_str((string) parse_url($candidatePath, PHP_URL_QUERY), $menuQuery);
+
+        foreach ($menuQuery as $key => $value) {
+            if (! array_key_exists($key, $currentQuery) || (string) $currentQuery[$key] !== (string) $value) {
+                return false;
+            }
+        }
 
         if ($menuPath === '/' || $menuPath === app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal)) {
             return $currentPath === '/' || $currentPath === $menuPath;

@@ -2149,7 +2149,7 @@ class DomainStoreController extends Controller
             'team' => ['required', 'array', 'min:1', 'max:20'],
             'team.*' => ['required', 'string', 'max:100'],
             'project' => ['required', 'string', 'max:100'],
-            'user_name' => ['required', 'string', 'max:100'],
+            'user_name' => ['nullable', 'string', 'max:100'],
             'erp' => ['nullable', 'array', 'max:20'],
             'erp.*' => ['required', 'string', 'max:100'],
             'credit_card' => ['nullable', 'string', 'max:100'],

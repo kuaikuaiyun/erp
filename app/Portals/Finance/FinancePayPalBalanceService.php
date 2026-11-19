@@ -116,9 +116,13 @@ class FinancePayPalBalanceService
             && ($card['display']['available'] === null || $card['display']['withheld'] === null || $card['display']['total'] === null));
 
         $monthlyCny = null;
-        $month = $db->table('finance_monthly_exchange_rates')->where('month', '<=', now('Asia/Shanghai')->format('Y-m'))->max('month');
+        $month = $db->table('finance_monthly_exchange_rates')->where('month', '<=', now('Asia/Shanghai')->format('Y-m'))
+            ->whereIn('channel', ['paypal', 'combined'])->max('month');
         if ($month !== null) {
-            $rates = $db->table('finance_monthly_exchange_rates')->where('month', $month)->pluck('cny_rate', 'currency')->put('CNY', '1');
+            $rates = $db->table('finance_monthly_exchange_rates')->where('month', $month)
+                ->whereIn('channel', ['paypal', 'combined'])
+                ->orderByRaw("CASE WHEN channel = 'paypal' THEN 0 ELSE 1 END")
+                ->get(['currency', 'cny_rate'])->unique('currency')->pluck('cny_rate', 'currency')->put('CNY', '1');
             $converted = $totals->isEmpty() ? null : '0';
             foreach ($totals as $currency => $amounts) {
                 if ($amounts['total'] === null || (! $rates->has($currency) && bccomp($amounts['total'], '0', 8) !== 0)) {

@@ -1461,6 +1461,7 @@ class FinanceSettlementService
         // Both summary and transaction consumers need the same grouping fields.
         $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
         $fields['_summary_team'] = true;
+        $fields['_summary_settlement_currency'] = true;
         // Keep the original date order for grouping and for assigning costs to the first successful payment.
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
         $paypalOrders = $channel === 'paypal' ? app(FinancePayPalSettlementOrders::class) : null;
@@ -1518,7 +1519,9 @@ class FinanceSettlementService
                     if (isset($paypalAmounts[$record->id])) {
                         $resolved[$record->id] = array_replace($resolved[$record->id], $paypalAmounts[$record->id]);
                     }
-                    yield $resolved[$record->id] + ['_summary_usd_version' => 1] + (! empty($filters['summary_projection'])
+                    yield $resolved[$record->id] + ['_summary_usd_version' => 1,
+                        '_summary_settlement_currency_version' => ! empty($filters['summary_native_settlement']) ? 1 : 0]
+                        + (! empty($filters['summary_projection'])
                         ? ['_summary_source_account' => $record->account] : []);
                 }
             }
@@ -1544,7 +1547,8 @@ class FinanceSettlementService
                     foreach (['fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'] as $field) {
                         $amount = $this->number($statement['card_layout'][$field] ?? null);
                         if ($amount !== null) {
-                            $amounts[$field] = $this->number($rates->convert($exchange, $orders[$key]->currency, $statement['settlement_date'], $amount));
+                            $amounts[$field] = ! empty($filters['summary_native_settlement']) ? $amount
+                                : $this->number($rates->convert($exchange, $orders[$key]->currency, $statement['settlement_date'], $amount));
                         }
                     }
                     if (count(array_filter($amounts, fn ($amount) => $amount !== null)) === 0) {
@@ -1555,7 +1559,10 @@ class FinanceSettlementService
                         'account' => $account->account_name, 'account_key' => $account->activity_account,
                         '_summary_source_account' => $account->activity_account, '_summary_team' => '',
                         'owner' => '', 'team' => '', 'subscription' => '', 'payment_method' => '',
-                        'currency' => $orders[$key]->currency, 'month' => substr($statement['settlement_date'], 0, 7),
+                        'currency' => $orders[$key]->currency,
+                        '_summary_settlement_currency' => ! empty($filters['summary_native_settlement']) ? $orders[$key]->currency : 'USD',
+                        '_summary_settlement_currency_version' => ! empty($filters['summary_native_settlement']) ? 1 : 0,
+                        'month' => substr($statement['settlement_date'], 0, 7),
                         'gross' => null, 'settlement' => null, 'success' => false, 'failed' => false,
                         'reference' => $statement['card_layout']['reference'], 'statement_only' => true,
                     ];
@@ -1582,7 +1589,12 @@ class FinanceSettlementService
                     return $row;
                 });
             }
-            return $details->map(fn ($row) => array_intersect_key($row, $fields))->all();
+            return $details->map(function ($row) use ($fields, $filters) {
+                if (! empty($filters['summary_native_settlement'])) {
+                    $row['_summary_settlement_currency'] = 'USD';
+                }
+                return array_intersect_key($row, $fields);
+            })->all();
         }
         $currencyField = $platform === 'worldpay' ? 'statement_currency' : 'settlement_currency';
         $currencies = $details->map(fn ($row) => strtoupper(trim((string) ($row['card_layout'][$currencyField] ?? ''))));
@@ -1592,12 +1604,13 @@ class FinanceSettlementService
         $rates = $usdRates->forOrders($orders);
         $dates = $records->mapWithKeys(fn ($record) => [$record->id => $record->occurred_at->setTimezone('Asia/Shanghai')->toDateString()]);
         $moneyFields = self::MONEY + ['settlement' => true];
-        return $details->map(function (array $row) use ($fields, $currencies, $usdRates, $rates, $dates, $moneyFields, $platform): array {
+        return $details->map(function (array $row) use ($fields, $currencies, $usdRates, $rates, $dates, $moneyFields, $platform, $filters): array {
             $layout = $row['card_layout'];
             $currency = $currencies[$row['id']];
             foreach (array_intersect_key($layout, $moneyFields) as $field => $value) {
                 $amount = $this->number($value);
-                if ($amount !== null && $currency !== '' && $currency !== 'USD' && ! in_array($field, ['logistics', 'purchase'], true)) {
+                if (empty($filters['summary_native_settlement']) && $amount !== null && $currency !== ''
+                    && $currency !== 'USD' && ! in_array($field, ['logistics', 'purchase'], true)) {
                     $amount = $this->number($usdRates->convert($rates, $currency, $dates[$row['id']], $amount));
                 }
                 $row[$field] = $amount;
@@ -1608,6 +1621,9 @@ class FinanceSettlementService
             if ($row['account_key'] === FinanceWorldpayImport::SOURCE_ACCOUNT) {
                 $row['account'] = 'Worldpay';
             }
+            $row['_summary_settlement_currency'] = ! empty($filters['summary_native_settlement'])
+                ? ($currency !== '' ? $currency : (strtoupper(trim((string) ($row['currency'] ?? ''))) ?: 'USD'))
+                : 'USD';
             $row = array_replace($row, array_intersect_key($layout, array_flip(['domain', 'owner', 'team', 'payment_method'])));
             return array_intersect_key($row, $fields);
         })->all();
@@ -1750,7 +1766,8 @@ class FinanceSettlementService
         if ($row['channel'] === 'paypal') {
             foreach (['frozen_refund' => 'refund', 'refund_top_up' => 'refund_fee'] as $field => $legacy) {
                 // A legacy amount may already cover this component.
-                if (isset($row[$field]) && bccomp($row[$legacy] ?? '0', '0', 8) === 0) {
+                if (isset($row[$field]) && bccomp($row[$field], '0', 8) !== 0
+                    && bccomp($row[$legacy] ?? '0', '0', 8) === 0) {
                     $refund = bcadd($refund ?? '0', $row[$field], 8);
                 }
             }

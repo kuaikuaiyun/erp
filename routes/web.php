@@ -224,6 +224,8 @@ Route::get('/product-requests', [ProductRequestController::class, 'operationInde
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
+Route::get('/operation/ai-product-library/{product}/push-members', [OperationAiProductLibraryController::class, 'pushMembers'])->whereNumber('product')->name('operation.ai-product-library.push-members');
+Route::post('/operation/ai-product-library/{product}/push-members', [OperationAiProductLibraryController::class, 'pushToMembers'])->whereNumber('product')->name('operation.ai-product-library.push-members.store');
 Route::get('/operation/ai-product-library/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationsIndex'])->name('operation.ai-product-library.placement-evaluations.index');
 Route::get('/operation/ai-product-library/placement-evaluations/product-options', [OperationAiProductLibraryController::class, 'placementEvaluationProductOptions'])->name('operation.ai-product-library.placement-evaluations.product-options');
 Route::get('/operation/ai-product-library/placement-evaluations/products/{product}', [OperationAiProductLibraryController::class, 'placementEvaluationProductDetails'])->name('operation.ai-product-library.placement-evaluations.products.show');

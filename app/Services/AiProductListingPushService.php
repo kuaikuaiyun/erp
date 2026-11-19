@@ -78,6 +78,98 @@ class AiProductListingPushService
             ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
     }
 
+    public function canPushFromLibrary(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || $this->managedDepartmentIds($user)->isNotEmpty();
+    }
+
+    /** @return Collection<int, array{id:int,name:string,username:string,department_id:int,department_name:string,is_published:bool,has_pending_task:bool}> */
+    public function libraryPushMembers(AikaipinProduct $product, AdminUser $actor): Collection
+    {
+        $departmentIds = $this->managedDepartmentIds($actor);
+        if ($departmentIds->isEmpty()) return collect();
+
+        $rolesTable = config('admin.database.roles_table', 'admin_roles');
+        $pivot = config('admin.database.role_users_table', 'admin_role_users');
+        $publishedUserIds = AiProductShopifyPublication::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->where('status', 'success')
+            ->pluck('published_by')->map(fn ($id): int => (int) $id)->unique();
+        $pendingUserIds = AiProductListingTask::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->where('status', AiProductListingTask::STATUS_ASSIGNED)
+            ->pluck('assignee_user_id')->map(fn ($id): int => (int) $id)->unique();
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query
+                ->whereIn($rolesTable.'.id', $departmentIds->all())
+                ->whereIn($pivot.'.position', [Department::POSITION_MEMBER, Department::POSITION_DEPUTY]))
+            ->with(['departments' => fn ($query) => $query
+                ->whereIn($rolesTable.'.id', $departmentIds->all())
+                ->whereIn($pivot.'.position', [Department::POSITION_MEMBER, Department::POSITION_DEPUTY])])
+            ->orderBy('name')->orderBy('username')->get()
+            ->map(function (AdminUser $member) use ($publishedUserIds, $pendingUserIds): array {
+                $department = $member->departments->first();
+
+                return [
+                    'id' => (int) $member->getKey(),
+                    'name' => trim((string) ($member->name ?: $member->username)),
+                    'username' => (string) $member->username,
+                    'department_id' => (int) $department->getKey(),
+                    'department_name' => (string) $department->name,
+                    'is_published' => $publishedUserIds->contains((int) $member->getKey()),
+                    'has_pending_task' => $pendingUserIds->contains((int) $member->getKey()),
+                ];
+            })->values();
+    }
+
+    /** @param array<int, int|string> $memberIds
+     *  @return array{pushed:int,skipped:int}
+     */
+    public function pushFromLibrary(AikaipinProduct $product, AdminUser $actor, array $memberIds): array
+    {
+        abort_unless($this->canPushFromLibrary($actor), 403);
+        $selectedIds = collect($memberIds)->map(fn ($id): int => (int) $id)->filter()->unique()->values();
+        $members = $this->libraryPushMembers($product, $actor)->keyBy('id');
+        if ($selectedIds->isEmpty() || $selectedIds->contains(fn (int $id): bool => ! $members->has($id))) {
+            throw ValidationException::withMessages(['member_ids' => '请选择当前管理组内的有效成员。']);
+        }
+
+        $pushed = 0;
+        $skipped = 0;
+        foreach ($selectedIds as $memberId) {
+            $memberData = $members->get($memberId);
+            if ($memberData['has_pending_task']) {
+                $skipped++;
+                continue;
+            }
+            $assignee = AdminUser::query()->findOrFail($memberId);
+            DB::connection($product->getConnectionName())->transaction(function () use ($product, $actor, $assignee, $memberData): void {
+                $message = $this->createMessage(
+                    '必须上架商品：'.$product->product_code,
+                    "主管 {$actor->name} 已将商品【{$product->name}】（{$product->product_code}）定点推送给你。请进入 AI 产品库完成 Shopify 上架；成功上架后本消息会自动标记为已处理。",
+                    $actor,
+                    'yunying',
+                    'Shopify订阅运营系统',
+                );
+                $recipient = $this->createRecipient($message, (int) $assignee->getKey());
+                AiProductListingTask::query()->create([
+                    'aikaipin_product_id' => $product->getKey(),
+                    'department_id' => $memberData['department_id'],
+                    'manager_user_id' => $actor->getKey(),
+                    'assignee_user_id' => $assignee->getKey(),
+                    'assignee_recipient_id' => $recipient->getKey(),
+                    'status' => AiProductListingTask::STATUS_ASSIGNED,
+                    'assigned_at' => now(),
+                ]);
+            });
+            $pushed++;
+        }
+
+        return compact('pushed', 'skipped');
+    }
+
     public function assign(AiProductListingTask $task, AdminUser $assignee, AdminUser $actor): void
     {
         if (! $actor->isAdministrator() && (int) $task->manager_user_id !== (int) $actor->getKey()) abort(403);
@@ -204,5 +296,21 @@ class AiProductListingPushService
             'internal_message_id' => $message->getKey(),
             'recipient_user_id' => $userId,
         ]);
+    }
+
+    /** @return Collection<int, int> */
+    private function managedDepartmentIds(AdminUser $user): Collection
+    {
+        if ($user->isAdministrator()) {
+            return $this->departments->operationDepartments()
+                ->filter(fn (Department $department): bool => $department->parent_id !== null)
+                ->pluck('id')->map(fn ($id): int => (int) $id)->unique()->values();
+        }
+
+        $pivot = config('admin.database.role_users_table', 'admin_role_users');
+
+        return $user->departments()
+            ->where($pivot.'.position', Department::POSITION_MANAGER)
+            ->pluck('admin_roles.id')->map(fn ($id): int => (int) $id)->unique()->values();
     }
 }

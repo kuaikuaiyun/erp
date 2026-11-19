@@ -527,9 +527,10 @@ class FinanceWorkbookService
                     }
                     continue;
                 }
-                $payload = $record['dataset'] === FinanceLogisticsCreditOrders::IMPORTED_DATASET
-                    ? $model->payload
-                    : $this->addCreditCosts($model->payload, $record['payload']);
+                // Costs entered in the editable order template are deliberate
+                // additive adjustments. Other statement amounts remain excluded
+                // from the order re-import path below.
+                $payload = $this->addCreditCosts($model->payload, $record['payload']);
                 if ($payload !== $model->payload) {
                     app(FinanceAccountingService::class)->guardUnlocked($model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
                 }

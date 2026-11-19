@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Portals\Finance\FinanceSummaryProjection;
 use App\Portals\Finance\FinanceSummaryDependencies;
 use App\Portals\Finance\FinanceReportSnapshots;
+use App\Portals\Finance\FinancePayPalSettlementProjection;
 use App\Portals\Finance\Http\Controllers\FinanceController;
 use App\Portals\Finance\FinanceWorkbookService;
 use Illuminate\Console\Command;
@@ -16,7 +17,7 @@ class RefreshFinanceSummaries extends Command
 
     protected $description = 'Publish pending monthly finance summary projections';
 
-    public function handle(FinanceWorkbookService $workbooks, FinanceSummaryProjection $projection, FinanceSummaryDependencies $dependencies, FinanceReportSnapshots $reports, FinanceController $controller): int
+    public function handle(FinanceWorkbookService $workbooks, FinanceSummaryProjection $projection, FinanceSummaryDependencies $dependencies, FinanceReportSnapshots $reports, FinanceController $controller, FinancePayPalSettlementProjection $paypalSettlement): int
     {
         $db = $workbooks->database();
         if (! $reports->runsInBackground()) {
@@ -60,13 +61,23 @@ class RefreshFinanceSummaries extends Command
             if ($tracksRevisions && ! $projection->usesSourceFiles()) {
                 try {
                     $activeMonths = $db->table('finance_report_scopes')->where('used_at', '>=', now()->subDays(7))
-                        ->whereIn('report', ['summary', 'losses'])->where('month', '<>', '')
-                        ->distinct()->pluck('month');
+                        ->whereIn('report', ['summary', 'losses', 'transactions'])->where('month', '<>', '')
+                        ->distinct()->pluck('month')
+                        ->push(now('Asia/Shanghai')->format('Y-m'))
+                        ->unique()->values();
                     $periods = $activeMonths->isEmpty() ? collect() : $db->table('finance_summary_periods')
                         ->whereIn('month', $activeMonths)->orderByDesc('month')->get();
                     foreach ($periods as $period) {
                         $projection->refresh($period);
                     }
+                } catch (\Throwable $exception) {
+                    report($exception);
+                    $failed = true;
+                }
+            }
+            if ($tracksRevisions && ! $failed) {
+                try {
+                    $failed = ! $paypalSettlement->refresh();
                 } catch (\Throwable $exception) {
                     report($exception);
                     $failed = true;
