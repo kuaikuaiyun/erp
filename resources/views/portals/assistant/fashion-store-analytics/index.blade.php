@@ -1,5 +1,5 @@
 @extends('portal.layout')
-@section('page_title', '服装店铺分析')
+@section('page_title', $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析')
 @push('styles')
 <style>
 .fashion-filter-grid:before,.fashion-filter-grid:after{display:none!important;content:none!important}
@@ -8,9 +8,9 @@
 @endpush
 @section('content')
 @php
-$sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['sort'=>$field,'direction'=>$direction]));};
+$sortUrl=function($field)use($filters,$reportProject){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['project_code'=>$reportProject['code'],'sort'=>$field,'direction'=>$direction]));};
 @endphp
-<section class="content-header"><h1>服装店铺分析 <small>统计 XShoppy、Shopline 服装店铺订单与营业额</small></h1></section>
+<section class="content-header"><h1>{{ $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析' }} <small>统计对应项目 XShoppy、Shopline 店铺订单与营业额</small></h1></section>
 <section class="content">
 <div class="fashion-analytics-summary">
 <div class="fashion-kpi"><span>店铺数</span><strong>{{ number_format($summary['stores_count']) }}</strong></div>
@@ -19,7 +19,7 @@ $sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$fi
 <div class="fashion-kpi"><span>营业额</span><strong>US${{ number_format($summary['total_sales'],2) }}</strong></div>
 <div class="fashion-kpi"><span>平均客单价</span><strong>US${{ number_format($summary['average_order_value'],2) }}</strong></div>
 </div>
-<div class="box fashion-filter"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><form method="get" action="{{ route('assistant.fashion-store-analytics.index') }}"><div class="box-body fashion-filter-body fashion-filter-grid">
+<div class="box fashion-filter"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><form method="get" action="{{ route('assistant.fashion-store-analytics.index') }}"><input type="hidden" name="project_code" value="{{ $reportProject['code'] }}"><div class="box-body fashion-filter-body fashion-filter-grid">
 <div class="form-group"><label>店铺名</label><input class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}" placeholder="请输入店铺名"></div>
 <div class="form-group"><label>域名</label><input class="form-control" name="domain" value="{{ $filters['domain'] }}" placeholder="请输入域名"></div>
 <div class="form-group"><label>建站平台</label><select class="form-control" name="platform"><option value="">全部</option><option value="xshoppy" @selected($filters['platform']==='xshoppy')>XShoppy</option><option value="shopline" @selected($filters['platform']==='shopline')>Shopline</option></select></div>
@@ -30,7 +30,7 @@ $sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$fi
 <div class="form-group"><label>统计时区</label><select class="form-control" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{ $value }}" @selected($filters['timezone']===$value)>{{ $label }}</option>@endforeach</select></div>
 <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="from_date" value="{{ $filters['from_date'] }}"></div>
 <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="to_date" value="{{ $filters['to_date'] }}"></div>
-<div class="fashion-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.fashion-store-analytics.index') }}">重置</a></div>
+<div class="fashion-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.fashion-store-analytics.index', ['project_code' => $reportProject['code']]) }}">重置</a></div>
 </div>
 </div></form></div>
 <div class="box fashion-list"><div class="box-header with-border"><h3 class="box-title">店铺数据 <small>共 {{ $stores->total() }} 家</small></h3></div><div class="table-responsive"><table class="table table-bordered table-hover fashion-table"><thead><tr>

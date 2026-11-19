@@ -736,6 +736,15 @@
                 checkbox.checked = checked === undefined || checked === null ? true : !!checked;
                 checkbox.setAttribute('data-sku-select', 'true');
                 label.appendChild(checkbox);
+            } else {
+                // Keep the familiar checkbox for system SKUs, but do not submit it as
+                // a selected operational SKU. System link data is always preserved by
+                // the server even if the user clears this visual selection.
+                checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = checked === undefined || checked === null ? true : !!checked;
+                checkbox.setAttribute('data-system-sku-select', 'true');
+                label.appendChild(checkbox);
             }
 
             // 数值输入框外再包一层小字标签，明确区分「采购价」与「重量」，只读行也能看清数值含义
@@ -773,7 +782,7 @@
             if (!editable) { priceField.readOnly = true; weightField.readOnly = true; }
             if (editable) { priceField.required = true; weightField.required = true; }
 
-            if (checkbox) {
+            if (checkbox && !systemSku) {
                 checkbox.addEventListener('change', function () {
                     priceField.disabled = !checkbox.checked;
                     weightField.disabled = !checkbox.checked;
