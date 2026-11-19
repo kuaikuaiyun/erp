@@ -296,8 +296,9 @@ class AppLovinPerformanceReportController extends Controller
 
                     return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
                 }), 2);
-                $historicalRevenue = round((float) $accountKeys->sum(
-                    fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+                $historicalRevenue = round(max(
+                    (float) $accountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+                    $revenue,
                 ), 2);
 
                 return [
@@ -393,8 +394,9 @@ class AppLovinPerformanceReportController extends Controller
 
             return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
         }), 2);
-        $totals['historical_revenue'] = round((float) $totalAccountKeys->sum(
-            fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+        $totals['historical_revenue'] = round(max(
+            (float) $totalAccountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+            (float) $totals['revenue'],
         ), 2);
         $totals['estimated_total_roi'] = $totals['deducted_consumption'] > 0
             ? $totals['historical_revenue'] / $totals['deducted_consumption']

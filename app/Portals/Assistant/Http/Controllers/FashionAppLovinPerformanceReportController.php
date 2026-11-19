@@ -167,7 +167,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 (string) $screenshot->account_number,
                 (string) $screenshot->account_key,
             ));
-        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
+        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity, $timezone): array {
             $groups = $report->adSpendEntries->map(function ($entry) use ($report, $stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
@@ -189,11 +189,16 @@ class FashionAppLovinPerformanceReportController extends Controller
             })->filter(fn (array $entry): bool => $entry['store_id'] > 0)->groupBy('store_id');
 
             foreach ($groups as $entriesForStore) {
-                $domain = mb_strtolower(trim((string) $entriesForStore->first()['domain']));
-                $revenue = $report->performanceEntries
-                    ->filter(fn ($entry): bool => mb_strtolower(trim((string) $entry->domain)) === $domain)
-                    ->sum(fn ($entry): float => (float) $entry->revenue_usd);
-                if ($revenue <= 0 && $groups->count() === 1) $revenue = (float) $report->total_revenue_usd;
+                $storeId = (int) $entriesForStore->first()['store_id'];
+                $store = $stores->get($storeId);
+                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', $timezone)->utc();
+                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', $timezone)->utc();
+                $platform = $store && mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
+                $revenue = (float) FashionLogisticsOrder::query()
+                    ->where('assistant_domain_store_id', $storeId)
+                    ->where('source_platform', $platform)
+                    ->whereBetween('order_created_at', [$from, $to])
+                    ->sum('total_amount');
                 $accounts = $entriesForStore->groupBy('account_identity')->map(fn ($rows): float => (float) $rows->sum('spend'));
                 $totalSpend = (float) $accounts->sum();
                 foreach ($accounts as $accountIdentityKey => $spend) {
@@ -272,8 +277,9 @@ class FashionAppLovinPerformanceReportController extends Controller
 
                     return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
                 }), 2);
-                $historicalRevenue = round((float) $accountKeys->sum(
-                    fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+                $historicalRevenue = round(max(
+                    (float) $accountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+                    $revenue,
                 ), 2);
 
                 return [...$first, 'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
@@ -339,8 +345,9 @@ class FashionAppLovinPerformanceReportController extends Controller
 
             return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
         }), 2);
-        $totals['historical_revenue'] = round((float) $totalAccountKeys->sum(
-            fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)
+        $totals['historical_revenue'] = round(max(
+            (float) $totalAccountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+            (float) $totals['revenue'],
         ), 2);
         $totals['estimated_total_roi'] = $totals['deducted_consumption'] > 0
             ? $totals['historical_revenue'] / $totals['deducted_consumption']
