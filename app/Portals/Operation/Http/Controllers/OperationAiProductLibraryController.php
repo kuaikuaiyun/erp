@@ -61,6 +61,33 @@ class OperationAiProductLibraryController extends Controller
             'products' => $this->productQuery($filters)->paginate(15)->withQueryString(),
             'filters' => $filters,
             'categories' => $this->categoryOptions(),
+            'canPushProducts' => $this->listingPush->canPushFromLibrary($context['user']),
+        ]);
+    }
+
+    public function pushMembers(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->listingPush->canPushFromLibrary($context['user']), 403);
+
+        return response()->json([
+            'product' => ['id' => (int) $product->getKey(), 'code' => (string) $product->product_code, 'name' => (string) $product->name],
+            'members' => $this->listingPush->libraryPushMembers($product, $context['user'])->all(),
+        ]);
+    }
+
+    public function pushToMembers(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->listingPush->canPushFromLibrary($context['user']), 403);
+        $data = $request->validate(['member_ids' => ['required', 'array', 'min:1'], 'member_ids.*' => ['integer', 'min:1']]);
+        $result = $this->listingPush->pushFromLibrary($product, $context['user'], $data['member_ids']);
+
+        return response()->json([
+            'message' => '推送完成：成功 '.$result['pushed'].' 人'.($result['skipped'] ? '，已存在待办跳过 '.$result['skipped'].' 人' : '').'。',
+            ...$result,
         ]);
     }
 

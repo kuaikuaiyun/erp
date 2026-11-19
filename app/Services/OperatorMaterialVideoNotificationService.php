@@ -12,8 +12,10 @@ use Illuminate\Support\Facades\DB;
 
 class OperatorMaterialVideoNotificationService
 {
+    private const MATERIAL_REVIEWER_USERNAME = 'AI_ZKZ';
+
     /**
-     * Notify every active manager of the uploader's departments.
+     * Notify every active manager of the uploader's departments and the material reviewer.
      *
      * @return int Number of managers notified.
      */
@@ -31,20 +33,27 @@ class OperatorMaterialVideoNotificationService
             ->unique()
             ->values();
 
-        if ($departmentIds->isEmpty()) {
-            return 0;
-        }
+        $managerIds = $departmentIds->isEmpty()
+            ? collect()
+            : AdminUser::query()
+                ->where('status', AdminUser::STATUS_ACTIVE)
+                ->where('id', '!=', $uploader->getKey())
+                ->whereHas('departments', fn ($query) => $query
+                    ->whereIn($rolesTable.'.id', $departmentIds->all())
+                    ->where($pivotTable.'.position', Department::POSITION_MANAGER))
+                ->pluck('id')
+                ->map(static fn ($id): int => (int) $id)
+                ->unique()
+                ->values();
 
-        $managerIds = AdminUser::query()
+        $reviewerId = AdminUser::query()
             ->where('status', AdminUser::STATUS_ACTIVE)
-            ->where('id', '!=', $uploader->getKey())
-            ->whereHas('departments', fn ($query) => $query
-                ->whereIn($rolesTable.'.id', $departmentIds->all())
-                ->where($pivotTable.'.position', Department::POSITION_MANAGER))
-            ->pluck('id')
-            ->map(static fn ($id): int => (int) $id)
-            ->unique()
-            ->values();
+            ->where('username', self::MATERIAL_REVIEWER_USERNAME)
+            ->value('id');
+        if ($reviewerId) {
+            $managerIds->push((int) $reviewerId);
+        }
+        $managerIds = $managerIds->reject(fn (int $id): bool => $id === (int) $uploader->getKey())->unique()->values();
 
         if ($managerIds->isEmpty()) {
             return 0;

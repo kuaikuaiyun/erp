@@ -5,8 +5,23 @@
 @push('styles')
     <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
     <style>
-        .operation-ai-product-page .aikaipin-operation-column { width:290px; }
+        .operation-ai-product-page .aikaipin-operation-column { width:300px; text-align:center; }
         .operation-ai-product-page .aikaipin-operation-cell { text-align:center; }
+        .operation-ai-product-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; width:100%; max-width:286px; margin:0 auto; }
+        .operation-ai-product-actions .btn { display:inline-flex; min-width:0; height:30px; align-items:center; justify-content:center; gap:5px; padding:5px 8px; border-radius:4px; font-size:12px; line-height:18px; white-space:nowrap; }
+        .operation-ai-product-actions .btn .fa { width:13px; margin:0; text-align:center; }
+        @media (max-width:1199px) { .operation-ai-product-page .aikaipin-operation-column { width:270px; } .operation-ai-product-actions { gap:5px; } .operation-ai-product-actions .btn { padding-right:5px; padding-left:5px; } }
+        .operation-ai-push-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; padding:10px 12px; border:1px solid #dce8ef; border-radius:6px; background:#f6fafc; }
+        .operation-ai-push-members { max-height:420px; overflow:auto; border:1px solid #e1e8ee; border-radius:6px; }
+        .operation-ai-push-member { display:flex; align-items:center; gap:10px; margin:0; padding:11px 13px; border-bottom:1px solid #edf1f4; cursor:pointer; font-weight:400; }
+        .operation-ai-push-member:last-child { border-bottom:0; }
+        .operation-ai-push-member:hover { background:#f7fbfd; }
+        .operation-ai-push-member input { margin:0; }
+        .operation-ai-push-member-main { min-width:0; flex:1; }
+        .operation-ai-push-member-main strong,.operation-ai-push-member-main small { display:block; }
+        .operation-ai-push-member-main small { margin-top:2px; color:#8795a3; }
+        .operation-ai-push-member-status { flex:0 0 auto; }
+        .operation-ai-push-empty { padding:32px 15px; color:#8c99a5; text-align:center; }
         .operation-ai-detail-dialog { width:880px; max-width:94vw; }
         .operation-ai-detail-modal .modal-header { padding:18px 22px; border-bottom:1px solid #e8edf3; }
         .operation-ai-detail-modal .modal-title { color:#263445; font-size:18px; font-weight:700; }
@@ -251,6 +266,7 @@
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $beijingUpdatedAt?->toAtomString() }}" title="北京时间">{{ $beijingUpdatedAt?->format('Y-m-d H:i') }}</time></td>
                             <td class="aikaipin-operation-cell">
+                                <div class="operation-ai-product-actions">
                                 @if($product->referenceFilePayload())
                                     <a class="btn btn-primary btn-sm" href="{{ route('operation.ai-product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
                                         <i class="fa fa-external-link"></i> 参考页
@@ -274,6 +290,14 @@
                                     data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
                                     <i class="fa fa-cloud-upload"></i> 上架
                                 </button>
+                                @if($canPushProducts)
+                                    <button type="button" class="btn btn-danger btn-sm" data-operation-ai-push
+                                        data-members-url="{{ route('operation.ai-product-library.push-members', $product) }}"
+                                        data-push-url="{{ route('operation.ai-product-library.push-members.store', $product) }}">
+                                        <i class="fa fa-paper-plane"></i> 推送
+                                    </button>
+                                @endif
+                                </div>
                             </td>
                         </tr>
                     @empty
@@ -292,6 +316,28 @@
         @endif
     </div>
 </section>
+
+@if($canPushProducts)
+<div class="modal fade" id="operation-ai-product-push-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document"><div class="modal-content">
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-paper-plane"></i> 定点推送上架任务</h4></div>
+        <form data-operation-ai-push-form>
+            @csrf
+            <div class="modal-body">
+                <div class="alert alert-info" data-operation-ai-push-product>正在加载产品和组员信息...</div>
+                <div class="operation-ai-push-toolbar">
+                    <label style="margin:0"><input type="checkbox" data-operation-ai-push-unpublished> 只看未上架成员</label>
+                    <button type="button" class="btn btn-default btn-xs" data-operation-ai-push-select-all>选择当前可推送成员</button>
+                </div>
+                <div class="operation-ai-push-members" data-operation-ai-push-members><div class="operation-ai-push-empty"><i class="fa fa-spinner fa-spin"></i> 正在加载...</div></div>
+                <div class="alert alert-danger" data-operation-ai-push-error hidden style="margin-top:12px;margin-bottom:0"></div>
+                <div class="alert alert-success" data-operation-ai-push-success hidden style="margin-top:12px;margin-bottom:0"></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-danger"><i class="fa fa-paper-plane"></i> 确认推送</button></div>
+        </form>
+    </div></div>
+</div>
+@endif
 
 <div class="modal fade operation-ai-detail-modal" id="operation-ai-product-detail-modal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog operation-ai-detail-dialog" role="document">
@@ -357,6 +403,76 @@
 
 @push('scripts')
 <script>
+(function () {
+    var modal = document.getElementById('operation-ai-product-push-modal');
+    if (!modal) return;
+    var form = modal.querySelector('[data-operation-ai-push-form]');
+    var productBox = modal.querySelector('[data-operation-ai-push-product]');
+    var membersBox = modal.querySelector('[data-operation-ai-push-members]');
+    var unpublishedOnly = modal.querySelector('[data-operation-ai-push-unpublished]');
+    var selectAll = modal.querySelector('[data-operation-ai-push-select-all]');
+    var errorBox = modal.querySelector('[data-operation-ai-push-error]');
+    var successBox = modal.querySelector('[data-operation-ai-push-success]');
+    var submit = form.querySelector('[type="submit"]');
+    var pushUrl = '';
+    var members = [];
+
+    function showMessage(box, message) { box.textContent = message || ''; box.hidden = !message; }
+    function renderMembers() {
+        membersBox.innerHTML = '';
+        var visible = members.filter(function (member) { return !unpublishedOnly.checked || !member.is_published; });
+        if (!visible.length) {
+            membersBox.innerHTML = '<div class="operation-ai-push-empty"><i class="fa fa-user-times"></i> 没有符合条件的组员</div>';
+            return;
+        }
+        visible.forEach(function (member) {
+            var label = document.createElement('label');
+            label.className = 'operation-ai-push-member';
+            label.dataset.published = member.is_published ? '1' : '0';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox'; checkbox.name = 'member_ids[]'; checkbox.value = member.id;
+            checkbox.disabled = !!member.has_pending_task;
+            var main = document.createElement('span'); main.className = 'operation-ai-push-member-main';
+            var name = document.createElement('strong'); name.textContent = member.name;
+            var meta = document.createElement('small'); meta.textContent = member.department_name + ' · ' + member.username;
+            main.appendChild(name); main.appendChild(meta);
+            var status = document.createElement('span'); status.className = 'operation-ai-push-member-status label ' + (member.has_pending_task ? 'label-warning' : (member.is_published ? 'label-success' : 'label-default'));
+            status.textContent = member.has_pending_task ? '待上架任务已推送' : (member.is_published ? '已上架' : '未上架');
+            label.appendChild(checkbox); label.appendChild(main); label.appendChild(status); membersBox.appendChild(label);
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest('[data-operation-ai-push]');
+        if (!trigger) return;
+        pushUrl = trigger.dataset.pushUrl || '';
+        members = []; unpublishedOnly.checked = false;
+        productBox.textContent = '正在加载产品和组员信息...';
+        membersBox.innerHTML = '<div class="operation-ai-push-empty"><i class="fa fa-spinner fa-spin"></i> 正在加载...</div>';
+        showMessage(errorBox, ''); showMessage(successBox, ''); submit.disabled = false;
+        $(modal).modal('show');
+        fetch(trigger.dataset.membersUrl, {headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'}, credentials:'same-origin'})
+            .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || '加载组员失败'); return data; }); })
+            .then(function (data) { members = data.members || []; productBox.textContent = data.product.code + ' · ' + data.product.name; renderMembers(); })
+            .catch(function (error) { membersBox.innerHTML = ''; showMessage(errorBox, error.message); });
+    });
+    unpublishedOnly.addEventListener('change', renderMembers);
+    selectAll.addEventListener('click', function () {
+        membersBox.querySelectorAll('input[name="member_ids[]"]:not(:disabled)').forEach(function (checkbox) { checkbox.checked = true; });
+    });
+    form.addEventListener('submit', function (event) {
+        event.preventDefault(); showMessage(errorBox, ''); showMessage(successBox, '');
+        var ids = Array.from(membersBox.querySelectorAll('input[name="member_ids[]"]:checked')).map(function (input) { return Number(input.value); });
+        if (!ids.length) { showMessage(errorBox, '请至少选择一名可推送成员。'); return; }
+        submit.disabled = true;
+        fetch(pushUrl, {method:'POST', headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':form.querySelector('[name="_token"]').value,'X-Requested-With':'XMLHttpRequest'}, credentials:'same-origin', body:JSON.stringify({member_ids:ids})})
+            .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || Object.values(data.errors || {}).flat()[0] || '推送失败'); return data; }); })
+            .then(function (data) { showMessage(successBox, data.message); members.forEach(function (member) { if (ids.indexOf(member.id) !== -1) member.has_pending_task = true; }); renderMembers(); })
+            .catch(function (error) { showMessage(errorBox, error.message); })
+            .finally(function () { submit.disabled = false; });
+    });
+})();
+
 (function () {
     var modal = document.getElementById('operation-ai-product-detail-modal');
     if (!modal) return;
