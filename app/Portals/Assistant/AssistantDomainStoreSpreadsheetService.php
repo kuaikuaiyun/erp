@@ -89,7 +89,6 @@ class AssistantDomainStoreSpreadsheetService
     ];
 
     private const REQUIRED_IMPORT_FIELDS = [
-        'user_name',
         'owner_user_id',
         'operation_department_id',
         'team',
@@ -329,6 +328,9 @@ class AssistantDomainStoreSpreadsheetService
 
         foreach (self::IMPORT_FIELDS as $field) {
             $headers[$this->importHeaderLabel($field)] = $field;
+            if ($field === 'user_name') {
+                $headers[__('assistant.domain_stores.import.required_header', ['header' => $this->importHeaderLabel($field)])] = $field;
+            }
             if (in_array($field, ['team', 'project', 'user_name'], true)) {
                 $headers[AssistantDomainStore::fieldLabel($field)] = $field;
             }
