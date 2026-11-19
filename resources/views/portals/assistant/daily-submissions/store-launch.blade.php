@@ -2,7 +2,7 @@
 @include('portals.assistant.partials.legacy-operation-department-multi-upgrade')
 @section('page_title', '下店需求处理')
 @push('styles')
-<style>.launch-review{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09)}.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.status-pill{padding:3px 9px;border-radius:12px}.status-pill.pending{background:#fff2cc;color:#8a6500}.status-pill.processing{background:#dceeff;color:#1d6299}.status-pill.processed{background:#dff5e6;color:#16823c}.status-pill.rejected{background:#fde2e2;color:#b42318}.decision-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.mark-processing-form{margin-bottom:7px}</style>
+<style>.launch-review{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09)}.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.status-pill{padding:3px 9px;border-radius:12px}.status-pill.pending{background:#fff2cc;color:#8a6500}.status-pill.processing{background:#dceeff;color:#1d6299}.status-pill.processed{background:#dff5e6;color:#16823c}.status-pill.rejected{background:#fde2e2;color:#b42318}.decision-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px dashed #c9dce8;min-width:360px}.mark-processing-form{margin-bottom:7px}td textarea[name="response_text"]{width:100%;min-width:360px;min-height:108px;padding:10px 12px;border:1px solid #a9c8dd;border-radius:6px;background:#fff;color:#243849;line-height:1.6;resize:vertical;box-shadow:inset 0 1px 2px rgba(31,67,98,.05)}td textarea[name="response_text"]:focus{border-color:#3c8dbc;box-shadow:0 0 0 2px rgba(60,141,188,.16)}</style>
 @endpush
 @section('content')
 <section class="content-header"><h1>下店需求处理 <small>处理运营提交的建站需求并回复</small></h1></section><section class="content">
