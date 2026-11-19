@@ -3210,7 +3210,7 @@ class FinanceController extends Controller
         if ($request->boolean('download')) {
             $metricKeys = array_values(array_unique(array_merge(...array_map(fn ($group) => array_keys($group['ratios']), $groups))));
             $groups = \App\Portals\Finance\FinanceExportSelection::filter($request, $groups)->all();
-            $headers = $report === 'losses' ? ['项目', '通道', '成功订单数', '失败交易数', '结算金额（美元）', ...array_map(fn ($key) => ($metrics[$key] ?? $service::MONEY[$key]).'（%）', $metricKeys), '合计损耗占比（%）'] : ['项目', '通道', '成功订单数', '失败交易数', '结算金额（美元）'];
+            $headers = $report === 'losses' ? ['项目', '通道', '成功订单数', '失败交易数', '结算金额（美元）', ...array_map(fn ($key) => ($metrics[$key] ?? $service::MONEY[$key]).'（%）', $metricKeys), '合计损耗占比（%）'] : ['项目', '通道', '成功订单数', '失败交易数', '结算金额'];
             $export = array_map(fn ($group) => [$group['name'], FinanceSettlementService::REPORT_CHANNELS[$group['channel']], $group['success_count'], $group['failed_count'], $group['settlement']], $groups);
 
             return $this->workbooks->download($headers, $export, 'finance-'.$report.'-'.$month.'.xlsx');

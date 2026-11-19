@@ -153,7 +153,7 @@ class AppLovinPerformanceReportController extends Controller
                 (string) $screenshot->account_number,
                 (string) $screenshot->account_key,
             ));
-        $historicalRevenueByGroup = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores): array {
+        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores): array {
             $storeAds = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad): bool => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
                 ->map(function (array $ad) use ($report, $bindings, $stores): ?array {
@@ -168,17 +168,32 @@ class AppLovinPerformanceReportController extends Controller
                     if ($storeId < 1) $storeId = (int) ($bindings->get($accountKey) ?? 0);
                     $domain = trim((string) ($ad['store_domain'] ?? $stores->get($storeId)?->domain ?? ''));
 
-                    return $storeId > 0 && $domain !== '' ? ['store_id' => $storeId, 'domain' => $domain] : null;
-                })->filter()->unique('store_id');
+                    return $storeId > 0 && $domain !== '' ? [
+                        'store_id' => $storeId,
+                        'domain' => $domain,
+                        'account_identity' => AppLovinGiftConsumption::accountIdentity(
+                            (int) $report->operator_user_id,
+                            (string) ($ad['account_number'] ?? ''),
+                            $accountKey,
+                        ),
+                        'spend' => (float) ($ad['actual_spend'] ?? 0),
+                    ] : null;
+                })->filter()->groupBy('store_id');
 
-            foreach ($storeAds as $storeAd) {
-                $domain = mb_strtolower(trim((string) $storeAd['domain']));
+            foreach ($storeAds as $adsForStore) {
+                $domain = mb_strtolower(trim((string) $adsForStore->first()['domain']));
                 $revenue = collect($report->metric_rows ?: [])
                     ->filter(fn (array $metric): bool => mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domain
                         && mb_strtolower(trim((string) ($metric['media_source'] ?? ''))) === 'applovin')
                     ->sum(fn (array $metric): float => (float) ($metric['first_total_revenue'] ?? 0));
-                $groupKey = (int) $report->operator_user_id.'|'.(int) $storeAd['store_id'];
-                $totals[$groupKey] = ($totals[$groupKey] ?? 0.0) + $revenue;
+                $accounts = $adsForStore->groupBy('account_identity')->map(fn ($rows): float => (float) $rows->sum('spend'));
+                $totalSpend = (float) $accounts->sum();
+                foreach ($accounts as $accountIdentity => $spend) {
+                    $share = $totalSpend > 0
+                        ? (float) $spend / $totalSpend
+                        : 1 / max(1, $accounts->count());
+                    $totals[$accountIdentity] = ($totals[$accountIdentity] ?? 0.0) + ($revenue * $share);
+                }
             }
 
             return $totals;
@@ -263,7 +278,7 @@ class AppLovinPerformanceReportController extends Controller
 
         $rows = $dailyRows
             ->groupBy(fn (array $row) => implode('|', [$row['department_id'], $row['operator_user_id'], $row['store_id']]))
-            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByGroup): array {
+            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('first_orders');
                 $revenue = round((float) $group->sum('first_revenue'), 2);
@@ -281,7 +296,10 @@ class AppLovinPerformanceReportController extends Controller
 
                     return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
                 }), 2);
-                $historicalRevenue = round((float) ($historicalRevenueByGroup[(int) $first['operator_user_id'].'|'.(int) $first['store_id']] ?? 0), 2);
+                $historicalRevenue = round(max(
+                    (float) $accountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+                    $revenue,
+                ), 2);
 
                 return [
                     'department_id' => (int) $first['department_id'],
@@ -376,7 +394,10 @@ class AppLovinPerformanceReportController extends Controller
 
             return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
         }), 2);
-        $totals['historical_revenue'] = round((float) $rows->sum('historical_revenue'), 2);
+        $totals['historical_revenue'] = round(max(
+            (float) $totalAccountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
+            (float) $totals['revenue'],
+        ), 2);
         $totals['estimated_total_roi'] = $totals['deducted_consumption'] > 0
             ? $totals['historical_revenue'] / $totals['deducted_consumption']
             : null;

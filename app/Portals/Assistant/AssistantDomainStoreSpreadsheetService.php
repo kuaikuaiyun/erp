@@ -70,6 +70,8 @@ class AssistantDomainStoreSpreadsheetService
         'team',
         'project',
         'user_name',
+        'owner_user_id',
+        'operation_department_id',
         'erp',
         'credit_card',
         'wallet',
@@ -87,6 +89,9 @@ class AssistantDomainStoreSpreadsheetService
     ];
 
     private const REQUIRED_IMPORT_FIELDS = [
+        'user_name',
+        'owner_user_id',
+        'operation_department_id',
         'team',
         'project',
         'shop_name',
@@ -324,7 +329,7 @@ class AssistantDomainStoreSpreadsheetService
 
         foreach (self::IMPORT_FIELDS as $field) {
             $headers[$this->importHeaderLabel($field)] = $field;
-            if (in_array($field, ['team', 'project'], true)) {
+            if (in_array($field, ['team', 'project', 'user_name'], true)) {
                 $headers[AssistantDomainStore::fieldLabel($field)] = $field;
             }
         }
@@ -336,6 +341,8 @@ class AssistantDomainStoreSpreadsheetService
     {
         $label = match ($field) {
             'user_name' => __('assistant.domain_stores.fields.user_name'),
+            'owner_user_id' => '店铺归属人ID',
+            'operation_department_id' => '运营归属部门ID',
             default => AssistantDomainStore::fieldLabel($field),
         };
 

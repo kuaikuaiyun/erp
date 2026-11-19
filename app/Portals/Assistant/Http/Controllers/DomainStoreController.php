@@ -250,6 +250,17 @@ class DomainStoreController extends Controller
                     }
 
                     $data = $this->normalizeValidatedData($validator->validated());
+                    $ownerRequest = new Request($data);
+                    try {
+                        $ownerUserId = $this->ownerAssignmentForRequest($ownerRequest, $context['user']);
+                    } catch (ValidationException $exception) {
+                        $errors[] = ['row' => $row['row'], 'issues' => collect($exception->errors())->map(fn ($messages, $field) => [
+                            'field' => $field, 'value' => (string) ($data[$field] ?? ''),
+                            'reason' => implode(' ', $messages), 'hint' => null,
+                        ])->values()->all()];
+                        continue;
+                    }
+                    unset($data['owner_user_id'], $data['operation_department_id']);
 
                     if ($this->storeDomainPairExists($data)) {
                         $errors[] = [
@@ -261,10 +272,13 @@ class DomainStoreController extends Controller
                     }
 
                     $store = new AssistantDomainStore($data);
+                    $store->owner_user_id = $ownerUserId;
+                    $store->owner_operation_department_id = $ownerRequest->integer('operation_department_id');
                     $store->owner_department_id = $departmentAccess['owner_department_id'];
                     $this->setLastOperator($store, $context['user']);
                     $store->save();
                     $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
+                    $this->ownerTimeline->ensureBaseline($store, $context['user']);
                     $this->history->recordImported($store, $context['user']);
                     $webhookCandidates[] = ['row' => $row['row'], 'store' => $store];
                     $created++;
@@ -1323,14 +1337,17 @@ class DomainStoreController extends Controller
         ?AssistantDomainStore $existingStore = null,
     ): ?int {
         if (!$this->authorization->canAssignStoreOwners($user)) {
+            if (!$existingStore?->owner_user_id) {
+                throw ValidationException::withMessages(['owner_user_id' => __('assistant.domain_stores.javascript.owner_choose_required')]);
+            }
             return $existingStore?->owner_user_id === null
                 ? null
                 : (int) $existingStore->owner_user_id;
         }
 
         $validated = $request->validate([
-            'operation_department_id' => ['nullable', 'integer'],
-            'owner_user_id' => ['nullable', 'integer'],
+            'operation_department_id' => ['required', 'integer', 'min:1'],
+            'owner_user_id' => ['required', 'integer', 'min:1'],
         ]);
         $operationDepartmentId = isset($validated['operation_department_id'])
             ? (int) $validated['operation_department_id']
@@ -1575,6 +1592,9 @@ class DomainStoreController extends Controller
         }
 
         abort_unless($this->authorization->canAssignStoreOwners($context['user']), 403);
+        if ($clear) {
+            throw ValidationException::withMessages(['owner_user_id' => __('assistant.domain_stores.javascript.owner_choose_required')]);
+        }
         $rules = [
             'selected_ids' => ['required', 'array', 'min:1', 'max:100'],
             'selected_ids.*' => ['required', 'integer', 'distinct'],
@@ -2111,6 +2131,8 @@ class DomainStoreController extends Controller
         return array_replace($this->storeRules(), [
             'team' => ['required', 'array', 'min:1', 'max:20'],
             'project' => ['required', 'string', 'max:100'],
+            'owner_user_id' => ['required', 'integer', 'min:1'],
+            'operation_department_id' => ['required', 'integer', 'min:1'],
         ]);
     }
 
@@ -2124,10 +2146,10 @@ class DomainStoreController extends Controller
             'domain_check_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::domainCheckLabels()))],
             'email' => ['nullable', 'email', 'max:191'],
             'email_bound' => ['required', 'boolean'],
-            'team' => ['nullable', 'array', 'max:20'],
+            'team' => ['required', 'array', 'min:1', 'max:20'],
             'team.*' => ['required', 'string', 'max:100'],
-            'project' => ['nullable', 'string', 'max:100'],
-            'user_name' => ['nullable', 'string', 'max:100'],
+            'project' => ['required', 'string', 'max:100'],
+            'user_name' => ['required', 'string', 'max:100'],
             'erp' => ['nullable', 'array', 'max:20'],
             'erp.*' => ['required', 'string', 'max:100'],
             'credit_card' => ['nullable', 'string', 'max:100'],

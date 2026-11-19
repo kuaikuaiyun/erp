@@ -33,6 +33,7 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
             $data = array_replace([
                 'shop_name' => 'Test Store', 'domain' => 'test.example', 'domain_check_status' => 'not_checked',
                 'email_bound' => '否', 'shop_status' => '在用', 'team' => 'Team A', 'project' => 'Project A',
+                'user_name' => 'User A', 'owner_user_id' => 1, 'operation_department_id' => 1,
             ], $record);
             $rows[] = array_map(fn ($field) => $data[$field] ?? '', $fields);
         }
@@ -93,11 +94,25 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         self::assertCount(6, $rows);
     }
 
-    public function test_normal_save_rules_do_not_gain_backend_required_constraints(): void
+    public function test_normal_save_and_import_both_require_team_project_and_user(): void
     {
         $row = $this->readRows([['team' => '', 'project' => '']])[0]['data'];
-        self::assertFalse(Validator::make($row, $this->rules('storeRules'))->fails());
+        self::assertTrue(Validator::make($row, $this->rules('storeRules'))->fails());
         self::assertTrue(Validator::make($row, $this->rules('importRules'))->fails());
+    }
+
+    public function test_import_requires_owner_and_department_and_all_four_fields(): void
+    {
+        foreach (['team', 'project', 'user_name', 'owner_user_id', 'operation_department_id'] as $field) {
+            $row = $this->readRows([[$field => '']])[0]['data'];
+            $validator = Validator::make($row, $this->rules('importRules'));
+            self::assertTrue($validator->fails(), $field);
+            self::assertArrayHasKey($field, $validator->failed());
+        }
+        $method = new \ReflectionMethod(DomainStoreController::class, 'batchRulesForFields');
+        $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
+        self::assertTrue(Validator::make(['user_name' => ' '], $method->invoke($controller, ['user_name']))->fails());
+        self::assertArrayNotHasKey('team', $method->invoke($controller, ['remark']));
     }
 
     public function test_forms_compile_and_batch_requirements_only_apply_to_selected_fields(): void

@@ -651,7 +651,6 @@
                         <div class="modal-body">
                             <div class="btn-group assistant-batch-action-switch" role="group" aria-label="{{ $t('selection.batch_manage_owner') }}">
                                 <button type="button" class="btn btn-success is-selected" data-owner-mode-choice="assign" aria-pressed="true"><i class="fa fa-user-plus"></i> {{ $t('selection.assign_owner_action') }}</button>
-                                <button type="button" class="btn btn-default" data-owner-mode-choice="clear" aria-pressed="false"><i class="fa fa-user-times"></i> {{ $t('selection.clear_owner_action') }}</button>
                             </div>
                             <p class="text-muted" data-owner-selection-summary></p>
                             <div data-owner-assign-fields>
@@ -744,7 +743,7 @@
         window.ErpAssistantDomainStoreBatchUpdateFieldGroups = @json($batchUpdateFieldGroups);
         window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261116-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261118-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js?v=20261102-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261020-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261021-2"></script>

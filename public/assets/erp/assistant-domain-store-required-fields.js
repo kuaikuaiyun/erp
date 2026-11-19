@@ -20,7 +20,7 @@
         form.querySelectorAll('[data-store-required-field]').forEach(function (group) {
             clearError(group);
             var field = group.getAttribute('data-store-required-field');
-            var inputs = Array.prototype.filter.call(group.querySelectorAll('input'), function (input) { return !input.disabled; });
+            var inputs = Array.prototype.filter.call(group.querySelectorAll('input, select'), function (input) { return !input.disabled; });
             if (!inputs.length) return;
             var valid = inputs.some(function (input) {
                 var value = String(input.value || '');
