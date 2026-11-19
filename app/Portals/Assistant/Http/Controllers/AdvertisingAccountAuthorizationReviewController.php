@@ -29,7 +29,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         $filters = $request->validate([
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
-            'status' => ['nullable', 'in:pending,processed,rejected'],
+            'status' => ['nullable', 'in:pending,processing,processed,rejected'],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
         $query = DailyAdvertisingAccountAuthorization::query();
@@ -48,8 +48,20 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         return view('portals.assistant.daily-submissions.advertising-account-authorization', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'filters' => $filters, 'departments' => $departments,
-            'submissions' => $query->orderByRaw("CASE WHEN status='pending' THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
+            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
         ]);
+    }
+
+    public function markProcessing(Request $request, DailyAdvertisingAccountAuthorization $submission): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
+        abort_unless($submission->status === DailyAdvertisingAccountAuthorization::STATUS_PENDING, 422, '该广告账号授权需求已开始处理或已完成，请刷新页面查看最新状态。');
+        $submission->update(['status' => DailyAdvertisingAccountAuthorization::STATUS_PROCESSING]);
+
+        return back()->with('success', '广告账号授权需求已标记为处理中。');
     }
 
     public function process(Request $request, DailyAdvertisingAccountAuthorization $submission): RedirectResponse
@@ -58,7 +70,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
-        abort_unless($submission->status === DailyAdvertisingAccountAuthorization::STATUS_PENDING, 422, '该广告账号授权需求已经处理，请刷新页面查看最新状态。');
+        abort_unless(in_array($submission->status, [DailyAdvertisingAccountAuthorization::STATUS_PENDING, DailyAdvertisingAccountAuthorization::STATUS_PROCESSING], true), 422, '该广告账号授权需求已经处理，请刷新页面查看最新状态。');
         $data = $request->validate([
             'decision' => ['required', 'in:processed,rejected'],
             'response_text' => ['required', 'string', 'max:5000'],

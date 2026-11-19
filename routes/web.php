@@ -292,14 +292,20 @@ Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningRevie
     ->name('assistant.daily-submissions.account-openings.index');
 Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
+Route::patch('/assistant/daily-submissions/account-openings/{submission}/processing', [AccountOpeningReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.processing');
 Route::get('/assistant/daily-submissions/store-launches', [StoreLaunchReviewController::class, 'index'])
     ->name('assistant.daily-submissions.store-launches.index');
 Route::patch('/assistant/daily-submissions/store-launches/{submission}/process', [StoreLaunchReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.store-launches.process');
+Route::patch('/assistant/daily-submissions/store-launches/{submission}/processing', [StoreLaunchReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.store-launches.processing');
 Route::get('/assistant/daily-submissions/advertising-account-authorizations', [AdvertisingAccountAuthorizationReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-account-authorizations.index');
 Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{submission}/process', [AdvertisingAccountAuthorizationReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.process');
+Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{submission}/processing', [AdvertisingAccountAuthorizationReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.processing');
 Route::get('/assistant/daily-submissions/account-store-transfers', [AccountStoreTransferReviewController::class, 'index'])
     ->name('assistant.daily-submissions.account-store-transfers.index');
 Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/images/{image}', [AccountStoreTransferReviewController::class, 'image'])
@@ -308,6 +314,8 @@ Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/im
     ->whereNumber('submission')->whereNumber('image')->name('assistant.daily-submissions.account-store-transfers.images.download');
 Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/process', [AccountStoreTransferReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.process');
+Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/processing', [AccountStoreTransferReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.processing');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
 Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLovinSpendController::class, 'pendingCount'])
