@@ -1406,29 +1406,21 @@ class ProductRequestController extends Controller
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
             // 面板左列可临时修正运营 SKU，仅用于本次勾选与链接级 SKU 处理；
             // 需求记录保留运营原始提交的 skus，采购确认值写入 procurement_skus，运营端据此提示 SKU 有变动
-            $operationSkus = $this->splitSkus($this->normalizeSkus((string) ($data['skus'] ?? '')));
-            // 本次面板展示过的 SKU（右栏系统已录入 + 左栏运营填写），用于识别已取消勾选项
-            $displayedSkus = array_values(array_unique(array_merge(
-                $this->splitSkus((string) ($data['link_skus'] ?? '')),
-                $operationSkus,
-            )));
-            // 面板左列被改写/删除的旧运营 SKU，需要从链接记录中移除，不能作为历史数据继续累计
-            $removedOperationSkus = array_values(array_diff($this->splitSkus((string) $locked->skus), $operationSkus));
-            $obsoleteSkus = array_values(array_unique(array_merge($displayedSkus, $removedOperationSkus)));
+            // 右侧系统 SKU 是同一 1688 链接的历史主数据，当前检验只能追加，不能删除或覆盖。
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
             unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
-            // 链接级 SKU 以本次勾选结果为最终集合：展示过但取消勾选的、以及被改写的旧运营 SKU 不再累计保留；
-            // 未查重（右栏未加载）时，未被展示过的历史 SKU 予以保留，避免误删链接已有数据
+            // 链接级 SKU 始终保留系统历史集合，并追加本次勾选的运营 SKU。
             $linkSkus = array_values(array_unique(array_merge(
+                $this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())),
                 $checkedSkus,
-                array_values(array_diff($this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())), $obsoleteSkus)),
             )));
+            $linkSkuValueMap = array_replace($skuValueMap, $this->linkSkuValues($linkHash));
             $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
                 $linkSkuPayload = [
                     'supplier_url' => $normalizedUrl,
                     'skus' => implode(',', $linkSkus),
-                    'sku_values' => $skuValueMap === [] ? null : $skuValueMap,
+                    'sku_values' => $linkSkuValueMap === [] ? null : $linkSkuValueMap,
                     'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? $locked->pcl_product_no)) ?: null,
                     'product_name' => trim((string) ($data['standard_chinese_name'] ?? $locked->standard_chinese_name)) ?: null,
                     'source' => 'system',

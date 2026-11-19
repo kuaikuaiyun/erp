@@ -166,12 +166,8 @@ class StoreController extends Controller
 
     private function accessibleStores(AdminUser $user): Builder
     {
-        $query = AssistantDomainStore::query();
-        if ($this->project['code'] === 'fuzhuang') {
-            $query->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')");
-        } else {
-            $query->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
-        }
+        $query = AssistantDomainStore::query()
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
         if ($user->isAdministrator()) {
             return $query;
         }
@@ -187,12 +183,8 @@ class StoreController extends Controller
 
     private function storeOperators()
     {
-        $storesQuery = AssistantDomainStore::query();
-        if ($this->project['code'] === 'fuzhuang') {
-            $storesQuery->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')");
-        } else {
-            $storesQuery->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
-        }
+        $storesQuery = AssistantDomainStore::query()
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
         $stores = $storesQuery->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->unique();
         $names = $stores->pluck('user_name')->filter()->unique();

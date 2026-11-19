@@ -16,7 +16,7 @@ final class OperationProjectCatalog
                 'route' => 'fashion',
                 'path' => 'fashion',
                 'departments' => ['服装运营部门', '单包服装运营部门', '单包服装运营系统'],
-                'store_projects' => [],
+                'store_projects' => ['单包服装项目'],
             ],
             'baokuan-fashion' => [
                 'name' => '爆款服装运营系统',

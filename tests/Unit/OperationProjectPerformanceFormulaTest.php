@@ -7,6 +7,13 @@ use PHPUnit\Framework\TestCase;
 
 class OperationProjectPerformanceFormulaTest extends TestCase
 {
+    public function test_danbao_fashion_uses_its_domain_store_project(): void
+    {
+        self::assertSame(['单包服装项目'], OperationProjectCatalog::storeProjectNames(
+            OperationProjectCatalog::get('fuzhuang')
+        ));
+    }
+
     public function test_the_three_project_formulas_match_the_department_workbook(): void
     {
         self::assertSame([
