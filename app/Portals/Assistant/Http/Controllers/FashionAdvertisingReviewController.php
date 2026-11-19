@@ -73,6 +73,7 @@ class FashionAdvertisingReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
+        $project = $this->reviewProject($request);
 
         $status = in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '';
         $from = $this->date($request->input('from'));
@@ -86,6 +87,7 @@ class FashionAdvertisingReviewController extends Controller
         $accountNumber = trim((string) $request->input('account_number'));
 
         $reports = FashionAdvertisingReport::withTrashed()->with(['adSpendEntries', 'submitter.departments'])
+            ->where('project_code', $project['code'])
             ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -109,6 +111,7 @@ class FashionAdvertisingReviewController extends Controller
             return $context;
         }
         $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
+        $project = $this->reviewProject($request);
 
         $departmentIds = collect($request->input('department_ids', []))
             ->push($request->input('department_id'))
@@ -126,6 +129,7 @@ class FashionAdvertisingReviewController extends Controller
         ];
 
         $reportSubmitterIds = FashionAdvertisingReport::withTrashed()
+            ->where('project_code', $project['code'])
             ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -144,6 +148,7 @@ class FashionAdvertisingReviewController extends Controller
             ->get(['id', 'name']);
 
         $reports = FashionAdvertisingReport::withTrashed()->with(['performanceEntries', 'adSpendEntries', 'submitter.departments'])
+            ->where('project_code', $project['code'])
             ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -161,6 +166,19 @@ class FashionAdvertisingReviewController extends Controller
 
         $performanceCache = [];
         $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache): FashionAdvertisingReport {
+            if ($report->project_code !== 'fuzhuang') {
+                $spend = (float) $report->total_ad_spend_usd;
+                $report->setAttribute('fashion_order_count', (int) $report->total_order_count);
+                $report->setAttribute('fashion_revenue', (float) $report->total_revenue_usd);
+                $report->setAttribute('fashion_roi', $spend > 0 ? (float) $report->total_revenue_usd / $spend : null);
+                $report->setAttribute('fashion_platform_rows', $report->performanceEntries->map(fn ($entry): array => [
+                    'platform' => $entry->site_builder ?: '建站系统',
+                    'orders' => (int) $entry->order_count,
+                    'revenue' => round((float) $entry->revenue_usd, 2),
+                ])->values());
+
+                return $report;
+            }
             $cacheKey = (int) $report->submitter_id.'|'.$report->report_date->format('Y-m-d');
             if (! isset($performanceCache[$cacheKey])) {
                 $submitterNames = collect([$report->submitter?->name, $report->submitter?->username])
@@ -208,7 +226,9 @@ class FashionAdvertisingReviewController extends Controller
             'filters' => $filters,
             'departments' => $departments,
             'submitters' => $submitters,
+            'reviewProject' => $project,
             'pendingCount' => FashionAdvertisingReport::query()
+                ->where('project_code', $project['code'])
                 ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                     ? $query->whereRaw('1 = 0')
                     : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -236,7 +256,7 @@ class FashionAdvertisingReviewController extends Controller
             'review_reason' => $data['decision'] === 'rejected' ? trim((string) $data['review_reason']) : null,
         ])->save();
 
-        return redirect()->route('assistant.fashion-advertising-reviews.index')
+        return redirect()->route('assistant.fashion-advertising-reviews.index', ['project_code' => $report->project_code])
             ->with('success', $data['decision'] === 'approved' ? '报表已审核通过。' : '报表已审核不通过。');
     }
 
@@ -358,12 +378,14 @@ class FashionAdvertisingReviewController extends Controller
         $data = $request->validate([
             'report_ids' => ['required', 'array', 'min:1'],
             'report_ids.*' => ['integer'],
+            'project_code' => ['required', Rule::in(array_keys(OperationProjectCatalog::all()))],
             'decision' => ['required', Rule::in(['approved', 'rejected'])],
             'review_reason' => ['nullable', 'string', 'max:1000', Rule::requiredIf($request->input('decision') === 'rejected')],
         ], ['report_ids.required' => '请至少选择一条待审核报表。', 'review_reason.required' => '批量审核不通过时请填写原因。']);
 
         $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
         $reports = FashionAdvertisingReport::query()->whereIn('id', $data['report_ids'])
+            ->where('project_code', $data['project_code'])
             ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -429,6 +451,14 @@ class FashionAdvertisingReviewController extends Controller
     private function date(mixed $value): string
     {
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : '';
+    }
+
+    /** @return array{code:string,name:string,route:string,path:string,departments:list<string>,store_projects:list<string>} */
+    private function reviewProject(Request $request): array
+    {
+        $code = trim((string) $request->input('project_code', 'fuzhuang'));
+
+        return OperationProjectCatalog::get(array_key_exists($code, OperationProjectCatalog::all()) ? $code : 'fuzhuang');
     }
 
     private function importableOperators(AdminUser $user)
