@@ -92,10 +92,10 @@ class DomainStoreController extends Controller
                 ? $this->assignableOperationDepartments($context['user'])
                 : collect(),
             'operationDepartments' => $canConfigureStoreOwnership
-                ? $this->storeOwners->storeOwnershipOperationDepartments()
+                ? $this->storeOwners->scopeConfigurationDepartments()
                 : collect(),
             'selectableOperationDepartmentIds' => $canConfigureStoreOwnership
-                ? $this->storeOwners->storeOwnershipSelectableOperationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id)->all()
+                ? $this->storeOwners->selectableScopeConfigurationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id)->all()
                 : [],
             'operationScopeMap' => $operationScopeMap,
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
@@ -805,7 +805,7 @@ class DomainStoreController extends Controller
         $assistantDepartmentIds = $this->authorization->assistantChildDepartments()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
-        $operationDepartmentIds = $this->storeOwners->storeOwnershipSelectableOperationDepartments()
+        $operationDepartmentIds = $this->storeOwners->selectableScopeConfigurationDepartments()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
         $scopeMap = [];
@@ -1578,7 +1578,7 @@ class DomainStoreController extends Controller
             ->unique()
             ->values();
 
-        return $this->storeOwners->storeOwnershipSelectableOperationDepartments()
+        return $this->storeOwners->selectableScopeConfigurationDepartments()
             ->whereIn('id', $operationDepartmentIds->all())
             ->values();
     }

@@ -61,6 +61,42 @@ class AssistantStoreOwnerService
     }
 
     /**
+     * Configuration candidates are all business roots and their direct children.
+     * Keep the legacy Operations trees above for finance and reporting consumers.
+     *
+     * @return Collection<int, Department>
+     */
+    public function scopeConfigurationDepartments(): Collection
+    {
+        $departments = Department::business()->orderBy('sort')->orderBy('name')->get();
+        $children = $departments->groupBy('parent_id');
+        $result = collect();
+
+        foreach ($departments->whereNull('parent_id') as $root) {
+            $root->setAttribute('tree_depth', 0);
+            $result->push($root);
+            foreach ($children->get($root->getKey(), collect()) as $child) {
+                $child->setAttribute('tree_depth', 1);
+                $result->push($child);
+            }
+        }
+
+        return $result;
+    }
+
+    /** @return Collection<int, Department> */
+    public function selectableScopeConfigurationDepartments(): Collection
+    {
+        $departments = $this->scopeConfigurationDepartments();
+        $parentIds = $departments->whereNotNull('parent_id')->pluck('parent_id');
+
+        return $departments
+            ->reject(fn (Department $department): bool => $department->parent_id === null
+                && $parentIds->contains((int) $department->getKey()))
+            ->values();
+    }
+
+    /**
      * @param list<string> $rootSlugs
      * @return Collection<int, Department>
      */

@@ -58,7 +58,8 @@ class LogisticsOrderSpreadsheetService
             ['总运费（USD）', 'total_shipping_usd', self::TYPE_MONEY, 16],
             ['PayPal实际退款（逐笔）', 'paypal_actual_refunds', self::TYPE_MULTILINE, 48],
             ['信用卡实际退款（逐笔）', 'credit_card_actual_refunds', self::TYPE_MULTILINE, 52],
-            ['收款账号', 'collection_account', self::TYPE_TEXT, 30],
+            [__('logistics.orders.export.refund_total'), 'actual_refund_total_usd', self::TYPE_MONEY, 20],
+            [__('logistics.orders.export.collection_account'), 'collection_account', self::TYPE_TEXT, 30],
             ['收款账号邮箱', 'collection_account_email', self::TYPE_TEXT, 28],
             ['交易号', 'transaction_id', self::TYPE_TEXT, 26],
             ['账单号', 'bill_number', self::TYPE_TEXT, 24],
@@ -77,12 +78,13 @@ class LogisticsOrderSpreadsheetService
     public function requiredOrderColumns(): array
     {
         return array_values(array_unique(array_merge(
-            ['id'],
+            ['id', 'shopify_payload'],
             array_filter(
                 array_column(self::columns(), 1),
                 static fn (string $field): bool => !in_array($field, [
                     'paypal_actual_refunds',
                     'credit_card_actual_refunds',
+                    'actual_refund_total_usd',
                 ], true),
             ),
         )));
@@ -260,6 +262,8 @@ class LogisticsOrderSpreadsheetService
         $creditCardRefunds = $order->relationLoaded('creditCardRefunds') ? $order->creditCardRefunds : collect();
 
         return match ($field) {
+            'collection_account' => $this->collectionAccount($order),
+            'actual_refund_total_usd' => round((float) $paypalRefunds->sum('refund_amount_usd') + (float) $creditCardRefunds->sum('refund_amount_usd'), 2),
             'paypal_actual_refunds' => $paypalRefunds->map(static function ($refund): string {
                 return implode(' | ', array_filter([
                     $refund->refund_transaction_id,
@@ -279,5 +283,24 @@ class LogisticsOrderSpreadsheetService
             })->implode("\n"),
             default => $order->getAttribute($field),
         };
+    }
+
+    private function collectionAccount(LogisticsOrder $order): string
+    {
+        $account = trim((string) $order->collection_account);
+        if ($account !== '') return $account;
+
+        $payload = $order->shopify_payload;
+        if (is_string($payload)) $payload = json_decode($payload, true);
+        if (is_array($payload)) {
+            foreach (['customAttributes' => 'key', 'note_attributes' => 'name'] as $field => $key) {
+                foreach (is_array($payload[$field] ?? null) ? $payload[$field] : [] as $attribute) {
+                    if (!is_array($attribute) || ($attribute[$key] ?? null) !== 'yx_payments_alias') continue;
+                    $value = $attribute['value'] ?? null;
+                    if (is_scalar($value) && trim((string) $value) !== '') return trim((string) $value);
+                }
+            }
+        }
+        return __('logistics.orders.export.unavailable');
     }
 }

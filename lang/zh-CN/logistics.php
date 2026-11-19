@@ -97,6 +97,11 @@ return [
         'menu' => 'Shopify 店铺列表',
     ],
     'orders' => [
+        'export' => [
+            'collection_account' => '收款账号',
+            'refund_total' => '退款合计（USD）',
+            'unavailable' => '—',
+        ],
         'tongtu_legacy_matching_disabled' => '通途订单匹配已停用，系统改为按 Shopify SKU 自动匹配通途商品资料。',
         'menu' => '物流订单',
         'identifier_information' => '订单信息',

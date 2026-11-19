@@ -33,11 +33,11 @@
     </div>
     <div class="payment-renewal-detail-scroll" tabindex="0" aria-label="{{ $dt('title') }}">
         <table class="payment-renewal-detail-table">
-            <thead><tr>@foreach(['erp_id','order','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount','delivery_state'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
+            <thead><tr>@foreach(['erp_id','order','tongtu_order_number','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount','delivery_state'] as $column)<th>{{ $dt($column) }}</th>@endforeach</tr></thead>
             <tbody>
             @forelse($detail['rows'] as $row)
                 <tr data-renewal-detail-order="{{ $row['erp_order_id'] }}">
-                    <td>{{ $row['erp_order_id'] }}</td><td>{{ $row['initial_order'] }}</td>
+                    <td>{{ $row['erp_order_id'] }}</td><td>{{ $row['initial_order'] }}</td><td class="payment-renewal-detail-reference">{{ $row['tongtu_order_number'] ?: '—' }}</td>
                     <td class="payment-renewal-detail-reference">{{ $row['transaction_id'] ?: '—' }}</td>
                     @foreach(['primary_bill_numbers','upsell_bill_numbers','transaction_ids','collection_accounts'] as $field)
                     <td class="payment-renewal-detail-reference">@forelse($row[$field] as $identifier)<span class="payment-renewal-detail-identifier">{{ $identifier }}</span>@empty<span>—</span>@endforelse</td>
@@ -56,7 +56,7 @@
                     </td><td class="payment-renewal-detail-number">{{ $money($row['raw_refund_amount']) }}</td><td>{{ $dt('delivery_'.$row['delivery_status']) }}</td>
                 </tr>
             @empty
-                <tr><td colspan="16" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
+                <tr><td colspan="17" class="payment-renewal-detail-empty">{{ $dt('empty') }}</td></tr>
             @endforelse
             </tbody>
         </table>

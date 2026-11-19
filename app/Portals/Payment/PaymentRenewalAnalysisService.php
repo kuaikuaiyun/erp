@@ -18,7 +18,7 @@ class PaymentRenewalAnalysisService
     // Avoid loading large Shopify/Tongtu payloads when reconstructing historical stages.
     private const ORDER_FIELDS = [
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
-        'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
+        'is_add_on', 'operator_name', 'store_name', 'tongtu_order_number', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
         'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status',
     ];
@@ -87,7 +87,7 @@ class PaymentRenewalAnalysisService
         $module=$this->moduleFilters($filters,'initial');
         $cacheFilters=$detail;
         unset($cacheFilters['detail_page'],$cacheFilters['detail_per_page']);
-        $key='payment:renewal-detail-summary:v23:'.sha1(json_encode([$module,$cacheFilters]));
+        $key='payment:renewal-detail-summary:v24:'.sha1(json_encode([$module,$cacheFilters]));
         $stats=Cache::remember($key,now()->addMinutes(5),function () use ($module,$detail): array {
             $scope=$summary=$this->emptyRiskTotal();
             $stores=[];
@@ -120,7 +120,7 @@ class PaymentRenewalAnalysisService
         if (!$filtered) return true;
         $keyword=trim((string)($detail['detail_keyword'] ?? ''));
         if ($keyword!=='' && !str_contains(mb_strtolower(implode(' ',[
-            $row['erp_order_id'],$row['initial_order'],$row['transaction_id'],implode(' ',$row['transaction_ids']),
+            $row['erp_order_id'],$row['initial_order'],$row['tongtu_order_number'],$row['transaction_id'],implode(' ',$row['transaction_ids']),
             $row['store_name'],implode(' ',$row['bill_numbers']),$row['buyer_email'],$row['collection_account'],$row['collection_account_email'],
         ])),mb_strtolower($keyword))) return false;
         foreach (['detail_store'=>'store_name','detail_method'=>'payment_method','detail_type'=>'purchase_type'] as $filter=>$field) {
@@ -525,7 +525,7 @@ class PaymentRenewalAnalysisService
             'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),
             'renewal_order' => (string) ($order->shopify_order_number ?: $order->id),
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
-            'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
+            'tongtu_order_number' => (string) $order->tongtu_order_number, 'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
             'bill_number' => (string) $order->bill_number, 'buyer_email' => (string) $order->buyer_email,
             'transaction_ids' => $this->uniqueIdentifiers($identifiers['transactions'] ?? []),
             'primary_bill_numbers' => $primary, 'upsell_bill_numbers' => $upsell,

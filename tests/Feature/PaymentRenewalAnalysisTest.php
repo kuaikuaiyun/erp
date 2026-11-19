@@ -243,7 +243,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         $filters=$this->filters();
         $service=app(PaymentRenewalAnalysisService::class);
         $before=$service->dashboard($filters);
-        DB::table('logistics_orders')->where('id',5)->update(['bill_number'=>'00001234567890123456789','transaction_id'=>'ERP-YX-5','collection_account'=>'收款账户A','collection_account_email'=>'collect@example.com']);
+        DB::table('logistics_orders')->where('id',5)->update(['tongtu_order_number'=>'00009876543210987654321','bill_number'=>'00001234567890123456789','transaction_id'=>'ERP-YX-5','collection_account'=>'收款账户A','collection_account_email'=>'collect@example.com']);
         foreach ([
             ['primary','00001234567890123456789','NOT-A-TRANSACTION'],
             ['upsell','ADDON-BILL-5','NOT-A-TRANSACTION'],
@@ -276,7 +276,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame('ERP-YX-5',$row['transaction_id']);
         self::assertSame(['收款账户A','collect@example.com'],$row['collection_accounts']);
         self::assertSame('00001234567890123456789',$row['bill_number']);
-        foreach (['EXTRA-TRANSACTION-5','ADDON-BILL-5','ERP-YX-5','collect@example.com','收款账户A'] as $search) {
+        foreach (['00009876543210987654321','EXTRA-TRANSACTION-5','ADDON-BILL-5','ERP-YX-5','collect@example.com','收款账户A'] as $search) {
             $filtered=$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>$search]));
             self::assertSame([5],array_column($filtered['rows'],'erp_order_id'));
         }
@@ -301,8 +301,11 @@ class PaymentRenewalAnalysisTest extends TestCase
                     if((string) $this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='5') {$target=$r;break;}
                 }
                 self::assertNotNull($target);
-                $txn=$kind==='main'?'J':'F';$bill=$kind==='main'?'H':'D';
-                $upsell=$kind==='main'?'I':'E';$account=$kind==='main'?'K':'G';
+                $txn=$kind==='main'?'K':'G';$bill=$kind==='main'?'I':'E';
+                $upsell=$kind==='main'?'J':'F';$account=$kind==='main'?'L':'H';
+                $tongtu=$kind==='main'?'F':'C';
+                self::assertSame('00009876543210987654321',$this->exportedValue($sheet,$tongtu.$target));
+                self::assertContains($sheet->getCell($tongtu.$target)->getDataType(),['s','inlineStr']);
                 self::assertSame("TX-5\nEXTRA-TRANSACTION-5", $this->exportedValue($sheet,$txn.$target));
                 self::assertSame('00001234567890123456789', $this->exportedValue($sheet,$bill.$target));
                 self::assertSame("ADDON-BILL-5\n<script>alert(1)</script>", $this->exportedValue($sheet,$upsell.$target));
@@ -378,7 +381,7 @@ class PaymentRenewalAnalysisTest extends TestCase
                 $sheet=$book->getSheet($kind==='main'?3:0);$found=false;
                 for($r=2;$r<=$sheet->getHighestRow();$r++){
                     if($this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='3001'){
-                        self::assertSame("1-尚雲科技有限公司pp\nmerchant@example.com",$this->exportedValue($sheet,($kind==='main'?'K':'G').$r));$found=true;break;
+                        self::assertSame("1-尚雲科技有限公司pp\nmerchant@example.com",$this->exportedValue($sheet,($kind==='main'?'L':'H').$r));$found=true;break;
                     }
                 }
                 self::assertTrue($found);
@@ -660,12 +663,12 @@ PHP;
                     self::assertSame('4',$this->exportedValue($sheet,'K6'));
                     self::assertSame('100%',$this->exportedValue($sheet,'P6'));
                     self::assertSame('25%',$this->exportedValue($sheet,'Q6'));
-                    self::assertSame('签收状态',$this->exportedValue($book->getSheet(3),'W1'));
+                    self::assertSame('签收状态',$this->exportedValue($book->getSheet(3),'X1'));
                 }else{
                     $sheet=$book->getSheet(0);
                     self::assertSame(3,$sheet->getHighestRow());
-                    self::assertSame('签收状态',$this->exportedValue($sheet,'P1'));
-                    self::assertSame('已签收',$this->exportedValue($sheet,'P2'));
+                    self::assertSame('签收状态',$this->exportedValue($sheet,'Q1'));
+                    self::assertSame('已签收',$this->exportedValue($sheet,'Q2'));
                 }
                 $book->disconnectWorksheets();
             }finally{unlink($path);}
@@ -960,15 +963,15 @@ PHP;
                 self::assertSame(2,$book->getSheetCount());
                 $sheet=$book->getSheet(0);
                 self::assertSame(count($expected['rows'])+1,$sheet->getHighestRow());
-                self::assertSame('主账单号', $this->exportedValue($sheet,'D1'));
-                self::assertSame('客户邮箱', $this->exportedValue($sheet,'H1'));
+                self::assertSame('主账单号', $this->exportedValue($sheet,'E1'));
+                self::assertSame('客户邮箱', $this->exportedValue($sheet,'I1'));
                 if ($index === 0) {
                     self::assertSame(48,$sheet->getHighestRow());
-                    self::assertSame($longBill, $this->exportedValue($sheet,'D2'));
-                    self::assertContains($sheet->getCell('D2')->getDataType(),['s','inlineStr']);
-                    self::assertSame('=1+1', $this->exportedValue($sheet,'D3'));
-                    self::assertContains($sheet->getCell('D3')->getDataType(),['s','inlineStr']);
-                    self::assertSame('buyer44@example.com', $this->exportedValue($sheet,'H2'));
+                    self::assertSame($longBill, $this->exportedValue($sheet,'E2'));
+                    self::assertContains($sheet->getCell('E2')->getDataType(),['s','inlineStr']);
+                    self::assertSame('=1+1', $this->exportedValue($sheet,'E3'));
+                    self::assertContains($sheet->getCell('E3')->getDataType(),['s','inlineStr']);
+                    self::assertSame('buyer44@example.com', $this->exportedValue($sheet,'I2'));
                     self::assertSame('UTC+08:00',$this->exportedValue($book->getSheet(1),'B3'));
                 }
                 $book->disconnectWorksheets();
@@ -993,34 +996,34 @@ PHP;
             file_put_contents($path,$bytes);
             $book=IOFactory::load($path);
             $sheet=$book->getSheet(3);
-            self::assertSame('退款时间', $this->exportedValue($sheet,'Q1'));
-            self::assertSame('争议时间', $this->exportedValue($sheet,'T1'));
-            self::assertSame('时间所属时区', $this->exportedValue($sheet,'V1'));
-            self::assertSame('主账单号', $this->exportedValue($sheet,'H1'));
-            self::assertSame('客户邮箱', $this->exportedValue($sheet,'L1'));
+            self::assertSame('退款时间', $this->exportedValue($sheet,'R1'));
+            self::assertSame('争议时间', $this->exportedValue($sheet,'U1'));
+            self::assertSame('时间所属时区', $this->exportedValue($sheet,'W1'));
+            self::assertSame('主账单号', $this->exportedValue($sheet,'I1'));
+            self::assertSame('客户邮箱', $this->exportedValue($sheet,'M1'));
             $matched=[];
             for ($r=2;$r<=$sheet->getHighestRow();$r++) {
                 $id=(string) $this->exportedValue($sheet,'E'.$r);
                 if ($id==='5') {
-                    self::assertSame('00009549574570768548249622', $this->exportedValue($sheet,'H'.$r));
-                    self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
-                    self::assertSame('buyer@example.com', $this->exportedValue($sheet,'L'.$r));
-                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00", $this->exportedValue($sheet,'Q'.$r));
-                    self::assertNull( $this->exportedValue($sheet,'T'.$r));
-                    self::assertSame('UTC-05:00', $this->exportedValue($sheet,'V'.$r));
-                    self::assertTrue($sheet->getStyle('Q'.$r)->getAlignment()->getWrapText());
+                    self::assertSame('00009549574570768548249622', $this->exportedValue($sheet,'I'.$r));
+                    self::assertContains($sheet->getCell('I'.$r)->getDataType(),['s','inlineStr']);
+                    self::assertSame('buyer@example.com', $this->exportedValue($sheet,'M'.$r));
+                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00", $this->exportedValue($sheet,'R'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'U'.$r));
+                    self::assertSame('UTC-05:00', $this->exportedValue($sheet,'W'.$r));
+                    self::assertTrue($sheet->getStyle('R'.$r)->getAlignment()->getWrapText());
                     $matched[]=$id;
                 } elseif ($id==='3') {
-                    self::assertSame('=1+1', $this->exportedValue($sheet,'H'.$r));
-                    self::assertContains($sheet->getCell('H'.$r)->getDataType(),['s','inlineStr']);
-                    self::assertNull( $this->exportedValue($sheet,'L'.$r));
-                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00", $this->exportedValue($sheet,'T'.$r));
-                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
-                    self::assertSame('UTC+08:00', $this->exportedValue($sheet,'V'.$r));
+                    self::assertSame('=1+1', $this->exportedValue($sheet,'I'.$r));
+                    self::assertContains($sheet->getCell('I'.$r)->getDataType(),['s','inlineStr']);
+                    self::assertNull( $this->exportedValue($sheet,'M'.$r));
+                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00", $this->exportedValue($sheet,'U'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'R'.$r));
+                    self::assertSame('UTC+08:00', $this->exportedValue($sheet,'W'.$r));
                     $matched[]=$id;
                 } elseif ($id==='6') {
                     // A refund with no event timestamp remains blank; never invent a payment-time substitute.
-                    self::assertNull( $this->exportedValue($sheet,'Q'.$r));
+                    self::assertNull( $this->exportedValue($sheet,'R'.$r));
                     $matched[]=$id;
                 }
             }

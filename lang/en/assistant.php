@@ -190,8 +190,8 @@ return [
             'owner_assignment_only_notice' => 'The owner is operational metadata only and does not grant or revoke record access.',
             'owner_scope_title' => 'Configure selectable Operations departments',
             'owner_scope_help' => 'This configuration only limits which Operations users each Assistant secondary department may select. It does not change department authorization or record visibility. Active users in selected departments and their descendants become candidates.',
-            'choose_operation_departments' => 'Selectable Operations departments (multiple allowed; the top-level Operations group only selects or clears all and is not an assignment option)',
-            'no_operation_departments' => 'No Operations departments were found. Confirm that Operations root dept-000022 exists.',
+            'choose_operation_departments' => 'Selectable business departments (multiple allowed; select second-level departments when present, otherwise select the root; roots with children only select or clear the group)',
+            'no_operation_departments' => 'No selectable business departments were found. Create a business department in department management.',
         ],
 
         'batch_update' => [

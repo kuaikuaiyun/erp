@@ -263,8 +263,8 @@ return [
             'owner_assignment_only_notice' => '归属人仅用于记录店铺的真实使用人，不会增加或收回任何记录查看权限。',
             'owner_scope_title' => '配置助理部门可选的运营部门',
             'owner_scope_help' => '此配置只限制各助理二级部门可以选择哪些运营成员，不会修改店铺记录的部门授权和可见范围。选择运营部门后，其下级部门的在职成员也会进入候选范围。',
-            'choose_operation_departments' => '可选择的运营部门（支持多选；最上层“运营部门”仅用于全选或取消全选，不会作为归属候选项）',
-            'no_operation_departments' => '未找到运营部门，请确认运营一级部门 dept-000022 已存在。',
+            'choose_operation_departments' => '可选择的业务部门（支持多选；有二级部门时选择二级，一级仅用于全选或取消全选；没有二级部门时可直接选择一级）',
+            'no_operation_departments' => '未找到可选的业务部门，请先在部门管理中创建业务部门。',
         ],
 
         'batch_update' => [
