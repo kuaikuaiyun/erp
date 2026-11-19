@@ -11,7 +11,10 @@
         .operation-ai-product-actions .btn { display:inline-flex; min-width:0; height:30px; align-items:center; justify-content:center; gap:5px; padding:5px 8px; border-radius:4px; font-size:12px; line-height:18px; white-space:nowrap; }
         .operation-ai-product-actions .btn .fa { width:13px; margin:0; text-align:center; }
         @media (max-width:1199px) { .operation-ai-product-page .aikaipin-operation-column { width:270px; } .operation-ai-product-actions { gap:5px; } .operation-ai-product-actions .btn { padding-right:5px; padding-left:5px; } }
-        .operation-ai-push-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; padding:10px 12px; border:1px solid #dce8ef; border-radius:6px; background:#f6fafc; }
+        .operation-ai-push-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 12px; margin-bottom:12px; padding:10px 12px; border:1px solid #dce8ef; border-radius:6px; background:#f6fafc; }
+        .operation-ai-push-search { position:relative; width:100%; }
+        .operation-ai-push-search .fa { position:absolute; top:10px; left:11px; color:#94a2af; }
+        .operation-ai-push-search .form-control { height:34px; padding-left:32px; border-radius:17px; }
         .operation-ai-push-members { max-height:420px; overflow:auto; border:1px solid #e1e8ee; border-radius:6px; }
         .operation-ai-push-member { display:flex; align-items:center; gap:10px; margin:0; padding:11px 13px; border-bottom:1px solid #edf1f4; cursor:pointer; font-weight:400; }
         .operation-ai-push-member:last-child { border-bottom:0; }
@@ -326,6 +329,7 @@
             <div class="modal-body">
                 <div class="alert alert-info" data-operation-ai-push-product>正在加载产品和组员信息...</div>
                 <div class="operation-ai-push-toolbar">
+                    <div class="operation-ai-push-search"><i class="fa fa-search"></i><input type="search" class="form-control input-sm" placeholder="搜索姓名、账号或部门" autocomplete="off" data-operation-ai-push-search></div>
                     <label style="margin:0"><input type="checkbox" data-operation-ai-push-unpublished> 只看未上架成员</label>
                     <button type="button" class="btn btn-default btn-xs" data-operation-ai-push-select-all>选择当前可推送成员</button>
                 </div>
@@ -409,6 +413,7 @@
     var form = modal.querySelector('[data-operation-ai-push-form]');
     var productBox = modal.querySelector('[data-operation-ai-push-product]');
     var membersBox = modal.querySelector('[data-operation-ai-push-members]');
+    var searchInput = modal.querySelector('[data-operation-ai-push-search]');
     var unpublishedOnly = modal.querySelector('[data-operation-ai-push-unpublished]');
     var selectAll = modal.querySelector('[data-operation-ai-push-select-all]');
     var errorBox = modal.querySelector('[data-operation-ai-push-error]');
@@ -416,11 +421,17 @@
     var submit = form.querySelector('[type="submit"]');
     var pushUrl = '';
     var members = [];
+    var selectedIds = new Set();
 
     function showMessage(box, message) { box.textContent = message || ''; box.hidden = !message; }
     function renderMembers() {
         membersBox.innerHTML = '';
-        var visible = members.filter(function (member) { return !unpublishedOnly.checked || !member.is_published; });
+        var keyword = searchInput.value.trim().toLowerCase();
+        var visible = members.filter(function (member) {
+            if (unpublishedOnly.checked && member.is_published) return false;
+            if (!keyword) return true;
+            return [member.name, member.username, member.department_name].some(function (value) { return String(value || '').toLowerCase().indexOf(keyword) !== -1; });
+        });
         if (!visible.length) {
             membersBox.innerHTML = '<div class="operation-ai-push-empty"><i class="fa fa-user-times"></i> 没有符合条件的组员</div>';
             return;
@@ -432,6 +443,7 @@
             var checkbox = document.createElement('input');
             checkbox.type = 'checkbox'; checkbox.name = 'member_ids[]'; checkbox.value = member.id;
             checkbox.disabled = !!member.has_pending_task;
+            checkbox.checked = selectedIds.has(member.id) && !checkbox.disabled;
             var main = document.createElement('span'); main.className = 'operation-ai-push-member-main';
             var name = document.createElement('strong'); name.textContent = member.name;
             var meta = document.createElement('small'); meta.textContent = member.department_name + ' · ' + member.username;
@@ -446,7 +458,7 @@
         var trigger = event.target.closest('[data-operation-ai-push]');
         if (!trigger) return;
         pushUrl = trigger.dataset.pushUrl || '';
-        members = []; unpublishedOnly.checked = false;
+        members = []; selectedIds.clear(); searchInput.value = ''; unpublishedOnly.checked = false;
         productBox.textContent = '正在加载产品和组员信息...';
         membersBox.innerHTML = '<div class="operation-ai-push-empty"><i class="fa fa-spinner fa-spin"></i> 正在加载...</div>';
         showMessage(errorBox, ''); showMessage(successBox, ''); submit.disabled = false;
@@ -456,18 +468,24 @@
             .then(function (data) { members = data.members || []; productBox.textContent = data.product.code + ' · ' + data.product.name; renderMembers(); })
             .catch(function (error) { membersBox.innerHTML = ''; showMessage(errorBox, error.message); });
     });
+    searchInput.addEventListener('input', renderMembers);
     unpublishedOnly.addEventListener('change', renderMembers);
+    membersBox.addEventListener('change', function (event) {
+        if (!event.target.matches('input[name="member_ids[]"]')) return;
+        var id = Number(event.target.value);
+        if (event.target.checked) selectedIds.add(id); else selectedIds.delete(id);
+    });
     selectAll.addEventListener('click', function () {
-        membersBox.querySelectorAll('input[name="member_ids[]"]:not(:disabled)').forEach(function (checkbox) { checkbox.checked = true; });
+        membersBox.querySelectorAll('input[name="member_ids[]"]:not(:disabled)').forEach(function (checkbox) { checkbox.checked = true; selectedIds.add(Number(checkbox.value)); });
     });
     form.addEventListener('submit', function (event) {
         event.preventDefault(); showMessage(errorBox, ''); showMessage(successBox, '');
-        var ids = Array.from(membersBox.querySelectorAll('input[name="member_ids[]"]:checked')).map(function (input) { return Number(input.value); });
+        var ids = Array.from(selectedIds);
         if (!ids.length) { showMessage(errorBox, '请至少选择一名可推送成员。'); return; }
         submit.disabled = true;
         fetch(pushUrl, {method:'POST', headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':form.querySelector('[name="_token"]').value,'X-Requested-With':'XMLHttpRequest'}, credentials:'same-origin', body:JSON.stringify({member_ids:ids})})
             .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || Object.values(data.errors || {}).flat()[0] || '推送失败'); return data; }); })
-            .then(function (data) { showMessage(successBox, data.message); members.forEach(function (member) { if (ids.indexOf(member.id) !== -1) member.has_pending_task = true; }); renderMembers(); })
+            .then(function (data) { showMessage(successBox, data.message); members.forEach(function (member) { if (ids.indexOf(member.id) !== -1) member.has_pending_task = true; }); ids.forEach(function (id) { selectedIds.delete(id); }); renderMembers(); })
             .catch(function (error) { showMessage(errorBox, error.message); })
             .finally(function () { submit.disabled = false; });
     });
