@@ -61,7 +61,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css?v=20261013-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261119-1">
 @endpush
 
 @section('content')
@@ -148,7 +148,7 @@
                         <label for="team">{{ $t('fields.team') }} <span class="text-red">*</span></label>
                         <div class="assistant-quick-option-group assistant-tag-input-group" data-tag-input-group data-team-quick-option-group data-quick-option-field="team">
                             <div class="assistant-quick-option-input-row assistant-tag-editor-row">
-                                <div class="assistant-tag-editor" data-tag-editor data-field-name="team[]">
+                                <div @class(['assistant-tag-editor', 'is-readonly' => ! $canManageQuickOptions]) data-tag-editor data-field-name="team[]">
                                     @foreach ($teamValues as $tag)
                                         <span class="assistant-tag-chip" data-tag-value="{{ $tag }}">
                                             <span class="assistant-tag-chip-label">{{ $tag }}</span>
@@ -159,7 +159,7 @@
                                     @if ($canManageQuickOptions)
                                         <input id="team" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.team_placeholder') }}">
                                     @else
-                                        <input id="team" type="hidden" class="assistant-tag-entry">
+                                        <input id="team" type="text" class="assistant-tag-entry" placeholder="{{ $t('form.team_placeholder') }}" readonly tabindex="-1">
                                     @endif
                                 </div>
                                 @if ($canManageQuickOptions)
@@ -252,7 +252,7 @@
                     <div class="form-group col-md-4 assistant-system-erp @error('erp') has-error @enderror">
                         <label for="erp">{{ $t('fields.erp') }}</label>
                         <div class="assistant-quick-option-group assistant-tag-input-group" data-tag-input-group data-team-quick-option-group data-quick-option-field="erp">
-                            <div class="assistant-tag-editor" data-tag-editor data-field-name="erp[]">
+                            <div @class(['assistant-tag-editor', 'is-readonly' => ! $canManageQuickOptions]) data-tag-editor data-field-name="erp[]">
                                 @foreach ($erpValues as $tag)
                                     <span class="assistant-tag-chip" data-tag-value="{{ $tag }}">
                                         <span class="assistant-tag-chip-label">{{ $tag }}</span>
@@ -263,7 +263,7 @@
                                 @if ($canManageQuickOptions)
                                     <input id="erp" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.erp_placeholder') }}">
                                 @else
-                                    <input id="erp" type="hidden" class="assistant-tag-entry">
+                                    <input id="erp" type="text" class="assistant-tag-entry" placeholder="{{ $t('form.erp_placeholder') }}" readonly tabindex="-1">
                                 @endif
                             </div>
                             @if ($canManageQuickOptions)
