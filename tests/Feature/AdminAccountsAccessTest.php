@@ -119,8 +119,8 @@ class AdminAccountsAccessTest extends TestCase
             $item['permission'] = null;
             $this->assertStringNotContainsString('<li', view('admin::partials.menu', compact('item'))->render());
         }
-        $item['uri'] = 'organization/departments';
-        $item['permission'] = 'organization.departments';
+        $item['uri'] = 'auth/setting';
+        $item['permission'] = null;
         $this->assertStringContainsString('<li', view('admin::partials.menu', compact('item'))->render());
         $item['uri'] = 'organization/accounts';
         $item['permission'] = 'organization.accounts';
@@ -161,5 +161,95 @@ class AdminAccountsAccessTest extends TestCase
             ->assertOk()->assertJsonCount(1, 'rows');
         $this->deleteJson($this->hrUrl.'/dingtalk/bindings/'.$binding->id)->assertOk();
         $this->assertFalse($binding->fresh()->active);
+    }
+
+    public function test_nonadministrators_cannot_use_department_menu_log_or_legacy_endpoints(): void
+    {
+        $department = $this->hrSource;
+        $endpoints = [
+            ['GET', 'organization/departments'], ['GET', 'organization/departments/create'],
+            ['POST', 'organization/departments'], ['GET', 'organization/departments/'.$department->id.'/edit'],
+            ['PUT', 'organization/departments/'.$department->id], ['PATCH', 'organization/departments/'.$department->id],
+            ['DELETE', 'organization/departments/'.$department->id],
+            ['GET', 'organization/departments/'.$department->id.'/members'],
+            ['POST', 'organization/departments/'.$department->id.'/members'],
+            ['GET', 'organization/departments/bindings'], ['PUT', 'organization/departments/bindings'],
+            ['GET', 'organization/departments/'.$department->id.'/permissions'],
+            ['PUT', 'organization/departments/'.$department->id.'/permissions'],
+            ['GET', 'organization/departments/'.$department->id.'/dissolution'],
+            ['POST', 'organization/departments/'.$department->id.'/dissolution'],
+            ['GET', 'auth/menu'], ['POST', 'auth/menu'], ['GET', 'auth/menu/1'],
+            ['GET', 'auth/menu/1/edit'], ['PUT', 'auth/menu/1'], ['PATCH', 'auth/menu/1'], ['DELETE', 'auth/menu/1'],
+            ['GET', 'auth/logs'], ['DELETE', 'auth/logs/1'],
+            ['GET', 'auth/roles'], ['GET', 'auth/permissions'], ['GET', 'organization/department-permissions'],
+        ];
+        // Even an existing wildcard grant must not restore main-backend management.
+        $permission = DB::table('admin_permissions')->insertGetId(['slug' => '*', 'name' => 'All']);
+        DB::table('admin_user_permissions')->insert(['user_id' => $this->hrActor->id, 'permission_id' => $permission]);
+        foreach (['manager', 'deputy', 'member'] as $position) {
+            DB::table('admin_role_users')->where('user_id', $this->hrActor->id)->update(['position' => $position]);
+            Admin::guard()->setUser($this->hrActor->unsetRelation('roles')->unsetRelation('departments'));
+            foreach ($endpoints as [$method, $path]) {
+                $this->json($method, '/'.trim(config('admin.route.prefix'), '/').'/'.$path)->assertForbidden();
+            }
+        }
+        $this->assertNotNull($department->fresh());
+        $this->assertSame('Department '.$this->hrActor->id, $department->fresh()->name);
+    }
+
+    public function test_management_group_disappears_for_nonadministrators_and_remains_for_superadministrators(): void
+    {
+        $children = [];
+        foreach (['organization/accounts', 'organization/departments', 'auth/menu', 'auth/logs'] as $uri) {
+            $children[] = ['uri' => $uri, 'title' => $uri, 'icon' => 'fa-circle', 'roles' => [], 'permission' => null];
+        }
+        $item = ['uri' => '', 'title' => 'Admin', 'icon' => 'fa-tasks', 'roles' => [], 'children' => $children];
+        Admin::guard()->setUser($this->hrActor);
+        $this->assertStringNotContainsString('<li', view('admin::partials.menu', compact('item'))->render());
+        foreach (['organization/departments', 'organization/departments/1/members', 'organization/department-permissions', 'auth/roles', 'auth/permissions', 'auth/menu', 'auth/menu/1/edit', 'auth/logs', admin_url('auth/menu')] as $uri) {
+            $menu = $children[0];
+            $menu['uri'] = $uri;
+            $this->assertStringNotContainsString('<li', view('admin::partials.menu', ['item' => $menu])->render());
+        }
+        $menu = $children[0];
+        $menu['uri'] = '';
+        foreach (['organization.departments', 'auth.management'] as $permission) {
+            $menu['permission'] = $permission;
+            $this->assertStringNotContainsString('<li', view('admin::partials.menu', ['item' => $menu])->render());
+        }
+        Admin::guard()->setUser($this->hrOwner);
+        $html = view('admin::partials.menu', compact('item'))->render();
+        $this->assertStringContainsString('treeview', $html);
+        foreach ($children as $child) {
+            $this->assertStringContainsString(admin_url($child['uri']), $html);
+        }
+    }
+
+    public function test_superadministrator_can_open_management_pages_and_edit_departments(): void
+    {
+        \Illuminate\Support\Facades\Schema::table('admin_roles', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->string('short_name')->nullable();
+        });
+        \Illuminate\Support\Facades\Schema::create(config('admin.database.operation_log_table'), function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->string('path');
+            $table->string('method');
+            $table->string('ip');
+            $table->text('input');
+            $table->timestamps();
+        });
+        Admin::guard()->setUser($this->hrOwner);
+        $prefix = '/'.trim(config('admin.route.prefix'), '/').'/';
+        $this->get($prefix.'organization/departments')->assertOk();
+        $this->get($prefix.'auth/menu')->assertOk();
+        $this->get($prefix.'auth/logs')->assertOk();
+        $this->get($prefix.'auth/roles')->assertRedirect();
+        $this->get($prefix.'auth/permissions')->assertRedirect();
+        $this->get($prefix.'organization/department-permissions')->assertRedirect();
+        $this->put($prefix.'organization/departments/'.$this->teamA->id, [
+            'name' => 'Updated Team A', 'sort' => 0,
+        ])->assertRedirect();
+        $this->assertSame('Updated Team A', $this->teamA->fresh()->name);
     }
 }

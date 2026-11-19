@@ -38,21 +38,21 @@ Route::group([
     $router->put('organization/accounts/{account}/permissions', [AccountPermissionController::class, 'update'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts', RequireSystemAdministrator::class])->name('organization.accounts.permissions.update');
     $router->get('organization/departments/bindings', [DepartmentController::class, 'bindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings');
     $router->put('organization/departments/bindings', [DepartmentController::class, 'updateBindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings.update');
-    $router->get('organization/departments/{department}/members', [DepartmentController::class, 'members'])->whereNumber('department')->middleware('admin.permission:check,organization.departments')->name('organization.departments.members');
-    $router->post('organization/departments/{department}/members', [DepartmentController::class, 'addMember'])->whereNumber('department')->middleware('admin.permission:check,organization.departments')->name('organization.departments.members.add');
-    $router->resource('organization/departments', DepartmentController::class)->except(['show'])->middleware('admin.permission:check,organization.departments')->names('organization.departments');
+    $router->get('organization/departments/{department}/members', [DepartmentController::class, 'members'])->whereNumber('department')->middleware([RequireSystemAdministrator::class, 'admin.permission:check,organization.departments'])->name('organization.departments.members');
+    $router->post('organization/departments/{department}/members', [DepartmentController::class, 'addMember'])->whereNumber('department')->middleware([RequireSystemAdministrator::class, 'admin.permission:check,organization.departments'])->name('organization.departments.members.add');
+    $router->resource('organization/departments', DepartmentController::class)->except(['show'])->middleware([RequireSystemAdministrator::class, 'admin.permission:check,organization.departments'])->names('organization.departments');
     $router->get('organization/departments/{department}/dissolution', [DepartmentController::class, 'dissolution'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.dissolution');
     $router->post('organization/departments/{department}/dissolution', [DepartmentController::class, 'dissolve'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.dissolve');
     $router->get('organization/departments/{department}/permissions', [DepartmentPermissionController::class, 'edit'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.permissions.edit');
     $router->put('organization/departments/{department}/permissions', [DepartmentPermissionController::class, 'update'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.permissions.update');
 
     $router->redirect('auth/users', 'organization/accounts')->middleware([RequireSystemAdministrator::class, 'admin.permission:check,organization.accounts']);
-    $router->redirect('auth/roles', 'organization/departments')->middleware('admin.permission:check,organization.departments');
-    $router->redirect('auth/permissions', 'organization/departments');
-    $router->redirect('organization/department-permissions', 'organization/departments');
+    $router->redirect('auth/roles', 'organization/departments')->middleware([RequireSystemAdministrator::class, 'admin.permission:check,organization.departments']);
+    $router->redirect('auth/permissions', 'organization/departments')->middleware(RequireSystemAdministrator::class);
+    $router->redirect('organization/department-permissions', 'organization/departments')->middleware(RequireSystemAdministrator::class);
 
-    $router->resource('auth/menu', MenuController::class, ['except' => ['create']])->names('auth.menu');
-    $router->resource('auth/logs', LogController::class, ['only' => ['index', 'destroy']])->names('auth.logs');
+    $router->resource('auth/menu', MenuController::class, ['except' => ['create']])->middleware(RequireSystemAdministrator::class)->names('auth.menu');
+    $router->resource('auth/logs', LogController::class, ['only' => ['index', 'destroy']])->middleware(RequireSystemAdministrator::class)->names('auth.logs');
     $router->post('_handle_form_', [HandleController::class, 'handleForm'])->name('handle-form');
     $router->post('_handle_action_', [HandleController::class, 'handleAction'])->name('handle-action');
     $router->get('_handle_selectable_', [HandleController::class, 'handleSelectable'])->name('handle-selectable');

@@ -9,10 +9,14 @@
         if ($adminPrefix !== '' && str_starts_with($uri, $adminPrefix.'/')) {
             $uri = substr($uri, strlen($adminPrefix) + 1);
         }
-        $isAccountMenu = $permission === 'organization.accounts'
-            || $uri === 'organization/accounts' || str_starts_with($uri, 'organization/accounts/')
-            || $uri === 'auth/users' || str_starts_with($uri, 'auth/users/');
-        if ($isAccountMenu && !$administrator->isAdministrator()) {
+        $isManagementMenu = in_array($permission, ['organization.accounts', 'organization.departments', 'auth.management'], true);
+        foreach (['organization/accounts', 'organization/departments', 'organization/department-permissions', 'auth/users', 'auth/roles', 'auth/permissions', 'auth/menu', 'auth/logs'] as $managementPath) {
+            if ($uri === $managementPath || str_starts_with($uri, $managementPath.'/')) {
+                $isManagementMenu = true;
+                break;
+            }
+        }
+        if ($isManagementMenu && !$administrator->isAdministrator()) {
             return false;
         }
 
