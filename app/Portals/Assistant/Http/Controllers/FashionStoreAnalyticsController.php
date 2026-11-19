@@ -10,6 +10,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -31,9 +32,12 @@ class FashionStoreAnalyticsController extends Controller
         if ($context instanceof Response) return $context;
         $this->authorization->assertAssistantPortal($context['portal']);
         $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
+        $projectCode = (string) $request->query('project_code', 'fuzhuang');
+        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        $project = OperationProjectCatalog::get($projectCode);
 
         $filters = $this->filters($request);
-        $query = $this->stores($context['user'], $filters);
+        $query = $this->stores($context['user'], $filters, $project);
         $metrics = $this->orderMetrics($filters);
         $query->leftJoinSub($metrics, 'fashion_metrics', fn ($join) => $join
             ->on('assistant_domain_stores.id', '=', 'fashion_metrics.assistant_domain_store_id'))
@@ -74,6 +78,7 @@ class FashionStoreAnalyticsController extends Controller
         return view('portals.assistant.fashion-store-analytics.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'stores' => $stores, 'filters' => $filters,
+            'reportProject' => $project,
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
             'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
@@ -84,11 +89,12 @@ class FashionStoreAnalyticsController extends Controller
     }
 
     /** @param array<string,mixed> $filters */
-    private function stores(AdminUser $user, array $filters): Builder
+    private function stores(AdminUser $user, array $filters, array $project): Builder
     {
         return $this->authorization->scopeDomainStores(AssistantDomainStore::query(), $user)
             ->with('ownerUser:id,name,username')
-            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
+            ->when($project['code'] !== 'danbao-general', fn (Builder $q) => $q->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')"))
             ->when($filters['shop_name'] !== '', fn (Builder $q) => $q->where('shop_name', 'like', '%'.$filters['shop_name'].'%'))
             ->when($filters['domain'] !== '', fn (Builder $q) => $q->where('domain', 'like', '%'.$filters['domain'].'%'))
             ->when($filters['platform'] !== '', fn (Builder $q) => $filters['platform'] === 'xshoppy'

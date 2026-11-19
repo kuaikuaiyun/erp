@@ -6,6 +6,7 @@ use App\Models\FinancePaymentAccount;
 use App\Portals\Finance\Http\Controllers\FinanceController;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -21,6 +22,94 @@ class FinanceReportSnapshots
         return in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true);
     }
 
+    /**
+     * Keep the normal monthly report screens warm before anyone opens them.
+     *
+     * Ad-hoc raw-field conditions still get their own scope, but ordinary menu
+     * switches and dimension filters reuse these channel/month snapshots.
+     */
+    public function registerDefaultScopes(int $monthLimit = 12): int
+    {
+        $db = $this->workbooks->database();
+        $schema = $db->getSchemaBuilder();
+        if (! $schema->hasTable('finance_report_scopes')) {
+            return 0;
+        }
+
+        $months = $schema->hasTable('finance_summary_periods')
+            ? $db->table('finance_summary_periods')->where('month', '<>', '')
+                ->select('month')->distinct()->orderByDesc('month')->limit($monthLimit)->pluck('month')
+            : collect();
+        $months->push(now('Asia/Shanghai')->format('Y-m'));
+        $months = $months->filter(fn ($month) => preg_match('/^\d{4}-\d{2}$/', (string) $month) === 1)
+            ->unique()->sortDesc()->take($monthLimit)->values();
+
+        // Prewarmed scopes stay active but rank below a scope explicitly used
+        // by a person. This prevents a cold deployment from delaying the month
+        // somebody is currently waiting for.
+        $prewarmAt = now()->subDays(6);
+        $scopes = [];
+        $add = function (string $report, string $month, array $filters) use (&$scopes, $prewarmAt): void {
+            $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
+            ksort($filters);
+            $scope = hash('sha256', json_encode([$report, $month, $filters], JSON_THROW_ON_ERROR));
+            $scopes[] = compact('scope', 'month', 'report') + [
+                'filters' => json_encode($filters, JSON_THROW_ON_ERROR),
+                'used_at' => $prewarmAt,
+            ];
+        };
+
+        $overviewChannels = [null, 'paypal', 'xuzong', 'xuzong1', 'xuzong2', 'ye', 'worldpay', 'credit_card'];
+        foreach ($months as $month) {
+            foreach (array_keys(FinanceTransactionSummary::VIEWS) as $channel) {
+                $add('transactions', $month, [
+                    '_settlement_currency_summary' => 3,
+                    ...($channel === 'combined' ? ['_combined_channel_rollup' => 10] : []),
+                    'channel' => $channel,
+                    'month' => $month,
+                ]);
+            }
+            foreach ($overviewChannels as $channel) {
+                $add('summary', $month, ['_include_options' => true, 'channel' => $channel]);
+                $add('losses', $month, ['_include_options' => true, 'channel' => $channel, 'layer' => 'business']);
+            }
+        }
+
+        if ($scopes !== []) {
+            $db->table('finance_report_scopes')->insertOrIgnore($scopes);
+            $db->table('finance_report_scopes')->whereIn('scope', array_column($scopes, 'scope'))
+                ->where('used_at', '<', now()->subDays(7))->update(['used_at' => $prewarmAt]);
+        }
+
+        return count($scopes);
+    }
+
+    /**
+     * A deployment should run the scheduler every minute. If that external
+     * process is missing or stalled, one web request may wake it after the
+     * response has been sent. The cache gate prevents polling from spawning a
+     * refresh on every request while the database advisory lock prevents two
+     * command instances from doing the same work.
+     */
+    private function requestBackgroundRefresh(): void
+    {
+        $driver = $this->workbooks->database()->getDriverName();
+        if (! in_array($driver, ['mysql', 'mariadb'], true)) {
+            return;
+        }
+
+        defer(function (): void {
+            try {
+                if (! Cache::add('finance:summaries:web-refresh', now()->timestamp, now()->addMinutes(5))) {
+                    return;
+                }
+                Artisan::call('finance:summaries:refresh');
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }, 'finance:summaries:web-refresh');
+    }
+
     public function refresh(FinanceController $controller, bool $tracksRevisions): bool
     {
         $db = $this->workbooks->database();
@@ -30,6 +119,8 @@ class FinanceReportSnapshots
             return false;
         }
         $failed = false;
+        $builds = 0;
+        $buildLimit = 10;
         $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
             ->where('month', '<>', '')
             ->orderByDesc('used_at')->orderBy('scope')->get();
@@ -42,6 +133,10 @@ class FinanceReportSnapshots
                 $filters = json_decode($scope->filters, true, 512, JSON_THROW_ON_ERROR);
                 $revision = $this->revision($db, $scope->report, $scope->month, $filters, $tracksRevisions);
                 if (! $db->table('finance_report_snapshots')->where(['scope' => $scope->scope, 'revision' => $revision])->exists()) {
+                    if ($builds >= $buildLimit || ($tracksRevisions && ! $this->projectionsReady($db, $scope->month, $filters))) {
+                        continue;
+                    }
+                    $builds++;
                     $result = $db->transaction(fn () => $this->build($controller, $scope, $filters));
                     if ($tracksRevisions && ($db->table('finance_summary_changes')->exists()
                         || $revision !== $this->revision($db, $scope->report, $scope->month, $filters, true))) {
@@ -196,6 +291,9 @@ class FinanceReportSnapshots
             'state' => $current ? 'ready' : ($failed ? 'failed' : ($saved ? 'updating' : 'pending')),
             'updated_at' => $saved?->created_at,
         ];
+        if (! $current) {
+            $this->requestBackgroundRefresh();
+        }
         if ($statusOnly) {
             return [null, $saved?->id, $status];
         }

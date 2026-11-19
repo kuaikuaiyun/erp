@@ -641,8 +641,6 @@
         // 商品信息检验草稿：恢复上次勾选的系统 SKU 与右侧列表，无需重新查重
         var draftData = null;
         try { draftData = JSON.parse(form.getAttribute('data-procurement-draft') || 'null'); } catch (e) { draftData = null; }
-        var draftChecked = draftData && Array.isArray(draftData.selected_skus) ? draftData.selected_skus : null;
-
         var operationList = panel.querySelector('#sku-operation-list');
         var skuSource = root.querySelector('[data-sku-edit-source]');
         var skuPreview = skuSource ? skuSource.parentNode.querySelector('[data-sku-edit-preview]') : null;
@@ -724,17 +722,30 @@
             resizeSkuSource();
         }
 
-        // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示；每行附采购价/重量输入框，勾选才可编辑
-        function buildSkuRow(value, editable, checked) {
+        // 仅运营 SKU 可勾选和编辑；系统已录入 SKU 始终只读保留。
+        function buildSkuRow(value, editable, checked, systemSku) {
             var label = document.createElement('label');
             label.className = 'sku-suggestion-item';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.name = 'selected_skus[]';
-            checkbox.value = value;
-            checkbox.checked = checked === undefined || checked === null ? true : !!checked;
-            checkbox.setAttribute('data-sku-select', 'true');
-            label.appendChild(checkbox);
+            if (systemSku) { label.setAttribute('data-system-sku', value); }
+            var checkbox = null;
+            if (!systemSku) {
+                checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.name = 'selected_skus[]';
+                checkbox.value = value;
+                checkbox.checked = checked === undefined || checked === null ? true : !!checked;
+                checkbox.setAttribute('data-sku-select', 'true');
+                label.appendChild(checkbox);
+            } else {
+                // Keep the familiar checkbox for system SKUs, but do not submit it as
+                // a selected operational SKU. System link data is always preserved by
+                // the server even if the user clears this visual selection.
+                checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = checked === undefined || checked === null ? true : !!checked;
+                checkbox.setAttribute('data-system-sku-select', 'true');
+                label.appendChild(checkbox);
+            }
 
             // 数值输入框外再包一层小字标签，明确区分「采购价」与「重量」，只读行也能看清数值含义
             function buildValueField(kind, placeholder, caption) {
@@ -751,7 +762,7 @@
                 // 左栏优先当前运营填写值，右栏优先链接 SKU 库值，两边互不覆盖。
                 var initial = editable ? (currentValue || '') : (systemValue || currentValue || '');
                 field.value = initial;
-                field.disabled = !checkbox.checked;
+                field.disabled = checkbox ? !checkbox.checked : false;
                 field.addEventListener('input', syncSkuValues);
                 field.addEventListener('click', function (event) { event.preventDefault(); });
                 if (caption !== '') {
@@ -771,12 +782,13 @@
             if (!editable) { priceField.readOnly = true; weightField.readOnly = true; }
             if (editable) { priceField.required = true; weightField.required = true; }
 
-            checkbox.addEventListener('change', function () {
-                priceField.disabled = !checkbox.checked;
-                weightField.disabled = !checkbox.checked;
-                if (label.parentNode === list) { syncLinkSkus(); }
-                updateSummary();
-            });
+            if (checkbox && !systemSku) {
+                checkbox.addEventListener('change', function () {
+                    priceField.disabled = !checkbox.checked;
+                    weightField.disabled = !checkbox.checked;
+                    updateSummary();
+                });
+            }
             if (editable) {
                 var edit = document.createElement('input');
                 edit.type = 'text';
@@ -827,12 +839,12 @@
         renderSkuPreview();
         resizeSkuSource();
 
-        // 链接基线始终与「系统已录入的 SKU」框保持一致，保证增删比对准确
+        // 系统 SKU 始终作为链接基线提交，后端仅会在其基础上追加运营已勾选 SKU。
         function syncLinkSkus() {
             if (!linkSkusInput) { return; }
             var values = [];
-            list.querySelectorAll('[data-sku-select]').forEach(function (box) {
-                var value = (box.value || '').trim();
+            list.querySelectorAll('[data-system-sku]').forEach(function (row) {
+                var value = (row.getAttribute('data-system-sku') || '').trim();
                 if (value !== '' && values.indexOf(value) === -1) { values.push(value); }
             });
             linkSkusInput.value = values.join(',');
@@ -862,8 +874,8 @@
                     if (value === '' || seen.indexOf(value) !== -1) { return; }
                     seen.push(value);
                     total += 1;
-                    // 链接上已录入的 SKU 只读展示，仅可勾选/取消（不提供修改）
-                    var label = buildSkuRow(sku, false, draftChecked === null ? true : draftChecked.indexOf(value) !== -1);
+                    // 链接上已录入的 SKU 只读展示，不能取消或编辑，保存时始终保留。
+                    var label = buildSkuRow(sku, false, true, true);
                     if (item.report_no) {
                         var source = document.createElement('span');
                         source.className = 'sku-source';
@@ -907,8 +919,8 @@
         form.erpSkuSuggestionsAppend = function (skus, reportNo) {
             var existing = [];
             // 只与右侧系统 SKU 去重，不用左侧运营 SKU 过滤系统完整集合。
-            list.querySelectorAll('input[name="selected_skus[]"]').forEach(function (box) {
-                var value = (box.value || '').trim();
+            list.querySelectorAll('[data-system-sku]').forEach(function (row) {
+                var value = (row.getAttribute('data-system-sku') || '').trim();
                 if (value !== '' && existing.indexOf(value) === -1) { existing.push(value); }
             });
             var added = [];
@@ -938,19 +950,23 @@
 
         if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
         form.erpSkuSuggestions = fetchSuggestions;
-        // 提交拦截：未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个（审核不通过除外）
-        form.addEventListener('submit', function (event) {
-            var submitter = event.submitter || null;
-            // 保存草稿：允许不勾选任何 SKU 直接保存
-            if (submitter && submitter.name === 'action' && submitter.value === 'draft') { return; }
-            var resultInput = form.querySelector('input[name="result"]');
-            if (resultInput && resultInput.value === 'rejected') { return; }
-            if (!panel.querySelector('input[name="selected_skus[]"]:checked')) {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                notify('error', panel.getAttribute('data-sku-check-required') || '请至少勾选一个 SKU');
-            }
-        }, true);
+        // 只有当前链接没有系统 SKU 时，才要求勾选至少一个运营 SKU（审核不通过除外）。
+        if (form.dataset.skuSubmitValidationReady !== '1') {
+            form.dataset.skuSubmitValidationReady = '1';
+            form.addEventListener('submit', function (event) {
+                var submitter = event.submitter || null;
+                // 保存草稿：允许不勾选任何 SKU 直接保存
+                if (submitter && submitter.name === 'action' && submitter.value === 'draft') { return; }
+                var resultInput = form.querySelector('input[name="result"]');
+                if (resultInput && resultInput.value === 'rejected') { return; }
+                var hasSystemSku = panel.querySelector('[data-system-sku]') !== null;
+                if (!hasSystemSku && !panel.querySelector('input[name="selected_skus[]"]:checked')) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    notify('error', panel.getAttribute('data-sku-check-required') || '请至少勾选一个 SKU');
+                }
+            }, true);
+        }
         // 进入表单只展示左侧运营 SKU；右侧系统已录入 SKU 在点击查重复用后再加载显示
         render('点击「品名和 1688 查重」复用后，此处显示同 1688 链接已录入的 SKU');
         if (draftData && draftData.system_skus && draftData.system_skus.length) {

@@ -2798,10 +2798,13 @@ class FinancePortalTest extends TestCase
         $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class, [$this->workbooks])->makePartial();
         $snapshots->shouldReceive('runsInBackground')->andReturn(true);
         $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $snapshots);
-        $url = '/finance/reports/losses?month_from=2026-09&month_to=2026-11';
+        $url = '/finance/reports/losses?month_from=2026-03&month_to=2026-11';
 
-        $page = $this->get($url)->assertOk()->assertSee('报表正在生成，请稍候。');
-        $this->assertDatabaseCount('finance_report_scopes', 3);
+        $page = $this->get($url)->assertOk()->assertSee('报表正在生成，请稍候。')
+            ->assertSee('class="overview-status-disclosure"', false)
+            ->assertSee('最近 5 个期间')->assertSee('2026-07 ·')->assertDontSee('2026-06 ·');
+        $this->assertStringNotContainsString('<details class="overview-status-disclosure" open', $page->getContent());
+        $this->assertDatabaseCount('finance_report_scopes', 9);
         $this->assertDatabaseCount('finance_report_snapshots', 0);
         $pending = $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending')->json('version');
         $this->assertSame($pending, $page->viewData('overviewStatus')['version']);
@@ -2810,7 +2813,7 @@ class FinancePortalTest extends TestCase
         // Publishing one month must not mark the whole comparison ready.
         $this->workbooks->database()->table('finance_report_scopes')->where('month', '2026-11')->update(['used_at' => now()->subDays(8)]);
         $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildSettlementOverviewMonth')->times(3)->andReturn([[], [], null]);
+        $controller->shouldReceive('buildSettlementOverviewMonth')->times(9)->andReturn([[], [], null]);
         $this->assertTrue($snapshots->refresh($controller, false));
         $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
         $this->assertTrue($snapshots->refresh($controller, false));
@@ -2842,6 +2845,58 @@ class FinancePortalTest extends TestCase
         $this->assertSame($result, $published);
         $this->assertNotNull($snapshot);
         $this->assertSame('ready', $status['state']);
+    }
+
+    public function test_scheduler_registers_recent_default_reports_before_a_user_opens_them(): void
+    {
+        (require database_path('migrations/2026_11_13_000001_create_finance_summary_projections.php'))->up();
+        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
+        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
+        $current = now('Asia/Shanghai')->startOfMonth();
+        foreach ([$current->copy()->subMonth(), $current->copy()->subMonths(2)] as $month) {
+            DB::table('finance_summary_periods')->insert([
+                'month' => $month->format('Y-m'), 'channel' => 'paypal', 'revision' => 1, 'published' => 1,
+            ]);
+        }
+
+        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
+        $this->assertSame(42, $reports->registerDefaultScopes(2));
+        $this->assertDatabaseCount('finance_report_scopes', 42);
+
+        foreach ([$current->format('Y-m'), $current->copy()->subMonth()->format('Y-m')] as $month) {
+            $this->assertSame(5, DB::table('finance_report_scopes')->where([
+                'report' => 'transactions', 'month' => $month,
+            ])->count());
+            $this->assertSame(8, DB::table('finance_report_scopes')->where([
+                'report' => 'summary', 'month' => $month,
+            ])->count());
+            $this->assertSame(8, DB::table('finance_report_scopes')->where([
+                'report' => 'losses', 'month' => $month,
+            ])->count());
+        }
+
+        $paypal = DB::table('finance_report_scopes')->where([
+            'report' => 'transactions', 'month' => $current->format('Y-m'),
+        ])->get()->first(fn ($scope) => json_decode($scope->filters, true)['channel'] === 'paypal');
+        $this->assertNotNull($paypal);
+        $this->assertSame([
+            '_settlement_currency_summary' => 3,
+            'channel' => 'paypal',
+            'month' => $current->format('Y-m'),
+        ], json_decode($paypal->filters, true, 512, JSON_THROW_ON_ERROR));
+
+        $this->assertSame(42, $reports->registerDefaultScopes(2));
+        $this->assertDatabaseCount('finance_report_scopes', 42);
+
+        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $controller->shouldReceive('buildTransactionReport')->zeroOrMoreTimes()->andReturn([[], []]);
+        $controller->shouldReceive('buildSettlementOverviewMonth')->zeroOrMoreTimes()->andReturn([[], [], null]);
+        $this->assertTrue($reports->refresh($controller, false));
+        $this->assertDatabaseCount('finance_report_snapshots', 10);
+        foreach ([20, 30, 40, 42] as $expected) {
+            $this->assertTrue($reports->refresh($controller, false));
+            $this->assertDatabaseCount('finance_report_snapshots', $expected);
+        }
     }
 
     public function test_loss_report_leaves_unimported_costs_blank_even_when_logistics_is_matched(): void
@@ -2971,16 +3026,38 @@ class FinancePortalTest extends TestCase
         $this->get($url.'&page=0')->assertSessionHasErrors('page');
     }
 
-    public function test_transaction_summary_loads_historical_subscription_choices_on_demand(): void
+    public function test_transaction_summary_uses_existing_values_as_fixed_filter_choices(): void
     {
         $this->workbooks->importRecords('paypal-orders', [
             2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'CHOICE-CURRENT', '订阅类型' => '本月类型'],
             3 => [...$this->recordRow(), '日期' => '2026-08-02', '交易 ID' => 'CHOICE-HISTORY', '订阅类型' => '历史类型'],
         ], 'A', 'UTC', 1);
         $url = '/finance/reports/summary?view=transactions&month=2026-11&channel=paypal';
-        $response = $this->get($url)->assertOk()->assertSee('data-options-url=', false);
+        $response = $this->get($url)->assertOk()
+            ->assertSee('<select id="report-currency"', false)
+            ->assertSee('<select id="report-team"', false)
+            ->assertSee('<select id="report-subscription"', false)
+            ->assertSee('<option value="本月类型"', false)
+            ->assertDontSee('datalist', false)
+            ->assertDontSee('添加筛选条件')
+            ->assertDontSee('settlement-add-condition', false)
+            ->assertDontSee('历史类型');
         $this->assertSame(['本月类型'], $response->viewData('subscriptionOptions')->all());
-        $this->getJson($url.'&subscription_options=1')->assertOk()->assertExactJson(['历史类型', '本月类型']);
+    }
+
+    public function test_transaction_summary_cuts_months_at_each_channel_settlement_timezone(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [
+            // 2026-11-01 02:00 UTC is still October in the PayPal settlement timezone (UTC-04:00).
+            2 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '02:00:00', '交易 ID' => 'PAYPAL-OCTOBER-EASTERN'],
+            // Midnight Eastern begins the November PayPal settlement month.
+            3 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '04:00:00', '交易 ID' => 'PAYPAL-NOVEMBER-EASTERN'],
+        ], 'Timezone account', 'UTC', 1);
+
+        $report = app(\App\Portals\Finance\Http\Controllers\FinanceController::class)
+            ->buildTransactionReport('paypal', [], \Carbon\CarbonImmutable::parse('2026-11-01', 'Asia/Shanghai'), null);
+
+        $this->assertSame(1, array_sum(array_column($report[0], 'orders')));
     }
 
     public function test_transaction_report_reuses_only_the_current_published_revision(): void
@@ -3144,7 +3221,14 @@ class FinancePortalTest extends TestCase
         $combined = $this->get($base.'&channel=combined&layer=account')->assertOk();
         $this->assertSame('Account A', $combined->viewData('groups')[0]['name']);
         $this->assertSame('account', $combined->viewData('filters')['layer']);
-        $combined->assertDontSee('value="combined"', false);
+        $combined->assertDontSee('value="combined"', false)
+            ->assertSee('<select id="overview-account"', false)
+            ->assertSee('<select id="overview-team"', false)
+            ->assertSee('<select id="overview-subscription"', false)
+            ->assertDontSee('id="overview-owner"', false)
+            ->assertDontSee('overview-options-', false)
+            ->assertDontSee('输入或选择')
+            ->assertSee('form.requestSubmit()', false);
         foreach (['paypal', 'credit_card'] as $channel) {
             $project = $this->get($base.'&channel='.$channel.'&layer=project')->assertOk();
             $this->assertSame('project', $project->viewData('filters')['layer']);
@@ -3449,7 +3533,7 @@ class FinancePortalTest extends TestCase
 
     public function test_transaction_summary_uses_each_channel_template_for_display_and_export(): void
     {
-        foreach (['paypal' => 23, 'credit_card' => 25, 'ye' => 25, 'worldpay' => 25, 'combined' => 26] as $channel => $count) {
+        foreach (['paypal' => 23, 'credit_card' => 25, 'ye' => 25, 'worldpay' => 25, 'combined' => 24] as $channel => $count) {
             $url = '/finance/reports/summary?view=transactions&month=2026-10&channel='.$channel;
             $response = $this->get($url)->assertOk()->assertViewHas('tab', $channel);
             $columns = $response->viewData('columns');
@@ -3458,6 +3542,11 @@ class FinancePortalTest extends TestCase
             $this->assertSame('结算货币', $columns['currency']);
             $this->assertSame('支付账户', $columns['account']);
             $this->assertSame(in_array($channel, ['paypal', 'combined'], true), isset($columns['dispute_hold']));
+            if ($channel === 'combined') {
+                $this->assertArrayNotHasKey('team', $columns);
+                $this->assertArrayNotHasKey('subscription', $columns);
+                $response->assertDontSee('id="report-team"', false)->assertDontSee('id="report-subscription"', false);
+            }
             $sheet = $this->readDownload($this->get($url.'&download=1')->assertOk()->streamedContent());
             $this->assertSame(array_values($columns), $sheet->toArray()[0]);
         }
@@ -3466,6 +3555,34 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('filters', fn ($filters) => $filters['layer'] === 'project');
         $this->get('/finance/reports/losses?channel=combined')->assertOk()
             ->assertViewHas('filters', fn ($filters) => $filters['layer'] === 'project_classification');
+    }
+
+    public function test_shopify_transaction_summary_uses_source_channels_without_region_or_subscription_dimensions(): void
+    {
+        $base = ['account' => 'A', 'account_key' => 'A', 'currency' => 'USD', 'team' => '厦门团队',
+            'subscription' => '订阅', 'month' => '2026-11', 'success' => true, 'failed' => false,
+            'settlement' => '10', 'gross' => '10', 'fee' => '0', 'fee_return' => '0',
+            'dispute_hold' => '0', 'dispute_release' => '0', 'dispute_fee' => '0'];
+        $items = (new \App\Portals\Finance\FinanceTransactionSummary)->summarize([
+            [...$base, 'channel' => 'paypal', 'payment_channel' => 'paypal'],
+            [...$base, 'channel' => 'credit_card', 'payment_channel' => 'ye'],
+        ], 'combined', usd: true);
+
+        $this->assertSame(['PayPal', '叶总支付'], array_column($items, 'channel'));
+        $this->assertArrayNotHasKey('team', $items[0]);
+        $this->assertArrayNotHasKey('subscription', $items[0]);
+        $missing = (new \App\Portals\Finance\FinanceTransactionSummary)->missingSummary(
+            (new \App\Portals\Finance\FinanceTransactionSummary)->summarize([
+                [...$base, 'team' => '', 'channel' => 'paypal', 'payment_channel' => 'paypal'],
+            ], 'combined', usd: true),
+            'combined', '2026-11',
+        );
+        $this->assertSame(1, $missing['orders']);
+        $this->assertSame('10.00000000', $missing['settlement']);
+        $total = (new \App\Portals\Finance\FinanceTransactionSummary)->totalSummary($items, 'combined', '2026-11');
+        $this->assertSame('全部数据汇总（含缺失）', $total['account']);
+        $this->assertSame(2, $total['orders']);
+        $this->assertSame('20.00000000', $total['settlement']);
     }
 
     public function test_paypal_new_import_rolls_back_invalid_new_rows(): void
@@ -5962,7 +6079,7 @@ class FinancePortalTest extends TestCase
         $sheet = $this->readDownload($export->streamedContent());
         $this->assertSame('销售收入', $sheet->getCell('AQ2')->getValue());
         $this->assertSame('折合人民币', $sheet->getCell($sheet->getHighestColumn().'1')->getValue());
-        $this->get('/finance/reports/summary?view=transactions&month=2026-10')->assertOk()->assertSee('应结算')->assertSee('Shopify');
+        $this->get('/finance/reports/summary?view=transactions&month=2026-10')->assertOk()->assertSee('应结算')->assertSee('合计');
         $this->get('/finance/reports/summary?view=transactions&month=2026-10&download=1')->assertOk();
         $this->post('/finance/settings/accounting/lock', ['month' => '2026-10'])->assertRedirect()->assertSessionHasNoErrors();
         $frozen = $accounting->report('2026-10');

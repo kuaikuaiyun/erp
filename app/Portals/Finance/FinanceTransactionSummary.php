@@ -6,7 +6,10 @@ class FinanceTransactionSummary
 {
     public const SETTLEMENT_CURRENCY = 'USD';
 
-    public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '徐总信用卡', 'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'combined' => 'Shopify'];
+    public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '徐总信用卡', 'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'combined' => '合计'];
+
+    /** The total tab is the roll-up of the four preceding payment tabs. */
+    public const COMBINED_CHANNELS = ['paypal', 'xuzong1', 'xuzong2', 'credit_card', 'ye', 'worldpay'];
 
     public static function requiresSubscription(string $tab): bool
     {
@@ -22,7 +25,7 @@ class FinanceTransactionSummary
         $currencies = [];
         $incomplete = [];
         foreach ($items as $item) {
-            if (filled($item['team']) && (! self::requiresSubscription($tab) || filled($item['subscription']))) {
+            if ($tab !== 'combined' && filled($item['team']) && (! self::requiresSubscription($tab) || filled($item['subscription']))) {
                 continue;
             }
             $row['orders'] += (int) ($item['orders'] ?? 0);
@@ -33,7 +36,7 @@ class FinanceTransactionSummary
             $currency = $item['currency'] ?: '未标注币种';
             $currencies[$currency] = true;
             foreach (array_diff(array_keys($this->columns($tab)), array_keys($row)) as $field) {
-                if (($item[$field] ?? null) !== null) {
+                if (($item[$field] ?? null) !== null && is_numeric($item[$field])) {
                     $unit = $currency;
                     $totals[$field][$unit] = bcadd($totals[$field][$unit] ?? '0', (string) $item[$field], 8);
                 }
@@ -54,9 +57,47 @@ class FinanceTransactionSummary
         return $row;
     }
 
+    /** The complete first-row total for a tab, including missing groups. */
+    public function totalSummary(array $items, string $tab, string $month): array
+    {
+        $row = ['channel' => self::VIEWS[$tab], 'account' => '全部数据汇总（含缺失）', 'currency' => self::SETTLEMENT_CURRENCY,
+            'team' => '', 'subscription' => '', 'month' => $month, 'orders' => 0, 'failed_orders' => 0,
+            'account_group' => 'total-summary:'.$tab.':'.$month];
+        $totals = [];
+        $currencies = [];
+        $incomplete = [];
+        foreach ($items as $item) {
+            $row['orders'] += (int) ($item['orders'] ?? 0);
+            $row['failed_orders'] += (int) ($item['failed_orders'] ?? 0);
+            foreach ($item['_incomplete_usd_fields'] ?? [] as $field) {
+                $incomplete[$field] = true;
+            }
+            $currency = $item['currency'] ?: '未标注币种';
+            $currencies[$currency] = true;
+            foreach (array_diff(array_keys($this->columns($tab)), array_keys($row)) as $field) {
+                if (($item[$field] ?? null) !== null && is_numeric($item[$field])) {
+                    $totals[$field][$currency] = bcadd($totals[$field][$currency] ?? '0', (string) $item[$field], 8);
+                }
+            }
+        }
+        foreach ($totals as $field => $amounts) {
+            ksort($amounts);
+            $row[$field] = count($amounts) === 1 ? reset($amounts) : implode(' / ', array_map(
+                fn ($amount) => FinanceCatalog::reportAmount($amount, 3), array_values($amounts),
+            ));
+        }
+        ksort($currencies);
+        $row['currency'] = $currencies === [] ? self::SETTLEMENT_CURRENCY : implode(' / ', array_keys($currencies));
+        foreach (array_keys($incomplete) as $field) {
+            $row[$field] = null;
+        }
+
+        return $row;
+    }
+
     public function reallocateUnassignedFailures(array $items, string $tab): array
     {
-        if (self::requiresSubscription($tab)) {
+        if (self::requiresSubscription($tab) || $tab === 'combined') {
             return $items;
         }
 
@@ -86,7 +127,9 @@ class FinanceTransactionSummary
 
     public function columns(string $tab): array
     {
-        return [...self::COMMON, ...match ($tab) {
+        $common = $tab === 'combined' ? array_diff_key(self::COMMON, ['team' => true, 'subscription' => true]) : self::COMMON;
+
+        return [...$common, ...match ($tab) {
             'paypal' => self::PAYPAL,
             'credit_card', 'ye', 'worldpay' => ['hold' => '保证金', ...self::CARD],
             'combined' => ['hold' => '保证金', 'dispute_hold' => '争议冻结金额', ...self::CARD],
@@ -99,11 +142,14 @@ class FinanceTransactionSummary
         $failedByMonth = [];
         foreach ($rows as $row) {
             $dimensions = ['account' => $row['account'],
-                'currency' => $usd ? ($row['_summary_settlement_currency'] ?? self::SETTLEMENT_CURRENCY) : $row['currency'], 'team' => $row['team'],
-                'subscription' => $row['subscription'], 'month' => $row['month']];
-            $key = json_encode([$row['payment_channel'] ?? $row['channel'], $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
+                'currency' => $usd ? ($row['_summary_settlement_currency'] ?? self::SETTLEMENT_CURRENCY) : $row['currency'],
+                ...($tab === 'combined' ? [] : ['team' => $row['team'], 'subscription' => $row['subscription']]),
+                'month' => $row['month']];
+            $paymentChannel = $row['payment_channel'] ?? $row['channel'];
+            $summaryChannel = $tab === 'combined' ? self::combinedChannel($paymentChannel) : $paymentChannel;
+            $key = json_encode([$summaryChannel, $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
             $group = &$groups[$key];
-            $group ??= [...$dimensions, 'channel' => self::VIEWS[$tab], '_payment_channel' => $row['payment_channel'] ?? $row['channel'],
+            $group ??= [...$dimensions, 'channel' => $tab === 'combined' ? self::VIEWS[$summaryChannel] : self::VIEWS[$tab], '_payment_channel' => $paymentChannel,
                 'orders' => 0, 'account_group' => $key];
             if (! empty($row['_cost_adjustment'])) {
                 foreach (array_intersect_key($row, ['purchase' => true, 'logistics' => true]) as $field => $value) {
@@ -196,6 +242,14 @@ class FinanceTransactionSummary
         return $groups;
     }
 
+    private static function combinedChannel(string $channel): string
+    {
+        return match ($channel) {
+            'xuzong', 'xuzong1', 'xuzong2', 'credit_card' => 'credit_card',
+            default => $channel,
+        };
+    }
+
     /** Aggregate failure allocation for all settlement tabs in one projection scan. */
     public function summarizeFailuresByTab(iterable $rows): array
     {
@@ -240,7 +294,9 @@ class FinanceTransactionSummary
         $teams = [];
         foreach ($groups as $key => &$group) {
             $group['failed_orders'] ??= 0;
-            if ($group['orders'] > 0 && filled($group['team'])
+            if ($tab === 'combined' && $group['orders'] > 0) {
+                $teams[$group['month']]['汇总'][$key] = $group['orders'];
+            } elseif ($group['orders'] > 0 && filled($group['team'])
                 && (! self::requiresSubscription($tab) || filled($group['subscription']))) {
                 $teams[$group['month']][$group['team']][$key] = $group['orders'];
             }

@@ -246,7 +246,7 @@ class DepartmentController extends Controller
         return $content
             ->title($parent ? __('organization.departments.create_child') : __('organization.departments.create_root'))
             ->description(__('organization.departments.title'))
-            ->body($this->form(null, $parent));
+            ->body($this->form(null, $parent, $this->departmentIndexReturnUrl($request)));
     }
 
     public function store(Request $request): RedirectResponse
@@ -264,17 +264,17 @@ class DepartmentController extends Controller
 
         admin_success(__('organization.departments.title'), __('organization.departments.save_created'));
 
-        return redirect(admin_url('organization/departments'));
+        return redirect()->to($this->departmentIndexReturnUrl($request));
     }
 
-    public function edit(Department $department, Content $content): Content
+    public function edit(Department $department, Request $request, Content $content): Content
     {
         $this->authorizeDepartmentManagement($department);
 
         return $content
             ->title(__('organization.departments.edit_department'))
             ->description($department->name)
-            ->body($this->form($department, $department->parent)->edit($department->getKey()));
+            ->body($this->form($department, $department->parent, $this->departmentIndexReturnUrl($request))->edit($department->getKey()));
     }
 
     public function update(Request $request, Department $department): RedirectResponse
@@ -285,7 +285,7 @@ class DepartmentController extends Controller
 
         admin_success(__('organization.departments.title'), __('organization.departments.save_updated'));
 
-        return redirect(admin_url('organization/departments'));
+        return redirect()->to($this->departmentIndexReturnUrl($request));
     }
 
     public function destroy(Department $department): RedirectResponse|JsonResponse
@@ -357,6 +357,7 @@ class DepartmentController extends Controller
 
         $grid->setName('organization-departments');
         $grid->setActionClass(OrganizationActions::class);
+        $returnTo = request()->fullUrl();
         $grid->model()
             ->where('slug', '!=', Department::SYSTEM_SLUG)
             ->with(['children', 'departmentMembers', 'permissions'])
@@ -364,17 +365,17 @@ class DepartmentController extends Controller
             ->orderByRaw('CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END')
             ->orderBy('sort')
             ->orderBy('name');
+        $grid->disableCreateButton();
         if (!$isSystemAdministrator) {
             $grid->model()->whereIn('id', $managedDepartmentIds->all());
-            $grid->disableCreateButton();
         }
         $grid->disableExport();
         $grid->disableFilter();
 
-        $grid->column('name', __('organization.departments.department_name'))->display(function (string $name) use ($isSystemAdministrator, $managedDepartmentIds): string {
+        $grid->column('name', __('organization.departments.department_name'))->display(function (string $name) use ($isSystemAdministrator, $managedDepartmentIds, $returnTo): string {
             $isChild = (bool) $this->parent_id;
             $hasVisibleParent = $isSystemAdministrator || $managedDepartmentIds->contains((int) $this->parent_id);
-            $url = admin_url('organization/departments/'.$this->getKey().'/edit');
+            $url = admin_url('organization/departments/'.$this->getKey().'/edit?'.http_build_query(['return_to' => $returnTo]));
             $hasChildren = $this->children->isNotEmpty();
             $isVisibleChild = $isChild && $hasVisibleParent;
             $levelLabel = $isChild ? __('organization.departments.level_child') : __('organization.departments.level_root');
@@ -432,13 +433,14 @@ class DepartmentController extends Controller
         });
 
         $authorization = $this->authorization;
-        $grid->actions(function (OrganizationActions $actions) use ($actor, $isSystemAdministrator, $authorization): void {
+        $grid->actions(function (OrganizationActions $actions) use ($actor, $isSystemAdministrator, $authorization, $returnTo): void {
             $actions->disableView();
             $actions->disableEdit();
             $actions->disableDelete();
             $department = $actions->row;
             $departmentId = $department->getKey();
-            $actions->append($actions->editButton());
+            $editUrl = admin_url('organization/departments/'.$departmentId.'/edit?'.http_build_query(['return_to' => $returnTo]));
+            $actions->append('<a href="'.e($editUrl).'" class="btn btn-xs btn-primary organization-grid-action" title="'.e(__('organization.common.edit')).'"><i class="fa fa-edit"></i> '.e(__('organization.common.edit')).'</a>');
 
             if ($isSystemAdministrator) {
                 $permissionUrl = admin_url('organization/departments/'.$departmentId.'/permissions');
@@ -446,7 +448,7 @@ class DepartmentController extends Controller
             }
 
             if (!$department->parent_id && $authorization->canCreateChildDepartment($actor, $department)) {
-                $childUrl = admin_url('organization/departments/create?parent_id='.$departmentId);
+                $childUrl = admin_url('organization/departments/create?'.http_build_query(['parent_id' => $departmentId, 'return_to' => $returnTo]));
                 $actions->append('<a href="'.e($childUrl).'" class="btn btn-xs btn-default organization-grid-action" title="'.e(__('organization.departments.create_child')).'"><i class="fa fa-plus-square-o"></i> '.e(__('organization.departments.create_child')).'</a>');
             }
 
@@ -462,8 +464,10 @@ class DepartmentController extends Controller
             }
         });
 
-        $grid->tools(function (Tools $tools) use ($isSystemAdministrator): void {
+        $grid->tools(function (Tools $tools) use ($isSystemAdministrator, $returnTo): void {
             if ($isSystemAdministrator) {
+                $createUrl = admin_url('organization/departments/create?'.http_build_query(['return_to' => $returnTo]));
+                $tools->append('<a href="'.e($createUrl).'" class="btn btn-sm btn-success"><i class="fa fa-plus"></i> '.e(__('organization.departments.create_root')).'</a>');
                 $tools->append('<a href="'.e(admin_url('organization/departments/bindings')).'" class="btn btn-sm btn-primary"><i class="fa fa-link"></i> 运营/助理部门绑定</a>');
             }
             $tools->batch(function (Tools\BatchActions $actions): void {
@@ -474,7 +478,7 @@ class DepartmentController extends Controller
         return $grid;
     }
 
-    private function form(?Department $department, ?Department $parent): Form
+    private function form(?Department $department, ?Department $parent, string $returnTo): Form
     {
         $actor = $this->administrator();
         $isEditing = $department !== null;
@@ -506,6 +510,7 @@ class DepartmentController extends Controller
             ->readonly()
             ->help(__('organization.departments.code_auto_help'));
         $form->hidden('parent_id')->default($parent?->getKey());
+        $form->hidden('return_to')->default($returnTo);
         $form->html(function () use ($parent): string {
             $parentName = $parent?->name ?? __('organization.departments.root_department_hint');
 
@@ -544,6 +549,25 @@ class DepartmentController extends Controller
         }
 
         return $form;
+    }
+
+    private function departmentIndexReturnUrl(Request $request): string
+    {
+        $defaultUrl = admin_url('organization/departments');
+        $returnTo = trim((string) $request->input('return_to'));
+        if ($returnTo === '') {
+            return $defaultUrl;
+        }
+
+        $returnParts = parse_url($returnTo);
+        $defaultParts = parse_url($defaultUrl);
+        if (! is_array($returnParts) || ! is_array($defaultParts)
+            || ($returnParts['host'] ?? null) !== ($defaultParts['host'] ?? null)
+            || ($returnParts['path'] ?? null) !== ($defaultParts['path'] ?? null)) {
+            return $defaultUrl;
+        }
+
+        return $returnTo;
     }
 
     private function departmentRules(): array

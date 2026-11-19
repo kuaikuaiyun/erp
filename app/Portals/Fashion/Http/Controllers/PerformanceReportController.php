@@ -113,24 +113,12 @@ class PerformanceReportController extends Controller
             ->whereNotNull('orders.paid_at_utc')
             ->whereBetween(DB::raw($orderTimestampSql), [$storageFrom, $storageTo]);
 
-        if ($this->project['code'] === 'fuzhuang') {
-            $base->where(function ($platform): void {
-                $platform->where(function ($xshoppy): void {
-                    $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
-                        ->where('orders.source_platform', 'xshoppy');
-                })->orWhere(function ($shopline): void {
-                    $shopline->whereRaw("LOWER(TRIM(stores.site_builder)) = 'shopline'")
-                        ->where('orders.source_platform', 'shopline');
-                });
-            });
-        } else {
-            $base->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($this->project));
-            $base->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END");
-            $base->where(function ($paid): void {
-                $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
-                    ->orWhere('orders.payment_status', '230');
-            });
-        }
+        $base->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($this->project));
+        $base->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END");
+        $base->where(function ($paid): void {
+            $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
+                ->orWhere('orders.payment_status', '230');
+        });
 
         $selectedSiteBuilder = (string) ($validated['site_builder'] ?? '');
         if ($selectedSiteBuilder !== '') {
@@ -482,11 +470,7 @@ class PerformanceReportController extends Controller
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
             ->where('id', (int) $validated['store_id'])
-            ->when(
-                $this->project['code'] === 'fuzhuang',
-                fn ($query) => $query->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
-            )
-            ->when($this->project['code'] !== 'fuzhuang', fn ($query) => $query->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project)))
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project))
             ->when(! $user->isAdministrator(), function ($query) use ($visibleOperatorIds, $visibleOperatorNames): void {
                 $query->where(function ($binding) use ($visibleOperatorIds, $visibleOperatorNames): void {
                     if ($visibleOperatorIds !== []) {
@@ -662,20 +646,7 @@ class PerformanceReportController extends Controller
     private function reportOperators(AdminUser $user, $managedDepartmentIds)
     {
         if ($user->isAdministrator()) {
-            if ($this->project['code'] !== 'fuzhuang') {
-                return $this->projectStoreOperators();
-            }
-            $storeOperatorIds = DB::connection(config('admin.database.connection') ?: config('database.default'))
-                ->table('assistant_domain_stores')
-                ->whereNotNull('owner_user_id')
-                ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
-                ->distinct()->pluck('owner_user_id')->map(fn ($id): int => (int) $id);
-            $operatorIds = $storeOperatorIds
-                ->merge($this->fashionOperators()->pluck('id')->map(fn ($id): int => (int) $id))
-                ->unique()->values();
-
-            return AdminUser::query()->whereIn('id', $operatorIds)
-                ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
+            return $this->projectStoreOperators();
         }
 
         if ($managedDepartmentIds->isEmpty()) {
@@ -732,10 +703,6 @@ class PerformanceReportController extends Controller
     /** @return array<string,string> */
     private function siteBuilderOptions(): array
     {
-        if ($this->project['code'] === 'fuzhuang') {
-            return ['xshoppy' => 'XShoppy', 'shopline' => 'Shopline'];
-        }
-
         return DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
             ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project))

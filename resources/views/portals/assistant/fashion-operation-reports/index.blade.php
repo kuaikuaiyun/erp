@@ -1,5 +1,5 @@
 @extends('portal.layout')
-@section('page_title','服装运营报表')
+@section('page_title', $reportProject['code'] === 'danbao-general' ? '单包百货运营报表' : '单包服装运营报表')
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <style>
@@ -15,16 +15,16 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>服装运营报表 <small>XShoppy、Shopline 店铺业绩与广告花费统计</small></h1></section>
+<section class="content-header"><h1>{{ $reportProject['code'] === 'danbao-general' ? '单包百货运营报表' : '单包服装运营报表' }} <small>对应项目 XShoppy、Shopline 店铺业绩与广告花费统计</small></h1></section>
 <section class="content">
-<div class="box fashion-report-filter"><div class="box-body"><form class="report-filter" method="get">
+<div class="box fashion-report-filter"><div class="box-body"><form class="report-filter" method="get"><input type="hidden" name="project_code" value="{{ $reportProject['code'] }}">
  <div class="form-group"><label>时间范围</label><select class="form-control" name="date_range" id="fashion-date-range"><option value="today" @selected(($filters['date_range']??'yesterday')==='today')>今天</option><option value="yesterday" @selected(($filters['date_range']??'yesterday')==='yesterday')>昨天</option><option value="last_7_days" @selected(($filters['date_range']??'yesterday')==='last_7_days')>近 7 天</option><option value="last_15_days" @selected(($filters['date_range']??'yesterday')==='last_15_days')>近 15 天</option><option value="last_30_days" @selected(($filters['date_range']??'yesterday')==='last_30_days')>近 30 天</option><option value="this_month" @selected(($filters['date_range']??'yesterday')==='this_month')>本月</option><option value="last_month" @selected(($filters['date_range']??'yesterday')==='last_month')>上月</option><option value="custom" @selected(($filters['date_range']??'yesterday')==='custom')>自定义时间</option></select></div>
  <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"></div><div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></div>
  <div class="form-group"><label>统计时区</label><select class="form-control" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{ $value }}" @selected($filters['timezone']===$value)>{{ $label }}</option>@endforeach</select></div>
  @include('portals.assistant.partials.operation-department-multi-filter',['departments'=>$departmentOptions,'selectedIds'=>$filters['department_ids'],'inputName'=>'department_ids','label'=>'运营部门'])<div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $filters['operator']??'' }}" placeholder="输入姓名"></div>
  <div class="form-group"><label>离职人员</label><select class="form-control" name="exclude_resigned"><option value="0" @selected(!($filters['exclude_resigned']??false))>包含离职人员</option><option value="1" @selected($filters['exclude_resigned']??false)>排除离职人员</option></select></div>
  <div class="form-group"><label>数据模式</label><select class="form-control" name="display_mode"><option value="performance" @selected(($filters['display_mode']??'performance')==='performance')>业绩模式</option><option value="team" @selected(($filters['display_mode']??'performance')==='team')>团队模式</option></select></div>
- <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route($fashionReportIndexRoute) }}">重置</a><button type="button" class="btn report-download-button" id="fashionReportImageDownload"><i class="fa fa-picture-o"></i> <span>下载列表图片</span></button>
+ <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route($fashionReportIndexRoute, ['project_code' => $reportProject['code']]) }}">重置</a><button type="button" class="btn report-download-button" id="fashionReportImageDownload"><i class="fa fa-picture-o"></i> <span>下载列表图片</span></button>
 </form></div></div>
 <div class="report-summary"><div class="report-card"><span>运营人数</span><strong>{{ $summary['people'] }}</strong></div><div class="report-card"><span>店铺数量</span><strong>{{ $summary['stores'] }}</strong></div><div class="report-card"><span>订单量</span><strong>{{ $summary['orders'] }}</strong></div><div class="report-card"><span>总业绩</span><strong>${{ number_format($summary['revenue'],2) }}</strong></div><div class="report-card"><span>客单价</span><strong>{{ $summary['aov']!==null?'$'.number_format($summary['aov'],2):'—' }}</strong></div><div class="report-card"><span>广告费</span><strong>${{ number_format($summary['ad_spend'],2) }}</strong></div><div class="report-card"><span>总 ROI</span><strong>{{ $summary['roi']!==null?number_format($summary['roi'],2):'—' }}</strong></div></div>
 <div class="report-note"><i class="fa fa-info-circle"></i> 订单业绩来自运营绑定店铺的所有订单，不限制付款状态；广告费统计审核通过和审核不通过的服装广告费提报，待审核数据暂不计入。各媒体仅显示实际广告花费；总 ROI＝总业绩÷全部实际广告费。</div>

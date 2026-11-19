@@ -1,6 +1,6 @@
 (() => {
     const notice = document.querySelector('[data-finance-snapshot-status]');
-    const form = notice?.parentElement.querySelector('form[method="get"]');
+    const form = document.querySelector('form[method="get"]');
     if (!form) return;
 
     const url = new URL(window.location.href);

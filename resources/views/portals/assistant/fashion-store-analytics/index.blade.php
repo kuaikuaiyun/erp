@@ -1,5 +1,5 @@
 @extends('portal.layout')
-@section('page_title', '服装店铺分析')
+@section('page_title', $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析')
 @push('styles')
 <style>
 .fashion-filter-grid:before,.fashion-filter-grid:after{display:none!important;content:none!important}
@@ -8,9 +8,9 @@
 @endpush
 @section('content')
 @php
-$sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['sort'=>$field,'direction'=>$direction]));};
+$sortUrl=function($field)use($filters,$reportProject){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['project_code'=>$reportProject['code'],'sort'=>$field,'direction'=>$direction]));};
 @endphp
-<section class="content-header"><h1>服装店铺分析 <small>统计 XShoppy、Shopline 服装店铺订单与营业额</small></h1></section>
+<section class="content-header"><h1>{{ $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析' }} <small>统计对应项目 XShoppy、Shopline 店铺订单与营业额</small></h1></section>
 <section class="content">
 <div class="fashion-analytics-summary">
 <div class="fashion-kpi"><span>店铺数</span><strong>{{ number_format($summary['stores_count']) }}</strong></div>
@@ -19,7 +19,7 @@ $sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$fi
 <div class="fashion-kpi"><span>营业额</span><strong>US${{ number_format($summary['total_sales'],2) }}</strong></div>
 <div class="fashion-kpi"><span>平均客单价</span><strong>US${{ number_format($summary['average_order_value'],2) }}</strong></div>
 </div>
-<div class="box fashion-filter"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><form method="get" action="{{ route('assistant.fashion-store-analytics.index') }}"><div class="box-body fashion-filter-body fashion-filter-grid">
+<div class="box fashion-filter"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><form method="get" action="{{ route('assistant.fashion-store-analytics.index') }}"><input type="hidden" name="project_code" value="{{ $reportProject['code'] }}"><div class="box-body fashion-filter-body fashion-filter-grid">
 <div class="form-group"><label>店铺名</label><input class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}" placeholder="请输入店铺名"></div>
 <div class="form-group"><label>域名</label><input class="form-control" name="domain" value="{{ $filters['domain'] }}" placeholder="请输入域名"></div>
 <div class="form-group"><label>建站平台</label><select class="form-control" name="platform"><option value="">全部</option><option value="xshoppy" @selected($filters['platform']==='xshoppy')>XShoppy</option><option value="shopline" @selected($filters['platform']==='shopline')>Shopline</option></select></div>
@@ -30,12 +30,12 @@ $sortUrl=function($field)use($filters){$direction=$filters['sort']===$field&&$fi
 <div class="form-group"><label>统计时区</label><select class="form-control" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{ $value }}" @selected($filters['timezone']===$value)>{{ $label }}</option>@endforeach</select></div>
 <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="from_date" value="{{ $filters['from_date'] }}"></div>
 <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="to_date" value="{{ $filters['to_date'] }}"></div>
-<div class="fashion-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.fashion-store-analytics.index') }}">重置</a></div>
+<div class="fashion-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.fashion-store-analytics.index', ['project_code' => $reportProject['code']]) }}">重置</a></div>
 </div>
 </div></form></div>
 <div class="box fashion-list"><div class="box-header with-border"><h3 class="box-title">店铺数据 <small>共 {{ $stores->total() }} 家</small></h3></div><div class="table-responsive"><table class="table table-bordered table-hover fashion-table"><thead><tr>
 <th><a class="sort-link" href="{{ $sortUrl('shop_name') }}">店铺</a></th><th><a class="sort-link" href="{{ $sortUrl('domain') }}">域名</a></th><th><a class="sort-link" href="{{ $sortUrl('email_purchased') }}">邮箱购买</a></th><th><a class="sort-link" href="{{ $sortUrl('platform') }}">平台</a></th><th>团队</th><th>归属人</th><th><a class="sort-link" href="{{ $sortUrl('orders_count') }}">订单数</a></th><th><a class="sort-link" href="{{ $sortUrl('total_sales') }}">营业额</a></th><th><a class="sort-link" href="{{ $sortUrl('average_order_value') }}">客单价</a></th><th><a class="sort-link" href="{{ $sortUrl('last_paid_at') }}">最近付款</a></th><th>最近同步</th>
-</tr></thead><tbody>@forelse($stores as $store)<tr><td><strong>{{ $store->shop_name ?: '—' }}</strong></td><td>{{ $store->domain ?: '—' }}</td><td><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? '是' : '否' }}</span></td><td><span class="platform-label">{{ mb_strtolower(trim((string)$store->site_builder))==='shopline'?'Shopline':'XShoppy' }}</span></td><td>{{ is_array($store->team)?implode('、',$store->team):($store->team?:'—') }}</td><td>{{ $store->owner_name ?: $store->user_name ?: '未归属' }}</td><td class="metric-main">{{ number_format((int)($store->analytics_orders_count??0)) }}</td><td><span class="metric-main">US${{ number_format((float)($store->analytics_total_sales??0),2) }}</span></td><td>US${{ number_format((float)($store->analytics_average_order_value??0),2) }}</td><td>{{ $store->analytics_last_paid_at?\Carbon\Carbon::parse($store->analytics_last_paid_at,'UTC')->timezone($filters['timezone'])->format('Y-m-d H:i'):'—' }}</td><td>{{ $store->analytics_last_synced_at?\Carbon\Carbon::parse($store->analytics_last_synced_at,'UTC')->timezone($filters['timezone'])->format('Y-m-d H:i'):'—' }}</td></tr>@empty<tr><td colspan="11" class="text-center text-muted" style="padding:35px">暂无符合条件的服装店铺数据</td></tr>@endforelse</tbody></table></div>
+</tr></thead><tbody>@forelse($stores as $store)@php($platform=mb_strtolower(trim((string)$store->site_builder)))<tr><td><strong>{{ $store->shop_name ?: '—' }}</strong></td><td>{{ $store->domain ?: '—' }}</td><td><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? '是' : '否' }}</span></td><td><span class="platform-label">{{ in_array($platform,['xshoppy','xshopy'],true)?'XShoppy':($platform==='shopline'?'Shopline':($store->site_builder?:'未填写')) }}</span></td><td>{{ is_array($store->team)?implode('、',$store->team):($store->team?:'—') }}</td><td>{{ $store->owner_name ?: $store->user_name ?: '未归属' }}</td><td class="metric-main">{{ number_format((int)($store->analytics_orders_count??0)) }}</td><td><span class="metric-main">US${{ number_format((float)($store->analytics_total_sales??0),2) }}</span></td><td>US${{ number_format((float)($store->analytics_average_order_value??0),2) }}</td><td>{{ $store->analytics_last_paid_at?\Carbon\Carbon::parse($store->analytics_last_paid_at,'UTC')->timezone($filters['timezone'])->format('Y-m-d H:i'):'—' }}</td><td>{{ $store->analytics_last_synced_at?\Carbon\Carbon::parse($store->analytics_last_synced_at,'UTC')->timezone($filters['timezone'])->format('Y-m-d H:i'):'—' }}</td></tr>@empty<tr><td colspan="11" class="text-center text-muted" style="padding:35px">暂无符合条件的店铺数据</td></tr>@endforelse</tbody></table></div>
 @php($pageStart=max(1,$stores->currentPage()-2))
 @php($pageEnd=min($stores->lastPage(),$stores->currentPage()+2))
 <div class="box-footer fashion-pagination">

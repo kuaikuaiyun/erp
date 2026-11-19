@@ -25,6 +25,13 @@
         $menuPath = '/'.trim(parse_url($candidatePath, PHP_URL_PATH) ?: $candidatePath, '/');
         parse_str((string) parse_url($candidatePath, PHP_URL_QUERY), $menuQuery);
 
+        // Project report pages share the same route and are separated by project_code.
+        // Match it explicitly so their two parent menus cannot be expanded together.
+        if (array_key_exists('project_code', $menuQuery)
+            && (string) request()->query('project_code', '') !== (string) $menuQuery['project_code']) {
+            return false;
+        }
+
         foreach ($menuQuery as $key => $value) {
             if (! array_key_exists($key, $currentQuery) || (string) $currentQuery[$key] !== (string) $value) {
                 return false;

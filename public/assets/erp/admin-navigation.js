@@ -11,7 +11,7 @@
         return normalised || '/';
     }
 
-    function linkPath(link) {
+    function linkTarget(link) {
         var href = link.getAttribute('href');
 
         if (!href || href === '#' || href.indexOf('javascript:') === 0) {
@@ -21,7 +21,10 @@
         try {
             var url = new window.URL(link.href, window.location.origin);
 
-            return url.origin === window.location.origin ? normalisePath(url.pathname) : null;
+            return url.origin === window.location.origin ? {
+                path: normalisePath(url.pathname),
+                query: url.searchParams
+            } : null;
         } catch (error) {
             return null;
         }
@@ -41,7 +44,22 @@
         return candidatePath.split('/').filter(Boolean).length > 1;
     }
 
-    function findBestMenuItem(menu, currentPath) {
+    function matchesCurrentLocation(currentUrl, candidate) {
+        if (!matchesCurrentPath(normalisePath(currentUrl.pathname), candidate.path)) {
+            return false;
+        }
+
+        var matches = true;
+        candidate.query.forEach(function (value, key) {
+            if (currentUrl.searchParams.get(key) !== value) {
+                matches = false;
+            }
+        });
+
+        return matches;
+    }
+
+    function findBestMenuItem(menu, currentUrl) {
         var best = null;
 
         Array.prototype.forEach.call(menu.querySelectorAll('li > a[href]'), function (link) {
@@ -49,16 +67,17 @@
                 return;
             }
 
-            var candidatePath = linkPath(link);
+            var candidate = linkTarget(link);
 
-            if (!candidatePath || !matchesCurrentPath(currentPath, candidatePath)) {
+            if (!candidate || !matchesCurrentLocation(currentUrl, candidate)) {
                 return;
             }
 
-            if (!best || candidatePath.length > best.path.length) {
+            var score = candidate.path.length + candidate.query.toString().length;
+            if (!best || score > best.score) {
                 best = {
                     item: link.parentElement,
-                    path: candidatePath
+                    score: score
                 };
             }
         });
@@ -89,7 +108,7 @@
             return;
         }
 
-        var activeItem = findBestMenuItem(menu, normalisePath(window.location.pathname));
+        var activeItem = findBestMenuItem(menu, new window.URL(window.location.href));
 
         if (!activeItem) {
             return;
@@ -149,5 +168,4 @@
         initialise();
     }
 })(window, document);
-
 

@@ -1599,6 +1599,11 @@ class FinanceController extends Controller
             'conditions.*.operator' => 'required|in:equals', 'conditions.*.value' => 'required|string|max:191',
         ]);
         $tab = $filters['channel'] ?? 'paypal';
+        // The total is the cross-channel roll-up. It intentionally has no
+        // region or subscription-type dimension/filter.
+        if ($tab === 'combined') {
+            unset($filters['team'], $filters['subscription']);
+        }
         $accountMatchesTab = static function (FinancePaymentAccount $account, string $tab): bool {
             return match ($tab) {
                 'combined' => true,
@@ -1641,16 +1646,22 @@ class FinanceController extends Controller
         $columns = $summary->columns($tab);
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
-        // Currency is a dimension of the completed summary. Build one monthly
-        // snapshot and filter it afterwards so switching currencies never
-        // triggers another source scan.
-        $buildScope = \Illuminate\Support\Arr::except($scope, ['currency']);
+        // These values are dimensions of the completed summary. Build one
+        // channel/month snapshot and filter it afterwards so ordinary searches
+        // do not register a new background report for every combination.
+        $buildScope = \Illuminate\Support\Arr::except($scope, [
+            'currency', 'payment_account_id', 'team', 'subscription',
+        ]);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
         $snapshotId = ! $statusOnly && ($request->boolean('download') || $request->has('page'))
             ? $request->query('report_snapshot')
             : null;
-        $build = fn () => $this->buildTransactionReport($tab, $buildScope, $month, $account);
-        $snapshotScope = [...$buildScope, 'channel' => $tab, '_settlement_currency_summary' => 1];
+        $build = fn () => $this->buildTransactionReport($tab, $buildScope, $month, null);
+        // The combined result no longer uses the retired Shopify label or
+        // dimensions. Its own scope prevents serving an older snapshot, and
+        // includes the team-missing summary introduced for the total view.
+        $snapshotScope = [...$buildScope, 'channel' => $tab, '_settlement_currency_summary' => 3,
+            ...($tab === 'combined' ? ['_combined_channel_rollup' => 10] : [])];
         $db = $this->workbooks->database();
         $live = true;
         $reusePublishedRevision = false;
@@ -1687,21 +1698,54 @@ class FinanceController extends Controller
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
+        $missingSummaryItems = [];
+        if ($tab === 'combined') {
+            foreach ($items as $index => $item) {
+                if (isset($item['_combined_missing_summary_groups'])) {
+                    $missingSummaryItems = $item['_combined_missing_summary_groups'];
+                    unset($items[$index]);
+                }
+            }
+            $items = array_values($items);
+        }
         $currencyOptions = collect($items)->pluck('currency')->filter()->unique()->sort()->values();
         if (filled($filters['currency'] ?? null)) {
             $items = array_values(array_filter($items, fn ($item) => $item['currency'] === $filters['currency']));
+            $missingSummaryItems = array_values(array_filter($missingSummaryItems, fn ($item) => $item['currency'] === $filters['currency']));
+        }
+        if ($account) {
+            $belongsToAccount = function ($item) use ($account): bool {
+                try {
+                    $dimensions = json_decode($item['account_group'] ?? '[]', true, 512, JSON_THROW_ON_ERROR);
+                } catch (\JsonException) {
+                    return false;
+                }
+
+                return ($dimensions[1] ?? null) === $account->activity_account;
+            };
+            $items = array_values(array_filter($items, $belongsToAccount));
+            $missingSummaryItems = array_values(array_filter($missingSummaryItems, $belongsToAccount));
+        }
+        if ($tab !== 'combined' && filled($filters['team'] ?? null)) {
+            $items = array_values(array_filter($items, fn ($item) => $item['team'] === $filters['team']));
+        }
+        if ($tab !== 'combined' && filled($filters['subscription'] ?? null)) {
+            $subscription = $service::subscriptionLabel($filters['subscription']);
+            $items = array_values(array_filter($items, fn ($item) => $item['subscription'] === $subscription));
         }
         $items = $summary->reallocateUnassignedFailures($items, $tab);
-        $missingSummary = $summary->missingSummary($items, $tab, $filters['month']);
-        $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
-            && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
+        // Every tab begins with a total that includes normal and missing rows.
+        $totalSummary = $summary->totalSummary($items, $tab, $filters['month']);
+        $missingSummary = $summary->missingSummary($tab === 'combined' ? $missingSummaryItems : $items, $tab, $filters['month']);
+        if ($tab !== 'combined') {
+            $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
+                && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
+        }
         if ($request->boolean('download')) {
             abort_if(! $live && $reportSnapshot === null, 409, '报表正在生成，请稍后导出。');
-            // Keep the missing-data row when it carries data (or is the only
-            // result), but do not put an empty placeholder before valid rows.
-            $exportRows = $items === [] || (int) $missingSummary['orders'] > 0 || (int) $missingSummary['failed_orders'] > 0
-                ? [$missingSummary, ...$items]
-                : $items;
+            // Both summary rows are exported for every tab, even when the
+            // missing row happens to be all zeroes.
+            $exportRows = [$totalSummary, $missingSummary, ...$items];
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $exportRows)
                 ->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
 
@@ -1728,6 +1772,7 @@ class FinanceController extends Controller
         return response()->view('portals.finance.report', [
             ...$context, 'report' => $report, 'filters' => $filters, 'columns' => $columns, 'items' => $items, 'paginator' => $paginator,
             'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
+            'totalSummary' => $totalSummary,
             'missingSummary' => $missingSummary,
             'creditMonths' => $creditMonths,
             'currencyOptions' => $currencyOptions,
@@ -1837,7 +1882,15 @@ class FinanceController extends Controller
     {
         $service = app(FinanceSettlementService::class);
         $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
-        $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account, reuse: $reuse)
+        // A reporting month is cut at each payment channel's settlement
+        // timezone, matching the settlement overview.  This is important at
+        // the beginning/end of a month: a PayPal or Xu Zong transaction must
+        // not move months merely because the browser is in Beijing time.
+        // Currency values remain USD summary values.  In particular, a Ye
+        // transaction's buyer currency must not be displayed as its blank
+        // settlement currency.
+        $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account, reuse: $reuse,
+            settlementTimezones: true)
             ->filter(fn ($row) => $service->matches($row, $scope['conditions'] ?? []));
 
         $subscriptions = [];
@@ -1852,6 +1905,7 @@ class FinanceController extends Controller
             'paypal' => ['paypal'],
             'ye' => ['ye'],
             'worldpay' => ['worldpay'],
+            'combined' => ['paypal', 'xuzong1', 'xuzong2', 'ye', 'worldpay'],
             default => ['xuzong1', 'xuzong2', 'ye', 'worldpay'],
         };
         $cnyRatesByChannel = $accounting->monthlyCnyRates($month->format('Y-m'), $rateChannels);
@@ -1876,6 +1930,24 @@ class FinanceController extends Controller
             }
             unset($item);
         }
+        if ($tab === 'combined') {
+            // Sum exactly the missing rows used by each of the four source
+            // tabs: PayPal/credit card require both team and subscription;
+            // Ye/Worldpay require team only.
+            $missingGroups = [];
+            foreach (['paypal', 'credit_card', 'ye', 'worldpay'] as $sourceTab) {
+                $sourceRows = $this->transactionSummaryRows($service, $sourceTab, [], $month, null, reuse: $reuse,
+                    settlementTimezones: true);
+                $sourceItems = $summary->summarize($sourceRows, $sourceTab, usd: true, cnyPerUsdByChannel: $cnyRatesByChannel);
+                foreach ($sourceItems as $sourceItem) {
+                    if (! filled($sourceItem['team'])
+                        || ($summary::requiresSubscription($sourceTab) && ! filled($sourceItem['subscription']))) {
+                        $missingGroups[] = $sourceItem;
+                    }
+                }
+            }
+            $items[] = ['_combined_missing_summary_groups' => $missingGroups];
+        }
 
         return [$items, $service->subscriptionOptions(collect($subscriptions), includeSourceOptions: false)->all()];
     }
@@ -1892,7 +1964,8 @@ class FinanceController extends Controller
                 'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
                 'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account ?? ($filters['account'] ?? null),
                 'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
-                'logistics_costs' => ! $settlementTimezones, 'summary_native_settlement' => ! $settlementTimezones,
+                'logistics_costs' => ! $settlementTimezones,
+                'summary_native_settlement' => ! $settlementTimezones,
                 'include_unmatched_fees' => $settlementTimezones || $tab === 'ye',
             ];
             if (filled($filters['payment_method'] ?? null)) {
@@ -1901,7 +1974,7 @@ class FinanceController extends Controller
             $paymentChannels = match ($tab) {
                 'credit_card' => ['xuzong1', 'xuzong2'],
                 'ye', 'worldpay' => [$tab],
-                'combined' => FinanceSettlementService::SHOPIFY_SUMMARY_CHANNELS,
+                'combined' => \App\Portals\Finance\FinanceTransactionSummary::COMBINED_CHANNELS,
                 default => [],
             };
             $projection = $reuse && ! $settlementTimezones ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
@@ -1915,7 +1988,7 @@ class FinanceController extends Controller
                 if ($paymentChannel === 'worldpay' && $row['failed']) {
                     $row['team'] = '';
                 }
-                if ($tab === 'combined' && ! FinanceSettlementService::isShopifySummaryChannel($paymentChannel)) {
+                if ($tab === 'combined' && ! in_array($paymentChannel, \App\Portals\Finance\FinanceTransactionSummary::COMBINED_CHANNELS, true)) {
                     continue;
                 }
                 if ($tab === 'credit_card' && ! in_array($paymentChannel, ['xuzong1', 'xuzong2'], true)
@@ -2840,6 +2913,7 @@ class FinanceController extends Controller
         }
         $data = $request->validate([
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+            'settlement_currency' => ['nullable', Rule::in(['USD', 'GBP'])],
             'settlement_type' => ['nullable', Rule::in(['正常结算', '停结算'])],
             'files' => 'required|array|list|min:1|max:5',
             'files.*' => 'required|file|extensions:xlsx,csv,txt|max:20480',
@@ -2915,7 +2989,7 @@ class FinanceController extends Controller
                             : \PhpOffice\PhpSpreadsheet\IOFactory::READER_CSV;
                         $account = null;
                         $websites = [];
-                        foreach ($this->creditChannelOrderBatches($file, 'ye', [$readerType]) as $rows) {
+                        foreach ($this->creditChannelOrderBatches($file, 'ye', [$readerType], $data['settlement_currency'] ?? 'USD') as $rows) {
                             foreach (array_unique(array_column($rows, '网站名称')) as $website) {
                                 $website = trim((string) $website);
                                 $matched = $websites[$website] ??= $conflux->resolveAccount($accounts, $website, website: true, actor: $actor);
@@ -2973,7 +3047,7 @@ class FinanceController extends Controller
         return $account;
     }
 
-    private function creditChannelOrderBatches(\Illuminate\Http\UploadedFile $file, string $channel, ?array $readerTypes = null): \Generator
+    private function creditChannelOrderBatches(\Illuminate\Http\UploadedFile $file, string $channel, ?array $readerTypes = null, ?string $settlementCurrency = null): \Generator
     {
         $limit = ini_parse_quantity((string) ini_get('memory_limit'));
         if ($limit > 0 && $limit < 384 * 1024 ** 2) {
@@ -2986,7 +3060,7 @@ class FinanceController extends Controller
             ? $this->workbooks->readConfluxOrderBatches($file, $columns, $sheetName, $optional)
             : [$this->workbooks->read($file, $columns, $sheetName, $optional, keyedHeaders: true, maxRows: 10000, readerTypes: $readerTypes)];
         foreach ($batches as $rows) {
-            yield array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+            yield array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row, $settlementCurrency), $rows);
         }
     }
 
@@ -2998,6 +3072,7 @@ class FinanceController extends Controller
             'card_group' => 'nullable|integer|min:1',
             'account' => $directWorldpay ? 'exclude' : 'required|string|max:191',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+            'settlement_currency' => ['nullable', Rule::in(['USD', 'GBP'])],
         ]);
         $file = $request->file('file');
         $worldpay = $data['card_channel'] === 'worldpay' ? app(\App\Portals\Finance\FinanceWorldpayImport::class) : null;
@@ -3022,7 +3097,7 @@ class FinanceController extends Controller
                     }
                 }
                 $count = $total = 0;
-                foreach ($this->creditChannelOrderBatches($file, $data['card_channel']) as $rows) {
+                foreach ($this->creditChannelOrderBatches($file, $data['card_channel'], settlementCurrency: $data['settlement_currency'] ?? null) as $rows) {
                     $count += $this->workbooks->importRecords('xuzong2-details', $rows, $account,
                         $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
                     $total += count($rows);

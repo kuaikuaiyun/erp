@@ -12,6 +12,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -47,6 +48,9 @@ class FashionOperationReportController extends Controller
         } else {
             $this->authorization->assertAssistantPortal($context['portal']);
         }
+        $projectCode = (string) $request->query('project_code', 'fuzhuang');
+        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        $project = OperationProjectCatalog::get($projectCode);
         $visibleDepartmentIds = $isDashboard
             ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : ($context['user']->isAdministrator() ? null : $this->storeOwners->visibleOperationDepartmentIds($context['user']));
@@ -103,6 +107,7 @@ class FashionOperationReportController extends Controller
 
         $stores = AssistantDomainStore::query()
             ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->whereIn(\DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
             ->with('ownerUser.departments')
             ->orderBy('shop_name')->get();
         $nameUsers = AdminUser::query()->with('departments')->whereIn('name', $stores->pluck('user_name')->filter()->unique())
@@ -118,6 +123,7 @@ class FashionOperationReportController extends Controller
         })->forget(0);
         $operatorIds = $storesByOperator->keys()->map(fn ($id) => (int) $id)->values();
         $operators = AdminUser::query()->with('departments')->whereIn('id', $operatorIds)
+            ->whereHas('departments', fn ($departments) => $departments->whereIn('admin_roles.id', OperationProjectCatalog::departmentIds($projectCode)))
             ->when($excludeResigned, fn ($query) => $query->where(function ($employment) {
                 $employment->whereNull('employment_status')->orWhere('employment_status', '!=', 'resigned');
             }))
@@ -133,6 +139,11 @@ class FashionOperationReportController extends Controller
         $stores = $stores->filter(fn (AssistantDomainStore $store): bool => $storesByOperator->has((int) ($store->owner_user_id
             ?: ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0))))->values();
         $departmentRows = Department::business()->get(['id', 'name', 'slug', 'parent_id', 'sort']);
+        $projectRootDepartmentIds = $departmentRows->whereIn('name', $project['departments'])->pluck('id')
+            ->map(fn ($id): int => (int) $id)->values();
+        $fashionDepartmentIds = OperationProjectCatalog::departmentIds($projectCode);
+        $fashionRootDepartmentId = (int) ($projectRootDepartmentIds->first() ?? 0);
+        /*
         // 部门名称允许业务侧随时调整；报表归属应使用稳定 slug，避免改名后整张报表为空。
         // 名称匹配仅用于兼容尚未统一 slug 的旧环境。
         $fashionDepartment = $departmentRows->firstWhere('slug', self::FASHION_ROOT_DEPARTMENT_SLUG)
@@ -148,6 +159,7 @@ class FashionOperationReportController extends Controller
             $before = $fashionDepartmentIds->count();
             $fashionDepartmentIds = $fashionDepartmentIds->merge($childIds)->unique()->values();
         } while ($fashionDepartmentIds->count() > $before);
+        */
         $orderMetrics = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
             ->where(function ($platform) use ($stores): void {
@@ -165,11 +177,11 @@ class FashionOperationReportController extends Controller
             ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
 
         $reports = FashionAdvertisingReport::query()
+            ->where('project_code', $projectCode)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $operatorIds)
             ->with('adSpendEntries')->get()->groupBy('submitter_id');
 
-        $fashionRootDepartmentId = (int) ($fashionDepartment?->id ?? 0);
         $selectedDepartmentIds = $request->has('department_ids')
             ? collect($validated['department_ids'] ?? [])->map(fn ($id) => (int) $id)->intersect($fashionDepartmentIds)->unique()->values()->all()
             : [];
@@ -221,7 +233,7 @@ class FashionOperationReportController extends Controller
                 }];
         })->filter()->values();
 
-        $departmentOptions = $fashionDepartment
+        $departmentOptions = $fashionDepartmentIds->isNotEmpty()
             ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id)
                 && (int) $department->id !== $fashionRootDepartmentId)
                 ->when($visibleDepartmentIds !== null, fn ($departments) => $departments->whereIn('id', $visibleDepartmentIds))
@@ -278,6 +290,7 @@ class FashionOperationReportController extends Controller
             'fashionReportIndexRoute' => $isDashboard
                 ? 'operation-dashboard.fashion-operation-reports.index'
                 : 'assistant.fashion-operation-reports.index',
+            'reportProject' => $project,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
                 'exclude_resigned' => $excludeResigned,

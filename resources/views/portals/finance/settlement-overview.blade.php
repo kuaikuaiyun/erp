@@ -44,6 +44,10 @@
 .loss-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}.loss-month-panel{margin:0!important}.loss-month-scroll{overflow:auto}.settlement-overview .loss-month-panel table{min-width:420px;table-layout:fixed}.settlement-overview .loss-month-panel th,.settlement-overview .loss-month-panel td{padding:5px 10px!important;font-size:12px;line-height:18px}.loss-month-panel th:first-child{width:200px}.loss-month-panel thead th{background:#dce8f3;font-weight:600}.settlement-overview .loss-month-panel th:not(:first-child),.settlement-overview .loss-month-panel td:not(:first-child){text-align:center}.loss-month-panel tbody tr:hover{background:#f5f9fc}.overview-stats{gap:10px;margin-bottom:12px}.overview-stat{padding:10px 14px}.overview-stat span{margin-bottom:3px}.overview-stat strong{font-size:20px}@media(max-width:1100px){.loss-comparison{grid-template-columns:1fr}}
 .loss-browser{background:#fff;border:1px solid var(--line);border-radius:6px;padding:0 14px 14px}.loss-scope-tabs,.loss-category-tabs{display:flex;gap:6px;flex-wrap:wrap}.loss-scope-tabs{gap:2px;border-bottom:1px solid #ddd;margin-bottom:12px}.loss-scope-tabs a{padding:10px 15px;margin-bottom:-1px;color:#3c8dbc;border:1px solid transparent;border-radius:4px 4px 0 0}.loss-scope-tabs a:hover{background:#eee}.loss-scope-tabs a.is-active{color:#555;background:#fff;border-color:#ddd #ddd #fff}.loss-category-tabs a{padding:5px 12px;color:#526e85;background:#f3f6f9;border:1px solid var(--line);border-radius:4px;font-size:12px}.loss-category-tabs a.is-active{color:#fff;background:#257fae;border-color:#257fae}.loss-selection{margin:14px 0 8px;color:var(--ink);font-weight:600;font-size:13px}.loss-selection span{margin-left:12px;color:var(--muted);font-size:12px;font-weight:400}.loss-browser .loss-comparison{display:block;max-width:900px}.loss-browser .loss-month-panel{border-radius:3px;border-top:1px solid var(--line)}
 .loss-month-panel th:nth-child(2),.loss-month-panel td:nth-child(2){text-align:left!important}
+.overview-status-disclosure{margin:0 0 10px;border:1px solid var(--line);border-radius:6px;background:#f8fbfd;color:var(--ink)}
+.overview-status-disclosure>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 14px;cursor:pointer;list-style:none;font-size:12px;user-select:none}
+.overview-status-disclosure>summary::-webkit-details-marker{display:none}.overview-status-title{display:flex;align-items:center;gap:7px;font-weight:600}.overview-status-title i{color:#3c8dbc}.overview-status-count{display:flex;align-items:center;gap:7px;color:var(--muted);font-weight:400}.overview-status-count .fa{transition:transform .18s ease}.overview-status-disclosure[open] .overview-status-count .fa{transform:rotate(180deg)}
+.overview-status-list{padding:4px 14px 10px;border-top:1px solid var(--line);background:#fff}.overview-status-list p{margin:7px 0;font-size:12px;line-height:1.55}
 </style>
 @endpush
 @section('finance_content')
@@ -51,26 +55,35 @@
 @php
     $summaryStatus = $reportStatuses[$filters['month']] ?? [];
     $summaryAwaitingResult = ($summaryStatus['state'] ?? 'ready') !== 'ready' && ! isset($summaryStatus['updated_at']);
+    $statusNotices = collect($reportStatuses)
+        ->filter(fn ($status) => $status['state'] !== 'ready' || isset($status['updated_at']))
+        ->sortKeys()->take(-5);
 @endphp
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
-@include('portals.finance.partials.report-snapshot-status', ['status' => $overviewStatus, 'watchSnapshot' => app(\App\Portals\Finance\FinanceReportSnapshots::class)->runsInBackground()])
-@foreach($reportStatuses as $period => $status)
-    @if($status['state'] !== 'ready' || isset($status['updated_at']))
-        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => false])
-    @endif
-@endforeach
+<details class="overview-status-disclosure">
+    <summary>
+        <span class="overview-status-title"><i class="fa fa-info-circle" aria-hidden="true"></i>报表生成通知</span>
+        <span class="overview-status-count">最近 {{ $statusNotices->count() }} 个期间 <i class="fa fa-chevron-down" aria-hidden="true"></i></span>
+    </summary>
+    <div class="overview-status-list">
+        <div hidden aria-hidden="true">@include('portals.finance.partials.report-snapshot-status', ['status' => $overviewStatus, 'watchSnapshot' => app(\App\Portals\Finance\FinanceReportSnapshots::class)->runsInBackground(), 'collapsible' => false])</div>
+        @foreach($statusNotices as $period => $status)
+        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => false, 'collapsible' => false])
+        @endforeach
+    </div>
+</details>
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
 @if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
 @if($report === 'losses')
-<div><label for="loss-month-from">开始月份（北京时间）</label><input id="loss-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" max="{{ $filters['month_to'] }}" class="form-control" required></div>
-<div><label for="loss-month-to">结束月份（北京时间）</label><input id="loss-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" min="{{ $filters['month_from'] }}" class="form-control" required></div>
+<div><label for="loss-month-from">开始月份（北京时间）</label><input id="loss-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" max="{{ $filters['month_to'] }}" class="form-control" data-overview-auto-submit required></div>
+<div><label for="loss-month-to">结束月份（北京时间）</label><input id="loss-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" min="{{ $filters['month_from'] }}" class="form-control" data-overview-auto-submit required></div>
 @else
-<div><label>月份（按通道时区）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
+<div><label>月份（按通道时区）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" data-overview-auto-submit required></div>
 @endif
 @php
     $selectedChannel = $filters['channel'] ?? '';
 @endphp
-<div><label for="overview-channel">支付通道</label><select id="overview-channel" name="channel" class="form-control">
+<div><label for="overview-channel">支付通道</label><select id="overview-channel" name="channel" class="form-control" data-overview-channel>
 <option value="">全部</option>
 @foreach(['paypal'=>'PayPal','xuzong'=>'徐总支付','ye'=>'叶总支付','worldpay'=>'Worldpay','credit_card'=>'信用卡合计'] as $key => $label)
 <option value="{{ $key }}" @selected($selectedChannel === $key || ($key === 'xuzong' && in_array($selectedChannel, ['xuzong1', 'xuzong2'], true)))>{{ $label }}</option>
@@ -78,17 +91,44 @@
 </select></div>
 <div id="overview-xuzong-source" @if(!in_array($selectedChannel, ['xuzong', 'xuzong1', 'xuzong2'], true)) hidden @endif>
 <label for="overview-xuzong-select">徐总支付来源</label>
-<select id="overview-xuzong-select" name="xuzong_source" class="form-control">
+<select id="overview-xuzong-select" name="xuzong_source" class="form-control" data-overview-source>
 <option value="">全部来源</option>
 <option value="xuzong1" @selected($selectedChannel === 'xuzong1')>徐总支付 1</option>
 <option value="xuzong2" @selected($selectedChannel === 'xuzong2')>徐总支付 2</option>
 </select></div>
 <script>
-document.getElementById('overview-channel').addEventListener('change', function () {
-    document.getElementById('overview-xuzong-source').hidden = this.value !== 'xuzong';
-});
+(function () {
+    var channel = document.getElementById('overview-channel');
+    var source = document.getElementById('overview-xuzong-select');
+    var sourceWrap = document.getElementById('overview-xuzong-source');
+    var form = channel.form;
+    function clearDependentFilters() {
+        form.querySelectorAll('[data-overview-dependent]').forEach(function (field) { field.value = ''; });
+    }
+    channel.addEventListener('change', function () {
+        sourceWrap.hidden = this.value !== 'xuzong';
+        source.value = '';
+        clearDependentFilters();
+        form.requestSubmit();
+    });
+    source.addEventListener('change', function () {
+        clearDependentFilters();
+        form.requestSubmit();
+    });
+    form.addEventListener('change', function (event) {
+        if (event.target.matches('[data-overview-auto-submit]')) form.requestSubmit();
+    });
+})();
 </script>
-@foreach(['account' => '支付账户', 'team' => '团队', 'owner' => '使用人', 'subscription' => '订阅类型'] as $field => $label)<div><label for="overview-{{ $field }}">{{ $label }}</label><input id="overview-{{ $field }}" name="{{ $field }}" value="{{ $filters[$field] ?? '' }}" list="overview-options-{{ $field }}" class="form-control" placeholder="输入或选择"><datalist id="overview-options-{{ $field }}">@foreach(($filterOptions[$field] ?? []) as $option)<option value="{{ $option['value'] }}">{{ $option['label'] }}</option>@endforeach</datalist></div>@endforeach
+@foreach(['account' => '支付账户', 'team' => '团队', 'subscription' => '订阅类型'] as $field => $label)
+@php
+    $selectedValue = (string) ($filters[$field] ?? '');
+@endphp
+<div><label for="overview-{{ $field }}">{{ $label }}</label><select id="overview-{{ $field }}" name="{{ $field }}" class="form-control" data-overview-dependent data-overview-auto-submit>
+<option value="">全部{{ $label }}</option>
+@foreach(($filterOptions[$field] ?? []) as $option)<option value="{{ $option['value'] }}" @selected($selectedValue === (string) $option['value'])>{{ $option['label'] }}</option>@endforeach
+</select></div>
+@endforeach
 @if($report === 'losses')
 @php
     $comparison = $monthlyLossGroups ?? [$filters['month'] => $groups];
