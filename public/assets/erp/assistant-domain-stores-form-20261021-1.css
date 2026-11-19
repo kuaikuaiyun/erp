@@ -44,3 +44,17 @@
         grid-column: span 1;
     }
 }
+.assistant-domain-store-form .assistant-tag-editor.is-readonly {
+    background: #eee;
+    cursor: not-allowed;
+}
+
+.assistant-domain-store-form .assistant-tag-editor.is-readonly:focus-within {
+    border-color: #d2dbe4;
+    box-shadow: none;
+}
+
+.assistant-domain-store-form .assistant-tag-editor.is-readonly .assistant-tag-entry {
+    background: transparent;
+    cursor: not-allowed;
+}
