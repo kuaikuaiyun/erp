@@ -176,18 +176,26 @@ $(function(){
     var rows=@json($personalSummaryRows),modal=$('#personalReportDetailModal'),title=$('#personalReportDetailTitle'),body=$('#personalReportDetailBody'),lossModal=$('#continuousLossModal'),lossBody=$('#continuousLossBody');
     function escapeHtml(value){return $('<div>').text(value==null?'':String(value)).html();}
     function money(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
-    $(document).on('click','.personal-detail-trigger',function(){
-        var row=rows[Number(this.getAttribute('data-personal-index'))];if(!row)return;
+    function openPersonalDetail(row){
         title.text((row.operator||'')+' · {{ $filters['date_from'] }} 至 {{ $filters['date_to'] }} 每日数据');
         var html='<table class="table table-bordered table-hover"><thead><tr><th>日期</th><th>订单量</th><th>当天营业额($)</th><th>当天广告费($)</th><th>ROI</th><th>计算结果($)</th><th>状态</th></tr></thead><tbody>';
         (row.days||[]).forEach(function(day){var status=day.profit_status==='profit'?'盈利':(day.profit_status==='loss'?'亏损':'持平');html+='<tr><td>'+escapeHtml(day.date)+'</td><td class="text-right">'+Number(day.order_count||0)+'</td><td class="text-right">'+money(day.revenue)+'</td><td class="text-right">'+money(day.ad_spend)+'</td><td class="text-center">'+(day.roi==null?'—':Number(day.roi).toFixed(2))+'</td><td class="text-right '+escapeHtml(day.profit_status)+'">'+money(day.profit)+'</td><td class="text-center">'+status+'</td></tr>';});
         body.html(html+'</tbody></table>');modal.modal('show');
+    }
+    $(document).on('click','.personal-detail-trigger',function(){
+        var row=rows[Number(this.getAttribute('data-personal-index'))];if(!row)return;
+        if(this.getAttribute('data-from-loss')==='1'){
+            lossModal.one('hidden.bs.modal',function(){openPersonalDetail(row);});
+            lossModal.modal('hide');
+            return;
+        }
+        openPersonalDetail(row);
     });
     $('#continuousLossPeople').on('click',function(){
         var losses=rows.filter(function(row){return !!row.continuous_loss;});
         if(!losses.length){lossBody.html('<p class="text-muted" style="margin:0">当前筛选范围没有连续亏损的人员。</p>');lossModal.modal('show');return;}
         var html='<table class="table table-bordered table-hover"><thead><tr><th>运营部门</th><th>人员</th><th>筛选期间营业额($)</th><th>筛选期间广告费($)</th><th>计算结果($)</th></tr></thead><tbody>';
-        losses.forEach(function(row){html+='<tr><td>'+escapeHtml(row.department)+'</td><td class="text-red"><b>'+escapeHtml(row.operator)+'</b></td><td class="text-right">'+money(row.revenue)+'</td><td class="text-right">'+money(row.ad_spend)+'</td><td class="text-right text-red">'+money(row.profit)+'</td></tr>';});
+        losses.forEach(function(row){var index=rows.indexOf(row);html+='<tr><td>'+escapeHtml(row.department)+'</td><td><button type="button" class="btn btn-link btn-xs text-red personal-detail-trigger" data-personal-index="'+index+'" data-from-loss="1"><i class="fa fa-eye"></i> <b>'+escapeHtml(row.operator)+'</b></button></td><td class="text-right">'+money(row.revenue)+'</td><td class="text-right">'+money(row.ad_spend)+'</td><td class="text-right text-red">'+money(row.profit)+'</td></tr>';});
         lossBody.html(html+'</tbody></table>');lossModal.modal('show');
     });
 })(jQuery);
