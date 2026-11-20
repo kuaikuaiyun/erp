@@ -184,6 +184,9 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
     <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-grid' : 'finance-filter finance-records-filter' }}">
         @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
             @foreach(\App\Portals\Finance\FinanceCatalog::PAYPAL_ORDER_FILTERS as $field => $label)
+                @if($xuzongReport && $loop->first)
+                @include('portals.finance.partials.filter-multiselect', ['id' => 'filter-region', 'name' => 'regions', 'label' => '地区', 'placeholder' => '全部地区', 'selected' => $filters['regions'] ?? (filled($filters['region'] ?? '') ? [$filters['region']] : []), 'choices' => $regions->map(fn ($region) => ['value' => $region, 'label' => $region]), 'wrapperClass' => 'logistics-filter-field', 'wrapperStyle' => 'order:65'])
+                @endif
                 @php
                     $commonField = in_array($field, ['id','shopify_order_number','tongtu_order_number','store_name','subscription_type','column_18','domain','column_13','currency','status'], true);
                     if ($xuzongReport) {

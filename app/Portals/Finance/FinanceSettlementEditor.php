@@ -12,16 +12,29 @@ class FinanceSettlementEditor
 {
     public function __construct(private readonly FinanceSettlementService $settlements, private readonly FinanceWorkbookService $workbooks) {}
 
-    public function numericFields(string $channel): array
+    public function fields(string $channel, ?string $cardChannel = null): array
     {
-        return array_unique([...array_keys($this->settlements->moneyFields($channel)), 'settlement', 'gross', 'source_settlement_usd', 'paypal_7', 'paypal_8', 'paypal_9']);
+        if ($channel === 'credit_card' && $cardChannel !== null) {
+            return array_diff_key(FinanceCreditSettlementLayout::displayColumns($cardChannel), array_flip([
+                'calendar_date', 'operation_region', 'worldpay_exception', 'payable', 'logistics', 'purchase',
+            ]));
+        }
+        return array_diff_key($this->settlements->columns($channel), array_flip($channel === 'paypal'
+            ? ['id', 'team', 'operation_region', 'logistics', 'purchase'] : ['id', 'logistics', 'purchase']));
     }
 
-    public function save(FinanceRecord $record, array $input, string $channel, int $actor, bool $addImportedCosts = false): void
+    public function numericFields(string $channel, ?string $cardChannel = null): array
     {
-        $columns = array_diff_key($this->settlements->columns($channel), ['id' => true]);
+        return array_unique([...array_keys($this->settlements->moneyFields($channel)), 'settlement', 'gross', 'source_settlement_usd', 'paypal_7', 'paypal_8', 'paypal_9',
+            ...FinanceCreditSettlementLayout::numericFields($cardChannel)]);
+    }
+
+    public function save(FinanceRecord $record, array $input, string $channel, int $actor, bool $addImportedCosts = false, ?string $cardChannel = null): void
+    {
+        $columns = $this->fields($channel, $cardChannel);
+        if ($addImportedCosts) $columns += ['logistics' => '物流-元', 'purchase' => '采购成本-元'];
         $rules = array_fill_keys(array_keys($columns), 'sometimes|nullable|string|max:191');
-        foreach (array_intersect($this->numericFields($channel), array_keys($columns)) as $field) {
+        foreach (array_intersect($this->numericFields($channel, $cardChannel), array_keys($columns)) as $field) {
             $rules[$field] = ['sometimes', 'nullable', 'numeric', 'regex:/^-?\d{1,18}(?:\.\d{1,8})?$/'];
             if (! in_array($field, ['paypal_7', 'paypal_8', 'paypal_9', 'gross'], true)) {
                 $rules[$field][] = 'gte:0';
@@ -47,13 +60,21 @@ class FinanceSettlementEditor
         if (! $addImportedCosts) {
             unset($rules['logistics'], $rules['purchase']);
         }
+        if ($cardChannel !== null) $rules = array_intersect_key($rules, $columns + ['timezone' => true]);
+        if ($cardChannel === 'ye') $rules['initiated_at'] = 'sometimes|required|date_format:Y-m-d H:i:s';
+        if (isset($columns['completed_at'])) $rules['completed_at'] = 'sometimes|nullable|date_format:Y-m-d H:i:s';
+        if (isset($columns['refund_count'])) $rules['refund_count'] = 'sometimes|nullable|integer|min:0';
+        if (isset($columns['statement_rate'])) $rules['statement_rate'] = 'sometimes|nullable|numeric|gt:0';
         $values = validator($input, $rules)->validate();
+        if ($cardChannel === 'ye' && isset($values['initiated_at'])) $values['date'] = $values['initiated_at'];
         $db = $this->workbooks->database();
-        $db->transaction(function () use ($db, $record, $values, $channel, $actor, $addImportedCosts): void {
+        $db->transaction(function () use ($db, $record, $values, $channel, $actor, $addImportedCosts, $cardChannel): void {
             $record = FinanceRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
             $accounting = app(FinanceAccountingService::class);
             $accounting->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
-            $current = $this->settlements->rows($channel, [], new \Illuminate\Database\Eloquent\Collection([$record]))->sole();
+            $scope = $cardChannel === null ? [] : ['card_channel' => $cardChannel, 'timezone' => $values['timezone'] ?? 'Asia/Shanghai'];
+            $current = $this->settlements->rows($channel, $scope, new \Illuminate\Database\Eloquent\Collection([$record]))->sole();
+            if ($cardChannel !== null) $current = array_replace($current, $current['card_layout'] ?? []);
             $accounting->guardUnlocked($current['month']);
             if ($addImportedCosts) {
                 foreach ($values as $field => $amount) {
@@ -61,7 +82,14 @@ class FinanceSettlementEditor
                     $values[$field] = bcadd(is_numeric($prior) ? (string) $prior : '0', (string) $amount, 8);
                 }
             }
-            $changed = array_filter($values, fn ($value, $field) => (string) ($value ?? '') !== (string) ($current[$field] ?? ''), ARRAY_FILTER_USE_BOTH);
+            $numericFields = $this->numericFields($channel, $cardChannel);
+            $changed = array_filter($values, function ($value, $field) use ($current, $numericFields): bool {
+                $prior = $current[$field] ?? null;
+                if (in_array($field, $numericFields, true) && is_numeric($value) && is_numeric($prior)) {
+                    return bccomp((string) $value, (string) $prior, 8) !== 0;
+                }
+                return (string) ($value ?? '') !== (string) ($prior ?? '');
+            }, ARRAY_FILTER_USE_BOTH);
             if ($changed === []) {
                 return;
             }
@@ -115,6 +143,19 @@ class FinanceSettlementEditor
                 }
             } else {
                 $sourceFields = [...$sourceFields, 'status', 'currency', 'gross'];
+                if ($cardChannel === 'ye') $sourceFields[] = 'initiated_at';
+                if ($cardChannel !== null) {
+                    $sourceColumns = FinanceCreditSettlementLayout::columns($cardChannel);
+                    foreach (['reference', 'currency', 'gross', 'status'] as $field) {
+                        if (array_key_exists($field, $changed)) {
+                            $payload[$sourceColumns[$field]] = $field === 'status'
+                                ? $this->status($changed[$field], $channel) : ($changed[$field] ?? '');
+                        }
+                    }
+                }
+                if ($cardChannel !== null && array_key_exists('merchant_order', $changed)) {
+                    $payload['商户订单号'] = $changed['merchant_order'] ?? '';
+                }
                 foreach (['status' => '支付状态', 'currency' => '交易币种', 'gross' => '交易金额'] as $field => $header) {
                     if (array_key_exists($field, $changed)) {
                         $value = $field === 'status' ? $this->status($changed[$field], $channel) : $changed[$field];
@@ -155,30 +196,24 @@ class FinanceSettlementEditor
             if (isset($changed['month'])) {
                 $accounting->guardUnlocked($changed['month']);
             }
+            if (! $addImportedCosts) $payload = FinanceSourceEdits::remember($record, $attributes, $payload);
             $candidate = clone $record;
             $candidate->forceFill([...$attributes, 'payload' => $payload]);
             if (array_intersect_key($attributes, array_flip(['account', 'reference', 'occurred_at', 'currency', 'status', 'raw_type']))) {
                 $this->guardUnique($candidate, $channel);
             }
             if ($attributes !== [] || $payload !== $record->payload) {
-                $identity = [$record->dataset, $candidate->account, $candidate->reference, $candidate->occurred_at->toIso8601String(), $candidate->raw_type ?? '', $candidate->currency, $candidate->status ?? ''];
-                if ($channel === 'credit_card') {
-                    $identity[] = trim((string) ($payload['商户订单号'] ?? $payload['Shopify订单号'] ?? ''));
-                    if (isset($payload['_card_channel'])) {
-                        $identity[] = $payload['_card_channel'];
-                    }
-                }
                 $link = $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->first();
                 if ($link) {
                     $ownerId = $account?->id ?? $link->payment_account_id;
                     $event = $candidate->raw_type ?? '';
-                    $identity = ['relay', $ownerId, $candidate->reference, $event];
                     if ($db->table('finance_payment_transactions')->where('payment_account_id', $ownerId)->where('transaction_id', $candidate->reference)->where('event_code', $event)->where('finance_record_id', '!=', $record->id)->exists()) {
                         throw ValidationException::withMessages(['reference' => '交易ID已存在，不能重复。']);
                     }
                     $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->update(['payment_account_id' => $ownerId, 'transaction_id' => $candidate->reference, 'event_code' => $event, 'updated_at' => now()]);
                 }
-                $candidate->fingerprint = hash('sha256', json_encode($identity, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+                // Source identity is independent of editable display values in every channel.
+                $candidate->fingerprint = $record->fingerprint;
                 if (FinanceRecord::query()->where('fingerprint', $candidate->fingerprint)->whereKeyNot($record->id)->exists()) {
                     throw ValidationException::withMessages(['reference' => '该交易记录已存在，不能重复。']);
                 }
@@ -191,14 +226,17 @@ class FinanceSettlementEditor
             if (array_key_exists('paypal_12', $changed)) {
                 $supplements['paypal_12'] = $changed['paypal_12'];
             }
-            foreach ($supplements as $field => $value) {
-                if ($value === null && in_array($field, $this->numericFields($channel), true)) {
-                    unset($overrides[$field]);
-                } else {
-                    $overrides[$field] = $value ?? '';
-                }
+            if ($cardChannel !== null && filled($supplements['completed_at'] ?? null)) {
+                $supplements['completed_at'] = $this->date($supplements['completed_at'], $zone)
+                    ->setTimezone($record->source_timezone ?: 'Asia/Shanghai')->toDateTimeString();
             }
-            $this->settlements->save($candidate, [...$supplements, '_edited_fields' => $overrides], $actor);
+            if ($addImportedCosts) {
+                $this->settlements->save($candidate, $supplements, $actor);
+            } else {
+                $supplements = array_map(fn ($value) => $value ?? '', $supplements);
+                $overrides = array_replace($overrides, $supplements);
+                $this->settlements->save($candidate, [...$supplements, '_edited_fields' => $overrides], $actor);
+            }
         });
     }
 

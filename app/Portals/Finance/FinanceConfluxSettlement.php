@@ -727,8 +727,11 @@ class FinanceConfluxSettlement
 
     private function unmatchedQuery(array $filters): ?\Illuminate\Database\Query\Builder
     {
+        foreach (['teams', 'regions', 'subscriptions'] as $field) {
+            if (! FinanceFilterSelection::matches('', $filters[$field] ?? [])) return null;
+        }
         if (($filters['card_channel'] ?? null) !== 'ye' || ($filters['card_match'] ?? '') === 'matched'
-            || filled($filters['team'] ?? null) || filled($filters['domain'] ?? null)
+            || filled($filters['team'] ?? null) || filled($filters['region'] ?? null) || filled($filters['domain'] ?? null)
             || filled($filters['subscription'] ?? null) || filled($filters['card_transaction_status'] ?? null)
             || filled($filters['source'] ?? null)) {
             return null;
@@ -740,7 +743,7 @@ class FinanceConfluxSettlement
         if (in_array($matches->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
             $matches->forceIndex($this->hasOrderMatchIndex() ? 'finance_conflux_order_match_idx' : 'finance_records_dataset_account_ref_idx');
         }
-        return $this->workbooks->database()->table(self::TABLE.' as entry')
+        $query = $this->workbooks->database()->table(self::TABLE.' as entry')
             ->join('finance_payment_accounts as merchant', 'merchant.id', '=', 'entry.payment_account_id')
             ->where('entry.platform', 'ye')->whereNull('merchant.deleted_at')->whereNotNull('entry.reference')
             ->where($matches->toBase(), '!=', 1)
@@ -758,6 +761,8 @@ class FinanceConfluxSettlement
             ->when(filled($filters['reference'] ?? null), fn ($query) => $query->where('entry.reference', $filters['reference']))
             ->when(filled($filters['from'] ?? null), fn ($query) => $query->where('entry.settlement_date', '>=', $filters['from']))
             ->when(filled($filters['to'] ?? null), fn ($query) => $query->where('entry.settlement_date', '<=', $filters['to']));
+        FinanceFilterSelection::applyQuery($query, 'merchant.activity_account', $filters['accounts'] ?? []);
+        return $query;
     }
 
     public function unmatchedPage(array $filters, int $offset, int $limit): array
@@ -799,8 +804,9 @@ class FinanceConfluxSettlement
         $query->orderBy('entry.payment_account_id')->orderBy('entry.reference')
             ->orderByDesc('entry.settlement_date')->orderByDesc('entry.id');
         $entries = ! empty($filters['stream_statement_export'])
+            || (! empty($filters['summary_only']) && $query->getConnection()->transactionLevel() === 0)
             ? \Illuminate\Support\LazyCollection::make(fn () => $this->streamExportEntries($query))
-            : $query->cursor();
+            : \Illuminate\Support\LazyCollection::make(fn () => $this->statementEntries($query));
         $service = app(FinanceSettlementService::class);
         $groups = $entries->chunkWhile(fn ($entry, $key, $group) =>
             $entry->payment_account_id === $group->first()->payment_account_id && $entry->reference === $group->first()->reference);
@@ -861,6 +867,33 @@ class FinanceConfluxSettlement
                 ] : []);
             }
         }
+    }
+
+    private function statementEntries(\Illuminate\Database\Query\Builder $query): iterable
+    {
+        // PDO's normal cursor buffers the entire result, including raw bill
+        // payloads. Seek through the existing group order on the same connection
+        // so transactions and groups spanning a page retain their semantics.
+        $last = null;
+        do {
+            $page = clone $query;
+            if ($last !== null) {
+                $page->where(function ($seek) use ($last): void {
+                    $seek->where('entry.payment_account_id', '>', $last->payment_account_id)
+                        ->orWhere(fn ($q) => $q->where('entry.payment_account_id', $last->payment_account_id)
+                            ->where('entry.reference', '>', $last->reference))
+                        ->orWhere(fn ($q) => $q->where('entry.payment_account_id', $last->payment_account_id)
+                            ->where('entry.reference', $last->reference)->where('entry.settlement_date', '<', $last->settlement_date))
+                        ->orWhere(fn ($q) => $q->where('entry.payment_account_id', $last->payment_account_id)
+                            ->where('entry.reference', $last->reference)->where('entry.settlement_date', $last->settlement_date)
+                            ->where('entry.id', '<', $last->id));
+                });
+            }
+            $batch = $page->limit(500)->get();
+            if ($batch->isEmpty()) return;
+            $last = $batch->last();
+            yield from $batch;
+        } while ($batch->count() === 500);
     }
 
     private function streamExportEntries(\Illuminate\Database\Query\Builder $query): iterable

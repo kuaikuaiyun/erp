@@ -6,11 +6,27 @@ class FinanceSummaryDataVersion
 {
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
+    public function cacheRevision(array $channels): string
+    {
+        $versions = array_map(fn ($channel) => $this->current($channel), $channels);
+        if (in_array(null, $versions, true)) {
+            // Untracked sources may be shared within a request, never across requests.
+            $request = app('request');
+            $run = $request->attributes->get('finance.source_cache_run') ?? bin2hex(random_bytes(16));
+            $request->attributes->set('finance.source_cache_run', $run);
+            $versions[] = $run;
+        }
+        return hash('sha256', json_encode([$channels, $versions], JSON_THROW_ON_ERROR));
+    }
+
     public function current(string $channel): ?string
     {
         $db = $this->workbooks->database();
         if (! FinanceSummaryTriggers::available($db)) {
-            return null;
+            // Without DB triggers, reuse source parts only within this one
+            // authenticated range calculation, never across later queries.
+            $run = app('request')->attributes->get('finance.source_run');
+            return is_string($run) && $run !== '' ? hash('sha256', 'request-source:'.$channel.':'.$run) : null;
         }
         // Related refunds, statements and FX can change an earlier month's payment.
         $periods = $db->table('finance_summary_periods')->where('channel', $channel)

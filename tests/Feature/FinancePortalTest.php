@@ -632,8 +632,11 @@ class FinancePortalTest extends TestCase
         [$sourceRows] = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->page(['timezone' => 'Asia/Shanghai'], 0, 10);
         $payload = $sourceRows->first();
         $generation = (string) \Illuminate\Support\Str::uuid();
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $versions->shouldReceive('current')->with('paypal')->andReturn('current-source');
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
         DB::table('finance_paypal_settlement_projections')->insert([
-            'id' => 1, 'generation' => $generation, 'source_revision' => str_repeat('a', 64),
+            'id' => 1, 'generation' => $generation, 'source_revision' => hash('sha256', 'paypal-settlement-attribution-v2:current-source'),
             'row_count' => 1, 'published_at' => now(),
         ]);
         DB::table('finance_paypal_settlement_rows')->insert([
@@ -652,6 +655,191 @@ class FinancePortalTest extends TestCase
         $this->get('/finance/reports/paypal-settlement')->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->total() === 1
                 && $rows->first()['reference'] === 'PROJECTED-PAYMENT');
+    }
+
+    public function test_paypal_settlement_does_not_show_a_projection_after_its_source_has_changed(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '交易 ID' => 'LIVE-SOURCE-PAYMENT'],
+        ], 'Live account', 'UTC', 1);
+        DB::table('finance_paypal_settlement_projections')->insert([
+            'id' => 1, 'generation' => 'stale', 'source_revision' => 'old-source', 'row_count' => 123, 'published_at' => now(),
+        ]);
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $versions->shouldReceive('current')->with('paypal')->andReturn('new-source', null);
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
+        foreach (['changed source', 'untracked source'] as $case) {
+            $this->get('/finance/reports/paypal-settlement')->assertOk()
+                ->assertViewHas('rows', fn ($rows) => $rows->total() === 1 && $rows->first()['reference'] === 'LIVE-SOURCE-PAYMENT');
+        }
+    }
+
+    public function test_paypal_settlement_follows_resolved_logistics_owner_and_team_updates(): void
+    {
+        Schema::create('assistant_domain_stores', function (Blueprint $table): void {
+            $table->id(); $table->string('domain'); $table->string('user_name'); $table->text('team');
+            $table->unsignedBigInteger('owner_user_id')->nullable();
+        });
+        DB::table('assistant_domain_stores')->insert([
+            'id' => 1, 'domain' => 'live-logistics.example', 'user_name' => '域名旧使用人', 'team' => '域名旧团队',
+        ]);
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id(); $table->unsignedBigInteger('assistant_domain_store_id'); $table->string('bill_number');
+            $table->string('source_shop_domain'); $table->string('shopify_order_number'); $table->dateTime('order_created_at');
+            $table->string('assigned_owner_name')->nullable(); $table->unsignedBigInteger('assigned_owner_user_id')->nullable();
+            $table->dateTime('owner_assignment_resolved_at')->nullable(); $table->string('group_names')->nullable();
+        });
+        DB::table('logistics_orders')->insert([
+            'id' => 1, 'assistant_domain_store_id' => 1, 'bill_number' => 'LIVE-LOGISTICS',
+            'source_shop_domain' => 'internal.myshopify.com', 'shopify_order_number' => '1002',
+            'order_created_at' => '2026-11-07 11:00:00', 'assigned_owner_name' => null,
+            'owner_assignment_resolved_at' => '2026-11-07 11:01:00', 'group_names' => '蒋总团队',
+        ]);
+        (require database_path('migrations/2026_10_30_000003_create_assistant_domain_store_owner_histories.php'))->up();
+        DB::table('assistant_domain_store_owner_histories')->insert([
+            'assistant_domain_store_id' => 1, 'event' => 'cleared', 'effective_from' => '2026-11-01 00:00:00',
+        ]);
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '交易 ID' => 'LIVE-LOGISTICS'],
+        ], 'Live account', 'UTC', 1);
+        $url = '/finance/reports/paypal-settlement?reference=LIVE-LOGISTICS';
+        $assertAttribution = function (string $owner, string $team) use ($url): void {
+            $this->get($url)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1
+                && $rows->first()['owner'] === $owner && $rows->first()['team'] === $team
+                && $rows->first()['domain'] === 'live-logistics.example');
+            $export = $this->readDownload($this->get($url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team')
+                ->assertOk()->streamedContent())->toArray();
+            $this->assertSame(['LIVE-LOGISTICS', $owner, $team], $export[1]);
+        };
+        $assertAttribution('', '蒋总团队');
+        DB::table('logistics_orders')->where('id', 1)->update([
+            'assigned_owner_name' => '物流更新归属人', 'group_names' => '物流更新团队', 'owner_assignment_resolved_at' => '2026-11-20 04:00:00',
+        ]);
+        $assertAttribution('物流更新归属人', '物流更新团队');
+        DB::table('logistics_orders')->where('id', 1)->update(['assigned_owner_name' => null, 'group_names' => '保留团队']);
+        $assertAttribution('', '保留团队');
+    }
+
+    public function test_paypal_business_fields_follow_logistics_edits_and_preserve_explicit_finance_overrides(): void
+    {
+        Schema::create('assistant_domain_stores', function (Blueprint $table): void {
+            $table->id(); $table->string('domain'); $table->string('user_name'); $table->string('team');
+        });
+        DB::table('assistant_domain_stores')->insert(['id' => 1, 'domain' => 'source.example', 'user_name' => '源使用人', 'team' => '源团队']);
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id(); $table->unsignedBigInteger('assistant_domain_store_id'); $table->string('bill_number');
+            $table->string('source_shop_domain'); $table->string('tongtu_order_number'); $table->string('payment_method');
+            $table->string('subscription_type'); $table->string('is_add_on');
+        });
+        DB::table('logistics_orders')->insert(['id' => 1, 'assistant_domain_store_id' => 1, 'bill_number' => 'SOURCE-EDIT',
+            'source_shop_domain' => 'source.myshopify.com', 'tongtu_order_number' => 'SOURCE-1002', 'payment_method' => 'pp',
+            'subscription_type' => '订阅首次购买', 'is_add_on' => '未加购']);
+        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '交易 ID' => 'SOURCE-EDIT']], 'Source account', 'UTC', 1);
+        $record = FinanceRecord::sole();
+        $record->update(['domain' => 'old-copy.example', 'payload' => [...$record->payload,
+            '通途订单' => 'OLD-COPY', '支付方式' => 'old-copy', '是否加购' => '已加购']]);
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $current = fn () => $service->rows('paypal', ['reference' => 'SOURCE-EDIT'])->sole();
+        $fields = ['domain', 'erp_order', 'payment_method', 'upsell'];
+        $row = $current();
+        $this->assertSame(['source.example', 'SOURCE-1002', 'pp', '未加购'], array_map(fn ($field) => $row[$field], $fields));
+        DB::table('assistant_domain_stores')->where('id', 1)->update(['domain' => 'changed.example']);
+        DB::table('logistics_orders')->where('id', 1)->update(['tongtu_order_number' => 'CHANGED-1002', 'payment_method' => '', 'is_add_on' => '']);
+        $row = $current();
+        $this->assertSame(['changed.example', 'CHANGED-1002', '', ''], array_map(fn ($field) => $row[$field], $fields));
+        $this->get('/finance/reports/paypal-settlement?domain=changed.example')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->total() === 1 && $rows->first()['erp_order'] === 'CHANGED-1002');
+        $this->get('/finance/reports/paypal-settlement?domain=old-copy.example')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+        $export = $this->readDownload($this->get('/finance/reports/paypal-settlement?domain=changed.example&download=1&export_columns[]=domain&export_columns[]=erp_order')
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['changed.example', 'CHANGED-1002'], $export[1]);
+        DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $record->id,
+            'payload' => json_encode(['_edited_fields' => ['domain' => 'finance-edit.example', 'erp_order' => 'FINANCE-EDIT', 'upsell' => '已加购']])]);
+        $row = $current();
+        $this->assertSame('finance-edit.example', $row['domain']);
+        $this->assertSame('FINANCE-EDIT', $row['erp_order']);
+        $this->assertSame('已加购', $row['upsell']);
+        $this->assertSame('old-copy.example', $record->fresh()->domain);
+        $this->assertSame('OLD-COPY', $record->fresh()->payload['通途订单']);
+    }
+
+    public function test_ye_region_options_disambiguate_order_and_supplement_payloads(): void
+    {
+        $account = $this->financePayPalAccount('地区查询叶总账户', ['account_type' => 'credit_card', 'card_platform' => 'ye']);
+        foreach (['source.example' => '厦门团队', 'edited.example' => '西安团队',
+            'deleted.example' => '北京团队', 'worldpay.example' => '郑州团队'] as $domain => $team) {
+            DB::table('finance_domain_groups')->insert(['domain' => $domain, 'owner' => '运营人员', 'team' => $team]);
+        }
+        foreach (['tagged', 'legacy', 'deleted', 'worldpay'] as $kind) {
+            $payload = ['团队' => $kind === 'worldpay' ? '郑州团队' : '厦门团队'];
+            if ($kind !== 'legacy') $payload['_card_channel'] = $kind === 'worldpay' ? 'worldpay' : 'ye';
+            $record = FinanceRecord::create(['dataset' => 'xuzong2-details', 'account' => $account->activity_account,
+                'reference' => 'REGION-JOIN-'.$kind, 'occurred_at' => '2026-11-02 01:00:00', 'source_timezone' => 'UTC',
+                'currency' => 'USD', 'status' => 'SUCCESS', 'domain' => match ($kind) {
+                    'deleted' => 'deleted.example', 'worldpay' => 'worldpay.example', default => 'source.example',
+                }, 'fingerprint' => hash('sha256', 'region-payload-join-'.$kind), 'payload' => $payload]);
+            if (in_array($kind, ['tagged', 'deleted'], true)) {
+                DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $record->id,
+                    'payload' => json_encode($kind === 'deleted' ? ['_deleted_at' => '2026-11-20 00:00:00'] : [
+                        '_card_channel' => 'worldpay', 'domain' => 'source.example', 'team' => '深圳团队',
+                        '_edited_fields' => ['domain' => 'edited.example', 'team' => '西安团队'],
+                    ], JSON_UNESCAPED_UNICODE)]);
+            }
+        }
+        $regions = app(\App\Portals\Finance\FinanceSettlementService::class)->regionOptions('ye-settlement')->all();
+        $this->assertEqualsCanonicalizing(['厦门', '西安'], $regions);
+    }
+
+    public function test_four_finance_detail_menus_filter_and_export_the_displayed_region(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id(); $table->string('bill_number'); $table->string('source_shop_domain');
+            $table->string('assigned_owner_name')->nullable(); $table->string('group_names')->nullable();
+            $table->dateTime('owner_assignment_resolved_at')->nullable();
+        });
+        foreach (['厦门', '深圳'] as $index => $region) {
+            $domain = 'region-'.$index.'.example';
+            DB::table('finance_domain_groups')->insert(['domain' => $domain, 'owner' => $region.'使用人', 'team' => $region.'团队']);
+            $reference = 'PAYPAL-REGION-'.$index;
+            $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '交易 ID' => $reference]], 'Region PayPal', 'UTC', 1);
+            DB::table('logistics_orders')->insert(['bill_number' => $reference, 'source_shop_domain' => $domain,
+                'assigned_owner_name' => $region.'使用人', 'group_names' => $region.'团队', 'owner_assignment_resolved_at' => '2026-11-20 00:00:00']);
+            foreach (['ye', 'worldpay'] as $platform) {
+                FinanceRecord::create(['dataset' => 'xuzong2-details', 'account' => 'Region '.$platform,
+                    'reference' => strtoupper($platform).'-REGION-'.$index, 'occurred_at' => '2026-11-02 12:00:00',
+                    'source_timezone' => 'UTC', 'currency' => 'USD', 'status' => 'SUCCESS', 'domain' => $domain,
+                    'fingerprint' => hash('sha256', $platform.$index),
+                    'payload' => ['_card_channel' => $platform, '支付状态' => 'SUCCESS', '交易币种' => 'USD', '交易金额' => '10',
+                        '结算金额' => '9', '结单币种' => 'USD', '结算币种' => 'USD', '结单金额' => '9',
+                        '交易流水号' => strtoupper($platform).'-REGION-'.$index, '网关接入号' => '25']]);
+            }
+            FinanceRecord::create(['dataset' => \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET,
+                'account' => 'SHANGYUN-v2', 'reference' => 'XUZONG-REGION-'.$index, 'occurred_at' => '2026-11-02 12:00:00',
+                'source_timezone' => 'UTC', 'currency' => 'USD', 'status' => 'SUCCESS', 'domain' => $domain,
+                'fingerprint' => hash('sha256', 'xuzong-region'.$index), 'payload' => ['交易金额' => '10', '结算币种' => 'USD']]);
+        }
+        foreach (['paypal-settlement', 'ye-settlement', 'worldpay-settlement'] as $report) {
+            $url = '/finance/reports/'.$report.'?region='.rawurlencode('厦门');
+            $page = $this->get($url)->assertOk()->assertSee('id="settlement-region"', false)->assertSee('全部地区');
+            $this->assertSame(1, $page->viewData('rows')->total(), $report);
+            $row = $page->viewData('rows')->first();
+            $this->assertSame('厦门', $report === 'paypal-settlement' ? $row['operation_region'] : $row['card_layout']['operation_region']);
+            $export = $this->readDownload($this->get($url.'&download=1&export_columns[]=operation_region')->assertOk()->streamedContent())->toArray();
+            $this->assertSame([['地区'], ['厦门']], $export, $report);
+            $this->get('/finance/reports/'.$report.'?region='.rawurlencode('北京'))->assertOk()
+                ->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+        }
+        $url = '/finance/reports/xuzong-credit?region='.rawurlencode('厦门');
+        $this->get($url)->assertOk()->assertSee('id="filter-region"', false)->assertSee('全部地区')
+            ->assertViewHas('records', fn ($rows) => $rows->total() === 1 && $rows->first()->reference === 'XUZONG-REGION-0');
+        $export = $this->readDownload($this->get('/finance/reports/xuzong-credit/export?region='.rawurlencode('厦门').'&export_scope=filtered&report_columns[]=3&report_columns[]=48')
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame([['平台订单号', '地区'], ['XUZONG-REGION-0', '厦门']], $export);
+        $this->get('/finance/reports/xuzong-credit?region='.rawurlencode('北京'))->assertOk()
+            ->assertViewHas('records', fn ($rows) => $rows->total() === 0);
     }
 
     public function test_paypal_settlement_date_filter_uses_the_selected_timezone_before_loading_details(): void
@@ -1410,6 +1598,38 @@ class FinancePortalTest extends TestCase
         }
         $this->get($report.'?card_channel=ye&account='.$second->activity_account)->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->pluck('reference')->all() === ['ORDER-'.$second->id]);
+    }
+
+    public function test_unmatched_statement_groups_survive_bounded_pages_and_keep_all_entries(): void
+    {
+        $first = $this->financePayPalAccount('Statement page A', ['account_type' => 'credit_card']);
+        $second = $this->financePayPalAccount('Statement page B', ['account_type' => 'credit_card']);
+        $rows = [];
+        for ($index = 1; $index <= 505; $index++) {
+            $account = $index <= 503 ? $first : $second;
+            $reference = $index <= 499 || $index > 503 ? 'GROUP-A' : 'GROUP-B';
+            $rows[] = [
+                'payment_account_id' => $account->id, 'platform' => 'ye',
+                'settlement_date' => $index <= 501 ? '2026-11-02' : '2026-11-01',
+                'reference' => $reference, 'kind' => 'refund', 'source_sheet' => '退款', 'source_row' => $index,
+                'report_hash' => str_repeat('a', 64), 'imported_by' => 1, 'created_at' => now(),
+                'payload' => json_encode(['支付订单号' => $reference, '结算币种' => 'USD', '结算金额' => '1', '退款处理费' => '0']),
+            ];
+        }
+        foreach (array_chunk($rows, 100) as $batch) DB::table('finance_credit_settlement_entries')->insert($batch);
+        $db = $this->workbooks->database();
+        $db->beginTransaction();
+        try {
+            $groups = iterator_to_array(app(\App\Portals\Finance\FinanceConfluxSettlement::class)->unmatchedRows([
+                'card_channel' => 'ye', 'from' => '2026-11-01', 'to' => '2026-11-30', 'summary_only' => true,
+                'conflux_report_fees' => new \App\Portals\Finance\FinanceStatementFeeCache,
+            ]), false);
+        } finally {
+            $db->rollBack();
+        }
+        $this->assertCount(3, $groups);
+        $this->assertSame(['GROUP-A', 'GROUP-B', 'GROUP-A'], array_column(array_column($groups, 'card_layout'), 'reference'));
+        $this->assertSame([499.0, 4.0, 2.0], array_map(fn ($g) => (float) $g['card_layout']['refund'], $groups));
     }
 
     public function test_conflux_filtered_queries_paginate_across_record_batches(): void
@@ -2753,108 +2973,87 @@ class FinancePortalTest extends TestCase
         $this->get(str_replace('month=2026-11', 'month=2026-12', $overview))->assertOk()->assertViewHas('groups', []);
     }
 
-    public function test_report_snapshots_serve_the_previous_version_and_retry_background_failures(): void
+    public function test_retired_report_cache_migration_removes_only_report_cache_tables(): void
     {
         (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
         (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class, [$this->workbooks])->makePartial();
-        $snapshots->shouldReceive('runsInBackground')->andReturn(true);
-        \Illuminate\Support\Facades\Cache::shouldReceive('store')->with('redis')->andThrow(new \RuntimeException('Redis unavailable'));
-        $buildOnRequest = fn () => $this->fail('The page must not calculate a report.');
-        $filters = ['layer' => 'business', '_include_options' => true];
-        $read = fn (?string $id = null) => $snapshots->result('losses', '2026-11', $filters, $buildOnRequest, $id);
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $first = [[['name' => 'Previous report']], [], null];
-        $second = [[['name' => 'Updated report']], [], null];
-        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andReturn($first);
-        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andThrow(new \RuntimeException('Build failed'));
-        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andReturn($second);
+        DB::table('finance_report_snapshots')->insert(['id' => 'old-cache', 'scope' => str_repeat('a', 64),
+            'revision' => str_repeat('b', 64), 'payload' => '[]', 'created_at' => now()]);
+        $records = DB::table('finance_records')->count();
+        (require database_path('migrations/2026_11_20_000001_drop_retired_finance_report_snapshots.php'))->up();
+        $this->assertFalse(Schema::hasTable('finance_report_snapshots'));
+        $this->assertFalse(Schema::hasTable('finance_report_scopes'));
+        $this->assertFalse(Schema::hasTable('finance_report_order_costs'));
+        $this->assertTrue(Schema::hasTable('finance_period_locks'));
+        $this->assertTrue(Schema::hasTable('finance_balance_snapshots'));
+        $this->assertSame($records, DB::table('finance_records')->count());
+    }
 
-        try {
-            $this->freezeTime();
-            $this->assertSame('pending', $read()[2]['state']);
-            $this->assertTrue($snapshots->refresh($controller, false));
-            [$result, $firstId, $status] = $read();
-            $this->assertSame($first, $result);
-            $this->assertSame('ready', $status['state']);
+    public function test_prepared_ye_tab_does_not_wait_for_other_channels_when_switching_back(): void
+    {
+        $projection = Mockery::mock(\App\Portals\Finance\FinanceSummaryProjection::class);
+        $projection->shouldReceive('stream')->once()->with('credit_card', Mockery::any(), true, null, ['ye'])->andReturnNull();
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryProjection::class, $projection);
+        $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
+        $sources->shouldReceive('ready')->once()->with('credit_card', Mockery::on(fn ($filters) => $filters['summary_payment_channels'] === ['ye']
+            && $filters['summary_native_settlement'] === true && $filters['timezone'] === 'Asia/Shanghai'))->andReturnTrue();
+        $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
+        $controller = app(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $ready = new \ReflectionMethod($controller, 'calculationMonthReady');
+        $this->assertTrue($ready->invoke($controller, 'summary', '2026-11', ['view' => 'transactions', 'channel' => 'ye']));
+    }
 
-            $this->travel(6)->minutes();
-            $this->assertSame('updating', $read()[2]['state']);
-            $this->assertFalse($snapshots->refresh($controller, false));
-            $this->assertSame('failed', $read()[2]['state']);
-            $this->assertSame($first, $read()[0]);
-            $this->assertTrue($snapshots->refresh($controller, false));
-            $this->assertSame($second, $read()[0]);
-            $this->assertSame($first, $read($firstId)[0]);
-        } finally {
-            $this->travelBack();
-        }
+    public function test_multi_month_calculation_runs_in_monthly_requests_without_saving_final_reports(): void
+    {
+        $db = Mockery::mock(\Illuminate\Database\Connection::class);
+        $db->shouldReceive('getDriverName')->andReturn('mysql');
+        $workbooks = Mockery::mock(FinanceWorkbookService::class)->makePartial();
+        $workbooks->shouldReceive('database')->andReturn($db);
+        $this->workbooks = $workbooks;
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $revision = 'revision-1';
+        $versions->shouldReceive('current')->andReturnUsing(function () use (&$revision) {
+            $run = request()->attributes->get('finance.source_run');
+            return $revision ?? ($run ? hash('sha256', $run) : null);
+        });
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
+        $controller = $this->directReportController();
+        $calls = [];
+        $controller->shouldReceive('buildSettlementOverviewMonth')->andReturnUsing(function ($month) use (&$calls) {
+            $calls[] = $month;
+            return [[], [], null];
+        });
+        $url = '/finance/reports/losses?month_from=2026-09&month_to=2026-11&loss_scope='.urlencode('合计');
+        $initial = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+        $this->assertSame([], $calls);
+        $plan = $initial->viewData('preparationPlan');
+        $this->assertSame(['2026-09', '2026-10', '2026-11'], array_values(array_unique(array_map(fn ($m) => substr($m['month'], 0, 7), $plan['months']))));
+        foreach ($plan['months'] as $month) $this->getJson($month['url'])->assertOk()->assertExactJson(['state' => 'ready']);
+        $this->assertCount(15, $calls);
+        $this->get($plan['resume_url'])->assertOk()->assertViewIs('portals.finance.settlement-overview');
+        $this->assertCount(18, $calls);
+        $this->assertFalse(Schema::hasTable('finance_report_snapshots'));
+        $this->get($url.'&_finance_plan=1')->assertOk()->assertJsonCount(15, 'months');
+        $singleMonth = '/finance/reports/losses?month_from=2026-11&month_to=2026-11&loss_scope='.urlencode('合计');
+        $this->get($singleMonth)->assertOk()->assertViewIs('portals.finance.report-preparing');
+        $this->get($singleMonth.'&_finance_plan=1')->assertOk()->assertJsonCount(5, 'months');
+        $revision = 'revision-2';
+        $this->get($plan['resume_url'])->assertOk()->assertViewIs('portals.finance.report-preparing');
+        $this->getJson('/finance/reports/losses?month_from=2026-09&month_to=2026-11&_source_prepare=1')->assertUnprocessable();
+        $revision = null;
+        $withoutTracking = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing')->viewData('preparationPlan');
+        $this->assertStringContainsString('_source_run=', $withoutTracking['resume_url']);
+        $this->getJson($withoutTracking['months'][0]['url'])->assertOk()->assertExactJson(['state' => 'ready']);
+        $this->get($withoutTracking['resume_url'])->assertOk()->assertViewIs('portals.finance.settlement-overview');
+        $this->getJson($url.'&_source_run=invalid')->assertUnprocessable();
     }
 
     public function test_loss_report_calculates_every_selected_month_without_report_snapshots(): void
     {
         $reports = $this->directReportController();
-        $reports->shouldReceive('buildSettlementOverviewMonth')->times(9)->andReturn([[], [], null]);
-        $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $snapshots->shouldNotReceive('result');
-        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $snapshots);
         $response = $this->get('/finance/reports/losses?month_from=2026-03&month_to=2026-11')->assertOk()
             ->assertDontSee('data-finance-snapshot-status', false)->assertDontSee('报表正在生成');
         $this->assertCount(9, $response->viewData('monthlyLossGroups'));
-    }
-
-    public function test_cold_transaction_report_waits_for_background_refresh_instead_of_scanning_raw_ledgers(): void
-    {
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class, [$this->workbooks])->makePartial();
-        $snapshots->shouldReceive('runsInBackground')->andReturn(true);
-        $filters = ['channel' => 'paypal'];
-        $buildOnRequest = fn () => $this->fail('The page must not calculate raw transaction ledgers.');
-        $read = fn () => $snapshots->result('transactions', '2026-11', $filters, $buildOnRequest, live: false);
-
-        $this->assertSame('pending', $read()[2]['state']);
-        $this->assertDatabaseHas('finance_report_scopes', ['report' => 'transactions', 'month' => '2026-11']);
-
-        $result = [[['account' => 'Published transaction report']], ['Subscription']];
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildTransactionReport')->once()->andReturn($result);
-        $this->assertTrue($snapshots->refresh($controller, false));
-
-        [$published, $snapshot, $status] = $read();
-        $this->assertSame($result, $published);
-        $this->assertNotNull($snapshot);
-        $this->assertSame('ready', $status['state']);
-    }
-
-    public function test_background_reports_build_from_source_files_without_a_published_projection(): void
-    {
-        (require database_path('migrations/2026_11_13_000001_create_finance_summary_projections.php'))->up();
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        Schema::create('finance_summary_changes', function (Blueprint $table): void {
-            $table->id();
-        });
-        DB::table('finance_summary_periods')->insert([
-            'month' => '2026-11', 'channel' => 'credit_card', 'revision' => 2, 'published' => 0,
-        ]);
-        DB::table('finance_report_scopes')->insert([
-            'scope' => str_repeat('a', 64), 'month' => '2026-11', 'report' => 'transactions',
-            'filters' => json_encode(['channel' => 'credit_card', 'month' => '2026-11']), 'used_at' => now(),
-        ]);
-        $projection = Mockery::mock(\App\Portals\Finance\FinanceSummaryProjection::class);
-        $projection->shouldReceive('usesSourceFiles')->andReturn(true);
-        $this->app->instance(\App\Portals\Finance\FinanceSummaryProjection::class, $projection);
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildTransactionReport')->once()->andReturn([[['account' => 'Source file result']], []]);
-
-        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $this->assertTrue($reports->refresh($controller, true));
-        $this->assertDatabaseCount('finance_report_snapshots', 1);
-        $this->assertDatabaseHas('finance_summary_periods', ['channel' => 'credit_card', 'published' => 0]);
-        DB::table('finance_summary_changes')->insert(['id' => 1]);
-        $this->assertFalse($reports->refresh($controller, true));
-        $this->assertDatabaseCount('finance_report_snapshots', 1);
     }
 
     public function test_combined_report_supports_raw_conditions_without_snapshot_metadata_in_rows(): void
@@ -2883,13 +3082,188 @@ class FinancePortalTest extends TestCase
         return $controller;
     }
 
+    public function test_report_attribute_cache_keeps_native_casts_and_observes_source_edits(): void
+    {
+        $record = new FinanceRecord;
+        $record->setRawAttributes(['id' => '12', 'status' => 'SUCCESS', 'payload' => '{"amount":"10"}', 'occurred_at' => '2026-11-02 12:00:00']);
+        $record->withCachedReportCasts();
+        $this->assertSame(12, $record->id);
+        $this->assertSame(['amount' => '10'], $record->payload);
+        $this->assertInstanceOf(\Carbon\CarbonImmutable::class, $record->occurred_at);
+        $record->payload = ['amount' => '20'];
+        $record->status = 'FAILED';
+        $this->assertSame(['amount' => '20'], $record->payload);
+        $this->assertSame('FAILED', $record->status);
+        $record->mergeCasts(['payload' => 'object']);
+        $this->assertInstanceOf(\stdClass::class, $record->payload);
+        $record->setRawAttributes(['payload' => '{"amount":"30"}']);
+        $this->assertSame('30', $record->payload->amount);
+    }
+
+    public function test_settlement_only_source_keeps_card_amounts_and_dimensions_equal_to_full_details(): void
+    {
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        foreach (['ye', 'worldpay'] as $platform) {
+            $account = $this->financePayPalAccount('Native '.$platform, ['account_type' => 'credit_card']);
+            FinanceRecord::query()->create([
+                'dataset' => 'xuzong2-details', 'account' => $account->activity_account, 'reference' => 'NATIVE-'.$platform,
+                'occurred_at' => '2026-11-02 12:00:00', 'currency' => 'USD', 'status' => 'SUCCESS',
+                'source_timezone' => 'UTC', 'fingerprint' => hash('sha256', 'NATIVE-'.$platform),
+                'payload' => ['_card_channel' => $platform, '支付状态' => 'SUCCESS', '交易币种' => 'USD',
+                    '交易金额' => '100', '结算金额' => '95', '结算币种' => 'USD', '结单币种' => 'USD', '结单金额' => '95',
+                    '交易手续费' => '5', '保证金' => '10', '单笔费用' => '1', '网关接入号' => $platform === 'worldpay' ? '25' : '24'],
+            ]);
+            $filters = ['from' => '2026-11-01', 'to' => '2026-11-30', 'timezone' => 'Asia/Shanghai', 'summary_payment_channels' => [$platform]];
+            $fields = ['id', 'payment_channel', 'account_key', 'owner', 'team', 'month', 'success', 'failed', 'settlement'];
+            $full = collect(iterator_to_array($service->summaryRowStream('credit_card', $filters), false));
+            $fast = collect(iterator_to_array($service->summaryRowStream('credit_card', $filters + ['summary_settlement_only' => true]), false));
+            $this->assertCount(1, $full);
+            $this->assertSame('95', $full[0]['settlement']);
+            $this->assertSame($full->map(fn ($row) => \Illuminate\Support\Arr::only($row, $fields))->all(),
+                $fast->map(fn ($row) => \Illuminate\Support\Arr::only($row, $fields))->all());
+        }
+    }
+
+    public function test_loss_scope_queries_only_visible_source_channels_and_keeps_other_scope_links(): void
+    {
+        $calls = [];
+        $service = Mockery::mock(\App\Portals\Finance\FinanceSettlementService::class, [$this->workbooks])->makePartial();
+        $service->shouldReceive('summaryRowStream')->times(5)->andReturnUsing(function ($channel, $filters) use (&$calls) {
+            $calls[] = [$channel, $filters['summary_payment_channels'] ?? []];
+            return [];
+        });
+        $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
+        $sources->shouldReceive('stream')->times(5)->andReturnUsing(fn ($channel, $filters, $transactions, $build) => $build($filters));
+        $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
+        $this->app->instance(\App\Portals\Finance\FinanceSettlementService::class, $service);
+        $this->get('/finance/reports/losses?month_from=2026-10&month_to=2026-11')->assertOk()
+            ->assertSee('叶总支付')->assertSee('Worldpay')->assertSee('data-loss-loaded-scopes', false);
+        $this->assertSame([['paypal', []], ['credit_card', ['xuzong1', 'xuzong2']], ['paypal', []], ['credit_card', ['xuzong1', 'xuzong2']]], $calls);
+        $this->get('/finance/reports/losses?month_from=2026-11&month_to=2026-11&loss_scope='.urlencode('叶总支付'))->assertOk();
+        $this->assertSame(['credit_card', ['ye']], $calls[4]);
+    }
+
+    public function test_loss_grand_total_combines_channels_once_and_exports_monthly_categories(): void
+    {
+        $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
+        $sources->shouldReceive('stream')->andReturnUsing(fn ($channel, $filters, $transactions, $build) => $build($filters));
+        $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
+        $service = Mockery::mock(\App\Portals\Finance\FinanceSettlementService::class, [$this->workbooks])->makePartial();
+        $service->shouldReceive('summaryRowStream')->andReturnUsing(function ($channel, $filters) {
+            $rows = [];
+            $factor = str_starts_with($filters['from'], '2026-10') ? 2 : 1;
+            foreach (['paypal' => 1, 'xuzong1' => 2, 'xuzong2' => 3, 'ye' => 4, 'worldpay' => 5] as $platform => $weight) {
+                if (($channel === 'paypal') !== ($platform === 'paypal')
+                    || ! in_array($platform, $filters['summary_payment_channels'] ?? [$platform], true)) continue;
+                $row = array_replace(array_fill_keys(array_keys(\App\Portals\Finance\FinanceSettlementService::MONEY), '0'), [
+                    'channel' => $channel, 'payment_channel' => $platform, 'account' => $platform, 'account_key' => $platform,
+                    'team' => 'team-'.$platform, 'subscription' => match ($platform) { 'paypal', 'xuzong1' => '订阅', 'xuzong2' => '无订阅', default => '' },
+                    'owner' => '', 'payment_method' => '', 'month' => substr($filters['from'], 0, 7), 'currency' => 'USD',
+                    'settlement' => (string) (100 * $weight * $factor), 'success' => true, 'failed' => false,
+                    'fee' => (string) (10 * $weight * $factor), 'fee_return' => $platform === 'paypal' ? '2' : '0',
+                    'dispute_refund' => $platform === 'paypal' ? '3' : '0', 'dispute_hold' => $platform === 'paypal' ? '5' : '0',
+                    'dispute_release' => $platform === 'paypal' ? '1' : '0', 'dispute_fee' => $platform === 'paypal' ? '2' : '0',
+                    'ethoca_refund' => $platform === 'paypal' ? '0' : '1', 'ethoca_fee' => $platform === 'paypal' ? '0' : '0.5',
+                    'logistics' => null, 'purchase' => null,
+                ]);
+                $rows[] = $row;
+                if ($platform !== 'paypal') {
+                    $rows[] = array_replace($row, array_fill_keys(array_keys(\App\Portals\Finance\FinanceSettlementService::MONEY), '0'), [
+                        'success' => false, 'failed' => true, 'settlement' => '999', 'per_order_fee' => '0.3',
+                        'logistics' => null, 'purchase' => null,
+                    ]);
+                }
+            }
+            return $rows;
+        });
+        $this->app->instance(\App\Portals\Finance\FinanceSettlementService::class, $service);
+
+        $baseUrl = '/finance/reports/losses?month_from=2026-10&month_to=2026-11';
+        $default = $this->get($baseUrl)->assertOk();
+        $this->assertFalse(collect($default->viewData('groups'))->contains('scope', '合计'));
+        $document = new \DOMDocument;
+        @$document->loadHTML($default->getContent());
+        $xpath = new \DOMXPath($document);
+        $this->assertNotContains('合计', json_decode($xpath->query('//*[@data-loss-loaded-scopes]')->item(0)->getAttribute('data-loss-loaded-scopes'), true));
+        $totalUrl = $xpath->query('//nav[@aria-label="损耗报表项目"]/a[normalize-space(.)="合计"]')->item(0)->getAttribute('href');
+        $response = $this->get($totalUrl)->assertOk()->assertViewHas('loadedLossScope', '合计');
+        $byCategory = collect($response->viewData('groups'))->where('scope', '合计')->keyBy('category');
+        $total = $byCategory['总计'];
+        $this->assertSame(5, $total['success_count']);
+        $this->assertSame(4, $total['failed_count']);
+        $this->assertSame('1500.00000000', $total['settlement']);
+        $this->assertSame('9.86666666', $total['ratios']['fee']);
+        $this->assertSame('0.08000000', $total['ratios']['per_order_fee']);
+        $this->assertSame('0.73333333', $total['ratios']['ethoca_refund']);
+        $this->assertSame('0.26666666', $total['ratios']['ethoca_fee']);
+        $this->assertNull($total['ratios']['logistics']);
+        $this->assertNull($total['ratios']['purchase']);
+        $this->assertSame('10.94666665', $total['total_ratio']);
+        $this->assertSame(2, $byCategory['订阅']['success_count']);
+        $this->assertSame(1, $byCategory['订阅']['failed_count']);
+        $this->assertSame('300.00000000', $byCategory['订阅']['settlement']);
+        $october = collect($response->viewData('monthlyLossGroups')['2026-10'])->first(fn ($g) => $g['scope'] === '合计' && $g['category'] === '总计');
+        $this->assertSame('3000.00000000', $october['settlement']);
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $this->assertSame('合计', $xpath->query('//div[contains(concat(" ",normalize-space(@class)," ")," loss-comparison ")]//thead/tr/th[2]')->item(0)->textContent);
+        $stats = json_decode($xpath->query('//script[@data-loss-stats]')->item(0)->textContent, true);
+        $this->assertSame('5', collect($stats)->first(fn ($s) => $s['scope'] === '合计' && $s['category'] === '总计')['success']);
+
+        $sheet = $this->readDownload($this->get($totalUrl.'&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['合计', '2026-10', '2026-11'], $sheet[1]);
+        $this->assertSame(['成功订单数', '5', '5'], $sheet[2]);
+        $metricKey = hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($total).'|fee');
+        $selected = $this->readDownload($this->get($totalUrl.'&download=1&selected_rows[]='.$metricKey)->assertOk()->streamedContent())->toArray();
+        $this->assertSame('手续费占比（%）', $selected[2][0]);
+        $this->assertEquals((float) $total['ratios']['fee'], $selected[2][2]);
+        $categorySheet = $this->readDownload($this->get($totalUrl.'&download=1&loss_category='.urlencode('订阅'))->assertOk()->streamedContent())->toArray();
+        $this->assertSame('合计 / 订阅', $categorySheet[1][0]);
+        $this->assertSame(['成功订单数', '2', '2'], $categorySheet[2]);
+        $filtered = $this->get($totalUrl.'&team=team-ye&layer=project')->assertOk();
+        $filteredTotal = collect($filtered->viewData('groups'))->first(fn ($g) => $g['scope'] === '合计' && $g['category'] === '总计');
+        $this->assertSame(1, $filteredTotal['success_count']);
+        $this->assertSame(1, $filteredTotal['failed_count']);
+        $this->assertSame('400.00000000', $filteredTotal['settlement']);
+        $this->get($totalUrl.'&team=missing-team')->assertOk()->assertViewHas('groups', []);
+    }
+
+    public function test_default_settlement_overview_matches_each_order_once_for_totals_and_failures(): void
+    {
+        $projection = Mockery::mock(\App\Portals\Finance\FinanceSummaryProjection::class);
+        $projection->shouldReceive('stream')->times(3)->andReturnNull();
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryProjection::class, $projection);
+        $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
+        $sources->shouldReceive('stream')->times(3)->andReturnUsing(fn ($channel, $filters, $transactions, $build) => $build($filters));
+        $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
+        $settlements = Mockery::mock(\App\Portals\Finance\FinanceSettlementService::class, [$this->workbooks])->makePartial();
+        $settlements->shouldReceive('summaryRowStream')->times(3)->andReturnUsing(function ($channel, $filters) {
+            $rows = [];
+            foreach ($channel === 'paypal' ? ['paypal'] : $filters['summary_payment_channels'] as $platform) {
+                $row = array_fill_keys(array_keys(\App\Portals\Finance\FinanceSettlementService::MONEY), '0') + [
+                    'channel' => $channel, 'payment_channel' => $platform, 'account' => $platform, 'account_key' => $platform,
+                    'team' => '深圳团队', 'subscription' => '订阅', 'payment_method' => '', 'owner' => '',
+                    'month' => '2026-11', 'currency' => 'USD', 'settlement' => '100', 'success' => true, 'failed' => false,
+                ];
+                array_push($rows, $row, [...$row, 'success' => false, 'failed' => true, 'settlement' => null]);
+            }
+            return $rows;
+        });
+        $this->app->instance(\App\Portals\Finance\FinanceSettlementService::class, $settlements);
+        [$groups] = app(\App\Portals\Finance\Http\Controllers\FinanceController::class)
+            ->buildSettlementOverviewMonth('2026-11', 'summary', ['layer' => 'account'], false, true);
+        $this->assertCount(5, $groups);
+        foreach ($groups as $group) {
+            $this->assertSame(1, $group['success_count']);
+            $this->assertSame(1, $group['failed_count']);
+            $this->assertSame('100.00000000', $group['settlement']);
+        }
+    }
+
     public function test_summary_page_size_is_remembered_across_channels_and_menu_reentry(): void
     {
         $key = 'finance:summary:page-size:'.$this->user->getKey();
         \Illuminate\Support\Facades\Cache::forget($key);
-        $reports = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $reports->shouldReceive('result')->andReturn([[[], []], null, ['state' => 'ready']]);
-        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $reports);
         $url = '/finance/reports/summary?view=transactions&month=2026-11';
         $this->get($url.'&channel=paypal&per_page=50&remember_page_size=1')->assertOk();
         $this->assertSame(50, \Illuminate\Support\Facades\Cache::get($key));
@@ -2994,106 +3368,6 @@ class FinancePortalTest extends TestCase
         $this->assertSame([['value' => '@channel:ye', 'label' => '叶总']], $response->viewData('filterOptions')['account']->all());
     }
 
-    public function test_report_diagnostics_distinguish_dependency_projection_and_snapshot_waits(): void
-    {
-        (require database_path('migrations/2026_11_13_000001_create_finance_summary_projections.php'))->up();
-        Schema::create('finance_summary_changes', function (Blueprint $table): void {
-            $table->id();
-        });
-        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $method = new \ReflectionMethod($reports, 'pendingDetail');
-        $read = fn () => $method->invoke($reports, $this->workbooks->database(), '2026-11', ['channel' => 'credit_card'], true);
-        DB::table('finance_summary_changes')->insert(['id' => 1]);
-        $this->assertStringContainsString('等待关联订单', $read());
-        DB::table('finance_summary_changes')->delete();
-        $this->assertStringContainsString('缺少月份登记', $read());
-        DB::table('finance_summary_periods')->insert([
-            'month' => '2026-11', 'channel' => 'credit_card', 'revision' => 2, 'published' => 1,
-        ]);
-        $this->assertStringContainsString('已发布 1 / 最新 2', $read());
-        DB::table('finance_summary_periods')->update(['published' => 2]);
-        \Illuminate\Support\Facades\Cache::put('finance:summaries:worker-status', [
-            'stage' => '生成 PayPal 结算明细投影', 'at' => '2026-11-19 16:00:00',
-        ]);
-        $this->assertStringContainsString('月份投影已就绪', $read());
-        $this->assertStringContainsString('生成 PayPal 结算明细投影', $read());
-        \Illuminate\Support\Facades\Cache::forget('finance:summaries:worker-status');
-    }
-
-    public function test_scheduler_registers_recent_default_reports_before_a_user_opens_them(): void
-    {
-        config(['finance.summaries.snapshots_per_run' => 10]);
-        (require database_path('migrations/2026_11_13_000001_create_finance_summary_projections.php'))->up();
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        $current = now('Asia/Shanghai')->startOfMonth();
-        foreach ([$current->copy()->subMonth(), $current->copy()->subMonths(2)] as $month) {
-            DB::table('finance_summary_periods')->insert([
-                'month' => $month->format('Y-m'), 'channel' => 'paypal', 'revision' => 1, 'published' => 1,
-            ]);
-        }
-
-        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $this->assertSame(42, $reports->registerDefaultScopes(2));
-        $this->assertDatabaseCount('finance_report_scopes', 42);
-
-        foreach ([$current->format('Y-m'), $current->copy()->subMonth()->format('Y-m')] as $month) {
-            $this->assertSame(5, DB::table('finance_report_scopes')->where([
-                'report' => 'transactions', 'month' => $month,
-            ])->count());
-            $this->assertSame(8, DB::table('finance_report_scopes')->where([
-                'report' => 'summary', 'month' => $month,
-            ])->count());
-            $this->assertSame(8, DB::table('finance_report_scopes')->where([
-                'report' => 'losses', 'month' => $month,
-            ])->count());
-        }
-
-        $paypal = DB::table('finance_report_scopes')->where([
-            'report' => 'transactions', 'month' => $current->format('Y-m'),
-        ])->get()->first(fn ($scope) => json_decode($scope->filters, true)['channel'] === 'paypal');
-        $this->assertNotNull($paypal);
-        $this->assertSame([
-            '_settlement_currency_summary' => 3,
-            'channel' => 'paypal',
-            'month' => $current->format('Y-m'),
-        ], json_decode($paypal->filters, true, 512, JSON_THROW_ON_ERROR));
-
-        $this->assertSame(42, $reports->registerDefaultScopes(2));
-        $this->assertDatabaseCount('finance_report_scopes', 42);
-
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildTransactionReport')->zeroOrMoreTimes()->andReturn([[], []]);
-        $controller->shouldReceive('buildSettlementOverviewMonth')->zeroOrMoreTimes()->andReturn([[], [], null]);
-        $this->assertTrue($reports->refresh($controller, false));
-        $this->assertDatabaseCount('finance_report_snapshots', 10);
-        foreach ([20, 30, 40, 42] as $expected) {
-            $this->assertTrue($reports->refresh($controller, false));
-            $this->assertDatabaseCount('finance_report_snapshots', $expected);
-        }
-    }
-
-    public function test_long_fallback_range_is_not_starved_when_five_minute_revisions_roll_over(): void
-    {
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        $this->travelTo(\Carbon\Carbon::parse('2026-11-19 12:00:00', 'UTC'));
-        config(['finance.summaries.snapshots_per_run' => 2]);
-        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        for ($month = 1; $month <= 11; $month++) DB::table('finance_report_scopes')->insert([
-            'scope' => hash('sha256', (string) $month), 'month' => sprintf('2026-%02d', $month), 'report' => 'transactions',
-            'filters' => json_encode(['channel' => 'paypal']), 'used_at' => now(),
-        ]);
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildTransactionReport')->times(12)->andReturn([[], []]);
-        for ($round = 0; $round < 6; $round++) {
-            DB::table('finance_report_scopes')->update(['used_at' => now()]);
-            $this->assertTrue($reports->refresh($controller, false));
-            $this->travel(1)->minutes();
-        }
-        $this->assertSame(11, DB::table('finance_report_snapshots')->distinct()->count('scope'));
-    }
-
     public function test_transaction_range_calculates_all_months_without_saved_reports(): void
     {
         $reports = $this->directReportController();
@@ -3111,9 +3385,6 @@ class FinancePortalTest extends TestCase
 
     public function test_old_status_urls_do_not_generate_or_wait_for_report_snapshots(): void
     {
-        $reports = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $reports->shouldNotReceive('result');
-        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $reports);
         foreach (['summary?view=transactions&', 'summary?view=settlement&', 'losses?'] as $path) {
             $this->getJson('/finance/reports/'.$path.'month_from=2026-01&month_to=2026-11&snapshot_status=1')
                 ->assertOk()->assertExactJson(['state' => 'ready']);
@@ -3122,39 +3393,8 @@ class FinancePortalTest extends TestCase
 
     public function test_live_ready_poll_does_not_publish_a_null_snapshot_version(): void
     {
-        $reports = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $reports->shouldNotReceive('result');
-        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $reports);
         $this->getJson('/finance/reports/summary?view=transactions&month=2026-11&snapshot_status=1')
             ->assertOk()->assertJsonPath('state', 'ready')->assertJsonMissingPath('version');
-    }
-
-    public function test_web_report_poll_does_not_start_a_heavy_refresh_by_default(): void
-    {
-        config(['finance.summaries.web_refresh' => false]);
-        $workbooks = Mockery::mock(FinanceWorkbookService::class);
-        $workbooks->shouldNotReceive('database');
-        $reports = new \App\Portals\Finance\FinanceReportSnapshots($workbooks);
-        (new \ReflectionMethod($reports, 'requestBackgroundRefresh'))->invoke($reports);
-        $this->assertTrue(true);
-    }
-
-    public function test_snapshot_worker_publishes_only_two_scopes_then_resumes_remaining_work(): void
-    {
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
-        config(['finance.summaries.snapshots_per_run' => 2]);
-        foreach (['paypal', 'ye', 'worldpay'] as $index => $channel) DB::table('finance_report_scopes')->insert([
-            'scope' => str_repeat((string) ($index + 1), 64), 'month' => '2026-11', 'report' => 'transactions',
-            'filters' => json_encode(['channel' => $channel]), 'used_at' => now(),
-        ]);
-        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
-        $controller->shouldReceive('buildTransactionReport')->times(3)->andReturn([[], []]);
-        $reports = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $this->assertTrue($reports->refresh($controller, false));
-        $this->assertDatabaseCount('finance_report_snapshots', 2);
-        $this->assertTrue($reports->refresh($controller, false));
-        $this->assertDatabaseCount('finance_report_snapshots', 3);
     }
 
     public function test_dependency_worker_limits_matching_and_leaves_new_changes_for_next_run(): void
@@ -3216,7 +3456,7 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseCount('finance_paypal_settlement_rows', 0);
         $this->travel(31)->seconds();
         $this->assertTrue($projection->refresh());
-        $this->assertSame('v3', DB::table('finance_paypal_settlement_projections')->value('source_revision'));
+        $this->assertSame(hash('sha256', 'paypal-settlement-attribution-v2:v3'), DB::table('finance_paypal_settlement_projections')->value('source_revision'));
         $this->assertDatabaseCount('finance_paypal_settlement_rows', 1);
         \Illuminate\Support\Facades\Cache::forget($cacheKey);
     }
@@ -3378,35 +3618,6 @@ class FinancePortalTest extends TestCase
             ->buildTransactionReport('paypal', [], \Carbon\CarbonImmutable::parse('2026-11-01', 'Asia/Shanghai'), null);
 
         $this->assertSame(1, array_sum(array_column($report[0], 'orders')));
-    }
-
-    public function test_transaction_report_reuses_only_the_current_published_revision(): void
-    {
-        (require database_path('migrations/2026_11_13_000001_create_finance_summary_projections.php'))->up();
-        (require database_path('migrations/2026_11_19_000002_add_finance_summary_filter_columns.php'))->up();
-        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
-        Schema::create('finance_summary_changes', function (Blueprint $table): void {
-            $table->id(); $table->string('source'); $table->json('payload');
-        });
-        DB::table('finance_summary_periods')->insert(['month' => '2026-11', 'channel' => 'credit_card', 'revision' => 1, 'published' => 1]);
-        $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $builds = 0;
-        $build = function () use (&$builds): array { return [[['amount' => ++$builds]], []]; };
-        $read = fn () => $snapshots->result('transactions', '2026-11', ['channel' => 'ye'], $build,
-            live: true, reusePublishedRevision: true);
-        $first = $read();
-        $second = $read();
-        $this->assertSame(1, $builds);
-        $this->assertSame($first[0], $second[0]);
-        $this->assertSame($first[1], $second[1]);
-        DB::table('finance_summary_periods')->update(['revision' => 2, 'published' => 2]);
-        $updated = $read();
-        $this->assertSame(2, $builds);
-        $this->assertNotSame($first[1], $updated[1]);
-        DB::table('finance_summary_changes')->insert(['source' => 'order', 'payload' => '{}']);
-        $read();
-        $read();
-        $this->assertSame(4, $builds);
     }
 
     public function test_summary_filter_column_migration_backfills_existing_projection_without_unpublishing_it(): void
@@ -3635,9 +3846,6 @@ class FinancePortalTest extends TestCase
 
     public function test_settlement_and_transaction_reports_both_run_without_report_snapshots(): void
     {
-        $reports = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $reports->shouldNotReceive('result');
-        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $reports);
         foreach (['settlement', 'transactions'] as $view) {
             $this->get('/finance/reports/summary?view='.$view.'&month=2026-10&channel=paypal')->assertOk()
                 ->assertDontSee('data-finance-snapshot-status', false)->assertDontSee('报表正在生成');
@@ -4373,7 +4581,7 @@ class FinancePortalTest extends TestCase
         $this->assertSame($notice, $statementOrder->refresh()->payload['_xuzong_statement_import']['notice']);
         $this->get($report.'?'.http_build_query(['reference' => 'CORRECTED-ID', 'order_fields' => ['subscription_type' => '订阅复购1次']]))
             ->assertOk()->assertViewHas('xuzongRows', fn ($rows) => $rows->count() === 1
-                && $rows->sole()['备注'] === '失败；财务复核；系统无匹配订单');
+                && $rows->sole()['备注'] === '财务复核');
         $this->post($statementPath, ['action' => 'handled', 'notice' => $notice])->assertRedirect($report);
         $this->get($report)->assertOk()->assertDontSee('待处理结算变动');
         $this->get($report.'?reference=LEGACY-GATEWAY&order_fields[status]='.urlencode('成功'))->assertOk()
@@ -4389,7 +4597,7 @@ class FinancePortalTest extends TestCase
         $lateId = DB::table('logistics_orders')->insertGetId($lateOrder);
         $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
             ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['域名'] === 'late.example.com'
-                && $rows->sole()['备注'] === '失败；财务复核' && $rows->sole()['原始支付状态'] === 'FAILED');
+                && $rows->sole()['备注'] === '财务复核' && $rows->sole()['原始支付状态'] === 'FAILED');
         $lateExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered')
             ->assertOk()->streamedContent())->toArray();
         $this->assertSame('late.example.com', $lateExport[1][array_search('域名', $lateExport[0], true)]);
@@ -6225,6 +6433,204 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseCount('finance_balance_snapshots', 0);
         $this->assertDatabaseCount('finance_sync_pages', 0);
         $this->assertStringNotContainsString('must-not-be-saved', json_encode(DB::table('finance_sync_logs')->get()));
+    }
+
+    public function test_xuzong_editor_protects_all_order_and_report_fields_including_empty_values(): void
+    {
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        $dataset = \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET;
+        $source = array_replace(array_fill_keys(FinanceCatalog::dataset($dataset)['headers'], ''), [
+            '商户名称' => '原商户', '商户订单号' => 'XU-ORDER', '平台订单号' => 'XU-SOURCE', '交易流水号' => 'XU-FLOW',
+            '订单币种' => 'USD', '订单金额' => '10', '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS',
+            '创建时间' => '2026-11-01 01:00:00', '完成时间' => '2026-11-01 02:00:00', '消费者邮箱' => 'source@example.test',
+        ]);
+        $this->workbooks->importRecords($dataset, [2 => $source], 'SHANGYUN-v2', 'UTC', 1);
+        $record = FinanceRecord::query()->sole();
+        $this->assertArrayNotHasKey(\App\Portals\Finance\FinanceSourceEdits::KEY, $record->payload);
+        $fields = array_fill_keys(\App\Portals\Finance\FinanceXuzongOrderImport::EDITABLE_ORDER_FIELDS, '编辑内容');
+        $fields = array_replace($fields, ['平台订单号' => 'XU-EDITED', '订单币种' => '', '订单金额' => '',
+            '交易币种' => 'USD', '交易金额' => '35', '支付状态' => 'FAILED', '消费者邮箱' => '',
+            '创建时间' => '2026-11-02 03:04:05', '完成时间' => '', '卡号' => '****9876']);
+        $reportFields = array_fill_keys(\App\Portals\Finance\FinanceXuzongCreditReport::additionalEditableHeaders(), '3');
+        $reportFields['备注'] = '';
+        $this->post('/finance/reports/xuzong-credit/statement/'.$record->id, [
+            'action' => 'edit_order', 'order_fields' => $fields, 'report_fields' => $reportFields,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        foreach ([1, 2] as $revision) {
+            $source['消费者邮箱'] = 'new-'.$revision.'@example.test';
+            $this->workbooks->importRecords($dataset, [2 => $source], 'SHANGYUN-v2', 'UTC', 1, createOnly: true, fillMissing: true);
+            app(\App\Portals\Finance\FinanceXuzongOrderImport::class)->importOfficialStatement(
+                UploadedFile::fake()->createWithContent('statement.csv',
+                    "平台订单号,商户订单号,结算币种,适用汇率,折算后结算贡献,结算时间\nXU-SOURCE,XU-ORDER,USD,1,2,2026-11-05 01:00:00\n"), 'SHANGYUN-v2'
+            );
+            $values = app(\App\Portals\Finance\FinanceXuzongCreditReport::class)->orderValues($record->id);
+            foreach ($fields as $field => $value) $this->assertEquals($value, $values[$field], '徐总订单: '.$field);
+            foreach ($reportFields as $field => $value) $this->assertEquals($value, $values[$field], '徐总报表: '.$field);
+            $this->assertDatabaseCount('finance_records', 1);
+        }
+    }
+
+    public function test_worldpay_official_reimport_uses_original_identity_and_preserves_editor_changes(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $account = $this->financePayPalAccount('Worldpay保护', ['account_type' => 'credit_card', 'card_platform' => 'worldpay']);
+        $importer = app(\App\Portals\Finance\FinanceWorldpayImport::class);
+        $source = ['网关接入号' => 'ORIGINAL-GATEWAY', '流水订单号' => 'WP-SOURCE', '商户订单号' => 'WP-ORDER',
+            '币种' => 'USD', '交易金额' => '10', '结单币种' => 'USD', '结单金额' => '9', '结单汇率' => '1',
+            '交易时间' => '2026-11-01 01:00:00', '交易状态' => 'SUCCESS', '支付方式' => 'CARD', 'HPP支付方式' => 'HPP',
+            '卡种' => 'VISA', '交易网址' => 'https://original.example.test', '卡号' => '****1234',
+            '邮箱' => 'source@example.test', '收货人国家' => 'US', '划款状态' => '已划款'];
+        $importer->import('general', [2 => $source], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::query()->sole();
+        $this->assertArrayNotHasKey(\App\Portals\Finance\FinanceSourceEdits::KEY, $record->payload);
+        $this->post('/finance/reports/worldpay-settlement/save', ['id' => $record->id, 'reference' => 'WP-EDITED',
+            'gateway' => 'EDITED-GATEWAY', 'gross' => '35', 'email' => '', 'fee' => '', 'hpp_method' => '人工HPP',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        foreach ([1, 2] as $revision) {
+            $source['交易金额'] = '999';
+            $source['邮箱'] = 'new@example.test';
+            $source['收货人国家'] = 'GB';
+            $importer->import('general', [2 => $source], $account->activity_account, 'UTC', 1);
+            $this->assertDatabaseCount('finance_records', 1);
+            $row = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('credit_card', ['card_channel' => 'worldpay'])->sole()['card_layout'];
+            foreach (['reference' => 'WP-EDITED', 'gateway' => 'EDITED-GATEWAY', 'gross' => '35', 'email' => '', 'fee' => '', 'hpp_method' => '人工HPP'] as $field => $value) {
+                $this->assertEquals($value, $row[$field], $field);
+            }
+            $this->assertSame('GB', $row['recipient_country']);
+        }
+    }
+
+    public function test_credit_detail_editors_protect_their_complete_field_schema_across_reimports(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $editor = app(\App\Portals\Finance\FinanceSettlementEditor::class);
+        $layout = \App\Portals\Finance\FinanceCreditSettlementLayout::class;
+        foreach (['ye', 'worldpay'] as $platform) {
+            $account = $this->financePayPalAccount('字段保护-'.$platform, ['account_type' => 'credit_card', 'card_platform' => $platform]);
+            $source = array_replace(array_fill_keys(array_keys($layout::columns($platform)), ''), [
+                'reference' => 'SOURCE-'.$platform, 'merchant_order' => 'ORDER-'.$platform,
+                'currency' => 'USD', 'gross' => '10', 'status' => 'SUCCESS', 'gateway' => 'gateway-original',
+                'initiated_at' => '2026-11-01 01:00:00', 'date' => '2026-11-01 01:00:00',
+                'completed_at' => '2026-11-01 02:00:00', 'fee' => '5', 'email' => 'original@example.test',
+                'domain' => 'original.example.test', 'month' => '2026-11', 'store_platform' => '原平台',
+            ]);
+            $this->workbooks->importRecords('xuzong2-details', [2 => $layout::importPayload($platform, $source)], $account->activity_account, 'UTC', 1);
+            $record = FinanceRecord::where('reference', $source['reference'])->sole();
+            $fingerprint = $record->fingerprint;
+            $editor->save($record, ['logistics' => '2'], 'credit_card', 1, addImportedCosts: true);
+            $importedSupplement = json_decode(DB::table('finance_settlement_supplements')->where('finance_record_id', $record->id)->value('payload'), true);
+            $this->assertArrayNotHasKey('logistics', $importedSupplement['_edited_fields'] ?? []);
+            $this->assertArrayNotHasKey(\App\Portals\Finance\FinanceSourceEdits::KEY, $record->fresh()->payload);
+            $manual = [];
+            foreach ($editor->fields('credit_card', $platform) as $field => $label) {
+                if ($field === 'store_platform') continue;
+                $manual[$field] = in_array($field, $editor->numericFields('credit_card', $platform), true) ? '1.25' : '编辑-'.$field;
+            }
+            $manual = array_replace($manual, ['reference' => 'EDITED-'.$platform, 'currency' => 'EUR', 'gross' => '35',
+                'status' => 'FAILED', 'month' => '2026-12', 'fee' => '', 'email' => '']);
+            foreach (['initiated_at', 'completed_at', 'date'] as $field) if (array_key_exists($field, $manual)) $manual[$field] = '2026-11-02 03:04:05';
+            if (array_key_exists('refund_count', $manual)) $manual['refund_count'] = '2';
+            foreach (['settlement_currency', 'statement_currency'] as $field) if (array_key_exists($field, $manual)) $manual[$field] = 'USD';
+            $this->post('/finance/reports/'.($platform === 'ye' ? 'ye-settlement' : 'worldpay-settlement').'/save', [
+                'id' => $record->id, 'timezone' => 'UTC', ...$manual,
+            ])->assertRedirect()->assertSessionHasNoErrors();
+            foreach ([1, 2] as $revision) {
+                $source['store_platform'] = '自动平台-'.$revision;
+                $source['gross'] = '999';
+                $source['email'] = 'incoming@example.test';
+                $this->workbooks->importRecords('xuzong2-details', [2 => $layout::importPayload($platform, $source)], $account->activity_account, 'UTC', 1);
+                $updated = $record->fresh();
+                $this->assertSame($fingerprint, $updated->fingerprint);
+                $row = $service->rows('credit_card', ['card_channel' => $platform, 'timezone' => 'UTC'],
+                    new \Illuminate\Database\Eloquent\Collection([$updated]))->sole()['card_layout'];
+                foreach ($manual as $field => $value) $this->assertEquals($value, $row[$field], $platform.': '.$field);
+                $this->assertSame('自动平台-'.$revision, $row['store_platform']);
+                $this->assertSame(1, FinanceRecord::where('account', $account->activity_account)->count());
+            }
+            if (isset($manual['completed_at'])) {
+                $shifted = $service->rows('credit_card', ['card_channel' => $platform, 'timezone' => 'Asia/Shanghai'],
+                    new \Illuminate\Database\Eloquent\Collection([$record->fresh()]))->sole()['card_layout'];
+                $this->assertSame('2026-11-02 11:04:05', $shifted['completed_at']);
+            }
+        }
+    }
+
+    public function test_paypal_resync_preserves_manual_source_edits_and_updates_unedited_fields_without_duplicates(): void
+    {
+        $this->post('/finance/payment-accounts', $this->newPaymentAccountData())->assertRedirect();
+        $account = FinancePaymentAccount::query()->sole();
+        $revision = 0;
+        Http::fake(function ($request) use ($account, &$revision) {
+            return $this->signedRelayResponse($request, $account, ['page' => 1, 'total_pages' => 1, 'total_items' => 1, 'transaction_details' => [[
+                'transaction_info' => ['transaction_id' => 'SOURCE-ID', 'transaction_event_code' => 'T0006',
+                    'transaction_initiation_date' => '2026-11-01T01:00:00Z',
+                    'transaction_amount' => ['value' => $revision ? '20' : '10', 'currency_code' => 'USD'],
+                    'fee_amount' => ['value' => $revision ? '-2' : '-1', 'currency_code' => 'USD'],
+                    'transaction_status' => $revision ? 'D' : 'S', 'invoice_id' => 'INVOICE-'.$revision],
+                'payer_info' => ['email_address' => 'source-'.$revision.'@example.test',
+                    'payer_name' => ['alternate_full_name' => 'Source '.$revision]],
+            ]]]);
+        });
+        $url = '/finance/payment-accounts/finance-'.$account->id.'/transactions';
+        $range = ['from' => '2026-11-01', 'to' => '2026-11-01', 'timezone' => 'UTC'];
+        $this->postJson($url, $range)->assertOk()->assertJsonPath('ok', true);
+        $record = FinanceRecord::query()->sole();
+        $fingerprint = $record->fingerprint;
+        $target = $this->financePayPalAccount('人工调整账户');
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'subscription' => '订阅'])
+            ->assertRedirect()->assertSessionHasNoErrors();
+        $editor = app(\App\Portals\Finance\FinanceSettlementEditor::class);
+        $manual = [];
+        foreach ($editor->fields('paypal') as $field => $label) {
+            $manual[$field] = in_array($field, $editor->numericFields('paypal'), true) ? '2' : '编辑-'.$field;
+        }
+        unset($manual['paypal_8'], $manual['paypal_13']); // Unedited fields must continue to follow the source.
+        $manual = array_replace($manual, ['account' => $target->account_name, 'reference' => 'FINANCE-ID',
+            'paypal_3' => '财务修改姓名', 'paypal_4' => 'T0005', 'paypal_6' => 'EUR', 'paypal_7' => '35', 'paypal_10' => '',
+            'paypal_0' => '2026-11-02', 'paypal_1' => '02:03:04', 'paypal_2' => 'UTC', 'paypal_5' => 'S',
+            'month' => '2026-12', 'date' => '2026-11-02 02:03:04', 'timezone' => 'UTC', 'fee' => '',
+            'subscription' => '', 'upsell' => '否']);
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, ...$manual])->assertRedirect()->assertSessionHasNoErrors();
+        // A second edit must retain earlier protection and explicitly protect status.
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'paypal_5' => 'PENDING'])
+            ->assertSessionHasNoErrors();
+        $manual['paypal_5'] = 'PENDING';
+        foreach ([1, 2] as $revision) {
+            $this->postJson($url, $range)->assertOk()->assertJsonPath('ok', true);
+            $updated = $record->fresh();
+            $this->assertSame($fingerprint, $updated->fingerprint);
+            $this->assertSame('FINANCE-ID', $updated->reference);
+            $this->assertSame($target->activity_account, $updated->account);
+            $this->assertSame('2026-11-02 02:03:04', $updated->occurred_at->format('Y-m-d H:i:s'));
+            $this->assertSame('PENDING', $updated->status);
+            $this->assertSame('EUR', $updated->currency);
+            $this->assertSame('T0005', $updated->raw_type);
+            $headers = FinanceCatalog::dataset('paypal-orders')['headers'];
+            foreach ([3 => '财务修改姓名', 7 => '35', 10 => '', 8 => '-2', 13 => 'INVOICE-'.$revision] as $index => $value) {
+                $this->assertSame($value, $updated->payload[$headers[$index]], 'paypal_'.$index);
+            }
+            $this->assertDatabaseCount('finance_records', 1);
+            $this->assertDatabaseCount('finance_payment_transactions', 1);
+            $transaction = DB::table('finance_payment_transactions')->sole();
+            $this->assertSame('FINANCE-ID', $transaction->transaction_id);
+            $this->assertSame('T0005', $transaction->event_code);
+            $raw = json_decode($transaction->raw_payload, true);
+            $this->assertSame('20', $raw['transaction_info']['transaction_amount']['value']);
+            $this->assertSame('source-'.$revision.'@example.test', $raw['payer_info']['email_address']);
+        }
+        $orders = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class);
+        $orders->forgetOrderGraph();
+        $detail = $orders->detailRow($record->id, 'UTC');
+        $this->assertNotNull($detail);
+        $payment = collect($detail['events'])->firstWhere('id', $record->id);
+        $this->assertSame('35', $payment['amount']);
+        $this->assertSame('EUR', $payment['currency']);
+        $this->assertSame('PENDING', $payment['status']);
+        foreach ($manual as $field => $value) {
+            if ($field === 'paypal_4') $value = \App\Portals\Finance\FinancePayPalEventTypes::label($value);
+            $this->assertEquals($value, $detail[$field], 'PayPal编辑字段: '.$field);
+        }
     }
 
     public function test_relay_transaction_pagination_keeps_raw_data_and_updates_same_identity(): void

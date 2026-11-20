@@ -67,10 +67,16 @@ class FashionOperationReportController extends Controller
             'exclude_resigned' => ['nullable', 'boolean'],
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
-            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
+            'display_mode' => ['nullable', Rule::in(['personal', 'performance', 'team'])],
+            'personal_range' => ['nullable', Rule::in(['7', '14'])],
+            'profit_coefficient' => ['nullable', 'numeric', 'gt:0', 'max:1000000'],
         ]);
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $excludeResigned = (bool) ($validated['exclude_resigned'] ?? false);
+        $displayMode = (string) ($validated['display_mode'] ?? ($isDashboard ? 'personal' : 'performance'));
+        $isPersonalMode = $isDashboard && $displayMode === 'personal';
+        $personalRange = (int) ($validated['personal_range'] ?? 7);
+        $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1);
         $reportNow = now($timezone);
         $dateRange = (string) ($validated['date_range'] ?? (
             $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
@@ -96,6 +102,10 @@ class FashionOperationReportController extends Controller
         };
         if ($dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+        if ($isPersonalMode) {
+            $dateFrom = $reportNow->copy()->subDays($personalRange - 1)->toDateString();
+            $dateTo = $reportNow->toDateString();
         }
         // Keep the assistant report on the exact same time basis as the fashion
         // performance report. The legacy paid_at_utc column stores a
@@ -160,7 +170,7 @@ class FashionOperationReportController extends Controller
             $fashionDepartmentIds = $fashionDepartmentIds->merge($childIds)->unique()->values();
         } while ($fashionDepartmentIds->count() > $before);
         */
-        $orderMetrics = FashionLogisticsOrder::query()
+        $ordersQuery = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
             ->where(function ($platform) use ($stores): void {
                 $platform->where(function ($xshoppy) use ($stores): void {
@@ -172,20 +182,47 @@ class FashionOperationReportController extends Controller
                 });
             })
             ->whereNotNull('paid_at_utc')
-            ->whereBetween('paid_at_utc', [$storageFrom, $storageTo])
-            ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
-            ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
+            ->whereBetween('paid_at_utc', [$storageFrom, $storageTo]);
+        $personalOrderMetrics = collect();
+        if ($isPersonalMode) {
+            $timezoneMinutes = $this->timezoneOffsetMinutes($timezone);
+            $reportDateExpression = sprintf('DATE(DATE_ADD(paid_at_utc, INTERVAL %d MINUTE))', $timezoneMinutes - 480);
+            $personalOrderMetrics = (clone $ordersQuery)
+                ->selectRaw("assistant_domain_store_id, {$reportDateExpression} report_date, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue")
+                ->groupBy('assistant_domain_store_id')
+                ->groupByRaw($reportDateExpression)
+                ->get()
+                ->keyBy(fn (FashionLogisticsOrder $order): string => (int) $order->assistant_domain_store_id.'|'.$order->report_date);
+            $orderMetrics = $personalOrderMetrics->groupBy('assistant_domain_store_id')->map(function ($metrics) {
+                return (object) [
+                    'order_count' => (int) $metrics->sum('order_count'),
+                    'revenue' => (float) $metrics->sum('revenue'),
+                ];
+            });
+        } else {
+            $orderMetrics = $ordersQuery
+                ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
+                ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
+        }
 
         $reports = FashionAdvertisingReport::query()
             ->where('project_code', $projectCode)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $operatorIds)
             ->with('adSpendEntries')->get()->groupBy('submitter_id');
+        $reportsByOperatorDate = $reports->flatMap(function ($operatorReports, $operatorId) {
+            return $operatorReports->mapWithKeys(fn (FashionAdvertisingReport $report) => [
+                (int) $operatorId.'|'.$report->report_date->format('Y-m-d') => $report,
+            ]);
+        });
+        $personalDates = $isPersonalMode
+            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => $reportNow->copy()->subDays($offset)->toDateString())->reverse()->values()
+            : collect();
 
         $selectedDepartmentIds = $request->has('department_ids')
             ? collect($validated['department_ids'] ?? [])->map(fn ($id) => (int) $id)->intersect($fashionDepartmentIds)->unique()->values()->all()
             : [];
-        $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId): ?array {
+        $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId, $isPersonalMode, $personalDates, $personalOrderMetrics, $reportsByOperatorDate, $profitCoefficient): ?array {
             $operator = $operators->get($operatorId);
             if (! $operator) {
                 return null;
@@ -217,6 +254,22 @@ class FashionOperationReportController extends Controller
                 : ($operatorReports->contains('status', FashionAdvertisingReport::STATUS_PENDING) ? 'pending' : 'submitted');
             $hireDays = $operator->hired_at ? max(1, $operator->hired_at->diffInDays(CarbonImmutable::parse($dateTo)) + 1) : null;
             $position = (string) ($department?->pivot?->position ?: Department::POSITION_MEMBER);
+            $personalDays = $isPersonalMode ? $personalDates->map(function (string $date) use ($operatorStores, $operatorId, $personalOrderMetrics, $reportsByOperatorDate, $profitCoefficient, $department): array {
+                $dayMetrics = $operatorStores->map(function (AssistantDomainStore $store) use ($personalOrderMetrics, $date) {
+                    return $personalOrderMetrics->get((int) $store->getKey().'|'.$date);
+                })->filter();
+                $dayRevenue = round((float) $dayMetrics->sum('revenue'), 2);
+                $dayOrders = (int) $dayMetrics->sum('order_count');
+                $dayReport = $reportsByOperatorDate->get($operatorId.'|'.$date);
+                $daySpend = $dayReport && in_array($dayReport->status, [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED], true)
+                    ? round((float) $dayReport->adSpendEntries->sum('actual_spend_usd'), 2)
+                    : 0.0;
+                $profit = round($dayRevenue / $profitCoefficient - $daySpend, 2);
+
+                return ['date' => $date, 'order_count' => $dayOrders, 'revenue' => $dayRevenue, 'ad_spend' => $daySpend,
+                    'roi' => $daySpend > 0 ? $dayRevenue / $daySpend : null, 'roi_class' => $this->roiClass($daySpend > 0 ? $dayRevenue / $daySpend : null), 'profit' => $profit,
+                    'profit_status' => $profit > 0 ? 'profit' : ($profit < 0 ? 'loss' : 'even')];
+            })->values() : collect();
 
             return ['department' => (string) ($department?->name ?: '未分配部门'), 'department_id' => (int) ($department?->id ?? 0), 'operator' => (string) ($operator->name ?: $operator->username),
                 'is_resigned' => (string) $operator->employment_status === 'resigned',
@@ -225,6 +278,7 @@ class FashionOperationReportController extends Controller
                 'order_count' => $orderCount, 'revenue' => $revenue, 'aov' => $orderCount > 0 ? $revenue / $orderCount : null,
                 'media' => $media, 'ad_spend' => $totalSpend, 'roi' => $totalSpend > 0 ? $revenue / $totalSpend : null,
                 'roi_class' => $this->roiClass($totalSpend > 0 ? $revenue / $totalSpend : null),
+                'personal_days' => $personalDays,
                 'submission_status' => $submissionStatus,
                 'submission_label' => match ($submissionStatus) {
                     'pending' => '已提报·待审核',
@@ -255,7 +309,6 @@ class FashionOperationReportController extends Controller
         });
         $sortBy = (string) ($validated['sort_by'] ?? 'order_count');
         $sortOrder = (string) ($validated['sort_order'] ?? 'desc');
-        $displayMode = (string) ($validated['display_mode'] ?? 'performance');
         $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder, $displayMode): int {
                 if ($displayMode === 'team') {
                     return [$left['department'], $left['team_rank'], $left['operator']]
@@ -268,6 +321,35 @@ class FashionOperationReportController extends Controller
 
                 return $sortOrder === 'desc' ? -$comparison : $comparison;
             })->values();
+
+        $personalRows = $isPersonalMode
+            ? $rows->flatMap(function (array $row) {
+                return collect($row['personal_days'] ?? [])->map(function (array $day) use ($row): array {
+                    return [...$day, 'department' => $row['department'], 'operator' => $row['operator']];
+                });
+            })->sortByDesc(fn (array $row): string => $row['date'].'|'.$row['operator'])->values()
+            : collect();
+        $personalSummaryRows = $isPersonalMode
+            ? $rows->map(function (array $row) use ($profitCoefficient): array {
+                $days = collect($row['personal_days'] ?? []);
+                $revenue = round((float) $days->sum('revenue'), 2);
+                $adSpend = round((float) $days->sum('ad_spend'), 2);
+                $profit = round($revenue / $profitCoefficient - $adSpend, 2);
+
+                return [
+                    'department' => $row['department'],
+                    'operator' => $row['operator'],
+                    'order_count' => (int) $days->sum('order_count'),
+                    'revenue' => $revenue,
+                    'ad_spend' => $adSpend,
+                    'roi' => $adSpend > 0 ? $revenue / $adSpend : null,
+                    'roi_class' => $this->roiClass($adSpend > 0 ? $revenue / $adSpend : null),
+                    'profit' => $profit,
+                    'continuous_loss' => $this->hasConsecutiveLosses($days, 6),
+                    'days' => $days->values(),
+                ];
+            })->sortByDesc('profit')->values()
+            : collect();
 
         $teamBands = [];
         if ($displayMode === 'team') {
@@ -288,14 +370,17 @@ class FashionOperationReportController extends Controller
             ->sum('revenue');
         $summaryRoi = $summarySpend > 0 ? $roiRevenue / $summarySpend : null;
         return view('portals.assistant.fashion-operation-reports.index', [
-            ...$context, 'rows' => $rows, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
+            ...$context, 'rows' => $rows, 'personalRows' => $personalRows, 'personalSummaryRows' => $personalSummaryRows, 'isPersonalMode' => $isPersonalMode,
+            'personalSummary' => ['profit' => (float) $personalSummaryRows->sum('profit'),
+                'continuous_loss_people' => $personalSummaryRows->where('continuous_loss', true)->count()],
+            'isDashboard' => $isDashboard, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
             'fashionReportIndexRoute' => $isDashboard
                 ? 'operation-dashboard.fashion-operation-reports.index'
                 : 'assistant.fashion-operation-reports.index',
             'reportProject' => $project,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
-                'exclude_resigned' => $excludeResigned,
+                'exclude_resigned' => $excludeResigned, 'personal_range' => $personalRange, 'profit_coefficient' => $profitCoefficient,
                 'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
@@ -323,5 +408,28 @@ class FashionOperationReportController extends Controller
         }
 
         return $options;
+    }
+
+    private function timezoneOffsetMinutes(string $timezone): int
+    {
+        $sign = str_starts_with($timezone, '-') ? -1 : 1;
+        [$hours, $minutes] = array_map('intval', explode(':', ltrim($timezone, '+-')));
+
+        return $sign * ($hours * 60 + $minutes);
+    }
+
+    /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
+    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $minimumDays): bool
+    {
+        $consecutiveDays = 0;
+
+        foreach ($days as $day) {
+            $consecutiveDays = ($day['profit_status'] ?? null) === 'loss' ? $consecutiveDays + 1 : 0;
+            if ($consecutiveDays >= $minimumDays) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

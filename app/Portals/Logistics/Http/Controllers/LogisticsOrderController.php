@@ -47,6 +47,8 @@ class LogisticsOrderController extends Controller
         'aerynix-2009-m9724',
         'briellev-1004.1',
         'briellev-1004.2',
+        'briellev-1004_1',
+        'briellev-1004_2',
     ];
 
     private const EXCLUDED_TONGTU_RECONCILIATION_DOMAINS = [

@@ -2,6 +2,7 @@
 
 namespace App\Portals\Finance;
 
+use App\Models\FinanceRecord;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
@@ -196,7 +197,7 @@ class FinancePayPalSettlementOrders
         }
         $orders = $this->ordersInDateRange($graph[0], $filters);
 
-        $scope = array_intersect_key($filters, array_flip(['account', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
+        $scope = array_intersect_key($filters, array_flip(['account', 'accounts', 'reference', 'team', 'teams', 'region', 'regions', 'domain', 'subscription', 'subscriptions', 'order_status', 'conditions']));
         if (! array_filter($scope)) {
             $rows = collect($this->matchingRows($filters, array_slice($orders, $offset, $limit), $graph, false));
             return [$rows, count($orders), $rows, true];
@@ -278,7 +279,7 @@ class FinancePayPalSettlementOrders
         return $graph === null ? collect() : collect($this->matchingRows($filters, $graph[0], $graph, true));
     }
 
-    public function exportRows(array $filters, bool $matchCandidateDomains = true, ?array $recordIds = null): iterable
+    public function exportRows(array $filters, bool $matchCandidateDomains = true, ?array $recordIds = null, ?callable $onSourceRows = null): iterable
     {
         if ($recordIds === []) {
             return;
@@ -303,9 +304,14 @@ class FinancePayPalSettlementOrders
         } else {
             $orders = $this->ordersInDateRange($graph[0], $filters);
         }
-        foreach ($this->matchingRows($filters, $orders, $graph, false, $matchCandidateDomains) as $row) {
+        foreach ($this->matchingRows($filters, $orders, $graph, false, $matchCandidateDomains, $onSourceRows) as $row) {
             yield array_intersect_key($row, $fields);
         }
+    }
+
+    public function releaseExportGraph(): void
+    {
+        $this->recordExportGraph = null;
     }
 
     /** Stream the fully calculated list rows for the background page projection. */
@@ -318,8 +324,9 @@ class FinancePayPalSettlementOrders
         yield from $this->matchingRows(['timezone' => 'Asia/Shanghai'], $graph[0], $graph, false);
     }
 
-    private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails, bool $matchCandidateDomains = false): iterable
+    private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails, bool $matchCandidateDomains = false, ?callable $onSourceRows = null): iterable
     {
+        if (! empty($filters['accounts'])) $orders = $this->accountCandidates($orders, $filters['accounts']);
         if (filled($filters['account'] ?? null)) {
             $orders = $this->accountCandidates($orders, $filters['account']);
         }
@@ -339,18 +346,21 @@ class FinancePayPalSettlementOrders
             $paymentQuery ??= $this->settlements->query('paypal', []);
             $records = (clone $paymentQuery)->whereIntegerInRaw('id', $ids)
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+            $records->each(fn (FinanceRecord $record) => $record->withCachedReportCasts());
             $context ??= $this->settlements->rowContext('paypal');
             $payments = $this->settlements->rows('paypal', [
                 'timezone' => $filters['timezone'], 'order_view' => true, 'match_candidate_domains' => $matchCandidateDomains,
             ], $records, $context)->keyBy('id');
+            if ($onSourceRows !== null) $onSourceRows($payments);
             foreach ($batch as $order) {
                 if (isset($order['event'])) {
                     $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails, $lockedMonths);
                 } else {
                     $payment = $payments->get($order['id']);
-                    if ($payment === null
+                    if ($payment === null || ! FinanceFilterSelection::rowMatches($payment, $filters, paypalPayment: true)
                         || (filled($filters['domain'] ?? null) && ! str_contains($payment['domain'] ?? '', $filters['domain']))
                         || (filled($filters['team'] ?? null) && $this->paymentTeam($payment) !== $filters['team'])
+                        || (filled($filters['region'] ?? null) && FinanceSettlementService::operationRegion($this->paymentTeam($payment)) !== $filters['region'])
                         || (filled($filters['subscription'] ?? null) && (filled($payment['subscription'] ?? null) ? $payment['subscription'] : '未匹配')
                             !== FinanceSettlementService::subscriptionLabel($filters['subscription']))) {
                         continue;
@@ -384,19 +394,22 @@ class FinancePayPalSettlementOrders
         });
     }
 
-    private function accountCandidates(array $orders, string $account): array
+    private function accountCandidates(array $orders, string|array $account): array
     {
+        $selected = is_array($account) ? $account : [$account];
         $db = $this->workbooks->database();
         $linked = $db->table('finance_payment_transactions as payment')
             ->join('finance_payment_accounts as owner', 'owner.id', '=', 'payment.payment_account_id')
             ->where('owner.account_type', 'paypal')->whereNull('owner.deleted_at')
-            ->where('owner.activity_account', $account)->select('payment.finance_record_id');
-        $ids = $db->table('finance_records')->where('dataset', 'paypal-orders')
-            ->where('account', $account)->select('id')->union($linked)->pluck('id')->flip()->all();
+            ->select('payment.finance_record_id');
+        FinanceFilterSelection::applyQuery($linked, 'owner.activity_account', $selected);
+        $records = $db->table('finance_records')->where('dataset', 'paypal-orders');
+        FinanceFilterSelection::applyQuery($records, 'account', $selected);
+        $ids = $records->select('id')->union($linked)->pluck('id')->flip()->all();
 
         // Keep both potential sources of account ownership; matches() applies the final rule.
         return array_filter($orders, fn (array $order) => isset($order['event'])
-            ? $order['event']['account_key'] === $account
+            ? FinanceFilterSelection::matches($order['event']['account_key'], $selected)
             : isset($ids[$order['id']]));
     }
 
@@ -424,7 +437,8 @@ class FinancePayPalSettlementOrders
     {
         $db = $this->workbooks->database();
 
-        return 'finance:paypal-settlement:order-graph:v1:'.hash('sha256', $db->getName().':'.$db->getDatabaseName());
+        return 'finance:paypal-settlement:order-graph:v2:'.hash('sha256', $db->getName().':'.$db->getDatabaseName())
+            .':'.app(FinanceSummaryDataVersion::class)->cacheRevision(['paypal']);
     }
 
     private function orderGraph(?int $recordId): ?array
@@ -486,7 +500,7 @@ class FinancePayPalSettlementOrders
                 ->get(['txn.finance_record_id', 'txn.payment_account_id', 'txn.transaction_id']);
             foreach ($matchingRoots as $txn) {
                 if (isset($byId[$txn->finance_record_id])) {
-                    $crossAccount[$txn->transaction_id][$txn->payment_account_id] = true;
+                    $this->addGraphMember($crossAccount, $txn->transaction_id, (int) $txn->payment_account_id);
                 }
             }
             // Read additional event types for the detail only. The settlement rules use the original event set.
@@ -515,7 +529,7 @@ class FinancePayPalSettlementOrders
             $transactions->select('txn.id');
         }
         $transactions->addSelect('txn.finance_record_id', 'txn.payment_account_id', 'txn.transaction_id',
-            'txn.event_code', 'record.occurred_at');
+            'txn.event_code', 'record.occurred_at', 'record.payload->'.FinancePayPalSourceEdits::KEY.'->payload as finance_source_edits');
         if ($mysql) {
             $source = $db->getQueryGrammar()->wrap('txn.raw_payload');
             $fields = ['paypal_reference_id', 'paypal_reference_id_type', 'invoice_id', 'transaction_amount',
@@ -529,7 +543,7 @@ class FinancePayPalSettlementOrders
             $transactions->addSelect('event_type.category as configured_category');
         }
         $transactionRows = \Illuminate\Support\LazyCollection::make(function () use ($transactions, $transactionIds): iterable {
-            foreach (array_chunk($transactionIds, 4000) as $ids) {
+            foreach (array_chunk($transactionIds, 500) as $ids) {
                 yield from (clone $transactions)->whereIntegerInRaw('txn.id', $ids)->orderBy('txn.id')->get();
             }
         });
@@ -546,6 +560,7 @@ class FinancePayPalSettlementOrders
                 continue;
             }
             $info = json_decode((string) $txn->transaction_info, true) ?? [];
+            $info = FinancePayPalSourceEdits::transactionInfo($info, json_decode((string) $txn->finance_source_edits, true) ?? []);
             $relatedId = $info['paypal_reference_id'] ?? '';
             $relatedType = $relatedId !== '' ? ($info['paypal_reference_id_type'] ?? '') : '';
             if (str_starts_with($txn->event_code, 'T02') && (isset($withdrawals[$txn->payment_account_id][$txn->transaction_id])
@@ -581,12 +596,14 @@ class FinancePayPalSettlementOrders
                 continue;
             }
             $events[$txn->id] = $event;
-            $index[$event['account_id']][$event['reference']][] = $txn->id;
+            $index[$event['account_id']] ??= [];
+            $this->addGraphMember($index[$event['account_id']], $event['reference'], (int) $txn->id);
             if ($event['invoice'] !== '' && ($payment || ($deleted && ! $settlementEvent))) {
-                $invoiceRoots[$event['account_id']][$event['invoice']][$event['id']] = true;
+                $invoiceRoots[$event['account_id']] ??= [];
+                $this->addGraphMember($invoiceRoots[$event['account_id']], $event['invoice'], $event['id']);
             }
             if ($payment) {
-                $crossAccount[$event['reference']][$event['account_id']] = true;
+                $this->addGraphMember($crossAccount, $event['reference'], $event['account_id']);
             }
         }
 
@@ -620,7 +637,8 @@ class FinancePayPalSettlementOrders
         }
         if ($extraEvents !== []) {
             foreach ($extraEvents as $id => $event) {
-                $index[$event['account_id']][$event['reference']][] = $id;
+                $index[$event['account_id']] ??= [];
+                $this->addGraphMember($index[$event['account_id']], $event['reference'], (int) $id);
             }
             $events += $extraEvents;
             foreach ($extraEvents as $event) {
@@ -632,6 +650,9 @@ class FinancePayPalSettlementOrders
             }
         }
         unset($events, $index, $byId, $paymentIds, $invoiceRoots);
+        // Only cross-account duplicates affect the result; unique references
+        // need no per-reference array in the retained graph.
+        $crossAccount = array_filter($crossAccount, 'is_array');
 
         $crossRates = [
             'monthly' => $db->table('finance_monthly_exchange_rates')->whereIn('channel', ['paypal', 'combined'])
@@ -651,6 +672,7 @@ class FinancePayPalSettlementOrders
 
     private function paymentRow(array $payment, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, array $crossRates, string $zone, bool $includeDetails): array
     {
+        $protected = $payment['editor_values'] ?? [];
         $id = $payment['id'];
         $root = $roots[$id] ?? null;
         $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
@@ -671,7 +693,8 @@ class FinancePayPalSettlementOrders
             $result['events'] = collect($result['events'])->sortBy('timestamp')->values()->all();
         }
         $payment['filter_date'] = $payment['source_date'];
-        unset($payment['manual_values'], $payment['source_date'], $result['manual_values'], $result['source_date']);
+        unset($payment['manual_values'], $payment['source_date'], $payment['editor_values'],
+            $result['manual_values'], $result['source_date'], $result['editor_values']);
         $result['payments'] = [$payment];
         foreach (['subscription', 'upsell'] as $field) {
             if (blank($result[$field])) {
@@ -682,7 +705,7 @@ class FinancePayPalSettlementOrders
         $result['paypal_12'] = $root['related_id'] ?? $payment['paypal_12'];
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
 
-        return $result;
+        return array_replace($result, $protected);
     }
 
     private function paymentTeam(array $payment): string
@@ -711,6 +734,19 @@ class FinancePayPalSettlementOrders
         ];
     }
 
+    private function addGraphMember(array &$map, string|int $key, int $id): void
+    {
+        // Most references have one member. Avoid one PHP hash table per event.
+        if (! isset($map[$key])) $map[$key] = $id;
+        elseif (is_array($map[$key])) $map[$key][$id] = true;
+        elseif ($map[$key] !== $id) $map[$key] = [$map[$key] => true, $id => true];
+    }
+
+    private function graphMembers(int|array|null $members): array
+    {
+        return is_array($members) ? array_keys($members) : ($members === null ? [] : [$members]);
+    }
+
     private function paymentRoots(array $event, array $events, array $index, array $payments, array $invoiceRoots = []): array
     {
         $pending = [$event];
@@ -726,9 +762,9 @@ class FinancePayPalSettlementOrders
                 continue;
             }
             if (isset(self::EVENTS[$current['code']]) && $current['invoice'] !== '') {
-                $invoiceMatches += $invoiceRoots[$current['account_id']][$current['invoice']] ?? [];
+                $invoiceMatches += array_fill_keys($this->graphMembers($invoiceRoots[$current['account_id']][$current['invoice']] ?? null), true);
             }
-            foreach ($index[$current['account_id']][$current['parent']] ?? [] as $id) {
+            foreach ($this->graphMembers($index[$current['account_id']][$current['parent']] ?? null) as $id) {
                 $pending[] = $events[$id];
             }
         }
@@ -741,6 +777,7 @@ class FinancePayPalSettlementOrders
         $zone = $filters['timezone'];
         $matchesScope = static function ($account, $date) use ($filters, $zone): bool {
             return (! filled($filters['account'] ?? null) || $account === $filters['account'])
+                && FinanceFilterSelection::matches($account, $filters['accounts'] ?? [])
                 && (! filled($filters['from'] ?? null) || $date >= CarbonImmutable::parse($filters['from'], $zone))
                 && (! filled($filters['to'] ?? null) || $date < CarbonImmutable::parse($filters['to'], $zone)->addDay());
         };
@@ -761,8 +798,10 @@ class FinancePayPalSettlementOrders
                 return false;
             }
         }
-        return (! filled($filters['order_status'] ?? null) || str_contains($row['order_status'], $filters['order_status']))
+        return FinanceFilterSelection::rowMatches($row, $filters)
+            && (! filled($filters['order_status'] ?? null) || str_contains($row['order_status'], $filters['order_status']))
             && (! filled($filters['team'] ?? null) || ($row['team'] ?? '') === $filters['team'])
+            && (! filled($filters['region'] ?? null) || ($row['operation_region'] ?? '') === $filters['region'])
             && (! filled($filters['subscription'] ?? null) || ($row['subscription'] ?? '') === FinanceSettlementService::subscriptionLabel($filters['subscription']))
             && (! filled($filters['domain'] ?? null) || str_contains($row['domain'] ?? '', $filters['domain']))
             && $this->settlements->matches($row, $filters['conditions'] ?? [], $numericConditionFields);
@@ -772,6 +811,7 @@ class FinancePayPalSettlementOrders
     {
         $result = $payment;
         $manual = $payment['manual_values'];
+        $protected = $payment['editor_values'] ?? [];
         $money = array_fill_keys([...self::COSTS, ...self::RETURNS], $root ? '0' : null);
         $refundSplit = array_fill_keys(array_keys(self::REFUND_SPLIT_COLUMNS), '0');
         $details = [];
@@ -976,6 +1016,10 @@ class FinancePayPalSettlementOrders
             }
         }
         $money += array_replace($refundSplit, $manualSplit);
+        foreach (array_intersect_key($protected, $money) as $field => $value) {
+            $money[$field] = $this->settlements->number($value);
+            $manualHold = $manualHold || in_array($field, ['hold', 'release', 'dispute_hold', 'dispute_release'], true);
+        }
         if ($manualSplit !== []) {
             $review['manual_refund_split'] = '已人工补录'.implode('、', array_intersect_key(self::REFUND_SPLIT_COLUMNS, $manualSplit));
         }
@@ -983,7 +1027,7 @@ class FinancePayPalSettlementOrders
             $review['refund_conflict'] = '旧退款列与人工补录的拆分退款同时有金额，待核对是否重复';
         }
         if ($root === null || isset($manual['settlement']) || isset($manual['结算金额-美元'])) {
-            $result['settlement'] = $payment['settlement'];
+            $result['settlement'] = $this->settlements->number($payment['settlement']);
         }
         if ($duplicate) {
             $review['duplicate'] = '跨账户存在相同交易号，待核对是否重复入账';
@@ -1026,7 +1070,7 @@ class FinancePayPalSettlementOrders
             || isset($manual['dispute_refund']) || isset($manual['争议退款'])) {
             $refundOriginal = bcadd(
                 bcadd($money['refund'] ?? '0', $money['dispute_refund'] ?? '0', self::SCALE),
-                bcadd($money['frozen_refund'], $money['refund_top_up'], self::SCALE),
+                bcadd($money['frozen_refund'] ?? '0', $money['refund_top_up'] ?? '0', self::SCALE),
                 self::SCALE
             );
             $comparisonAmount = $result['settlement'];
@@ -1043,7 +1087,7 @@ class FinancePayPalSettlementOrders
         if ($includeDetails) {
             $result['events'] = $details;
         }
-        return $result;
+        return array_replace($result, $protected);
     }
 
     private function refundFromReleasedHold(array $root, array $events, Collection $holds, array $pairedDisputes,

@@ -200,14 +200,27 @@ class FinancePayPalSyncService
                                 }
                                 $this->page($logId, $query, $response);
                                 foreach ($prepared as $entry) {
-                                    $record = FinanceRecord::query()->updateOrCreate(['fingerprint' => $entry['record']['fingerprint']], $entry['record']);
-                                    $db->table('finance_payment_transactions')->updateOrInsert([
-                                        'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
-                                    ], [
+                                    $record = FinanceRecord::query()->where('fingerprint', $entry['record']['fingerprint'])->lockForUpdate()->first();
+                                    if ($record) {
+                                        $accounting->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                                        $record->forceFill(FinancePayPalSourceEdits::apply($record, $entry['record']))->save();
+                                    } else {
+                                        $record = FinanceRecord::query()->create($entry['record']);
+                                    }
+                                    $transactionValues = [
                                         'finance_record_id' => $record->id, 'raw_payload' => json_encode($entry['raw'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
                                         ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
                                         'created_at' => $record->created_at, 'updated_at' => now(),
-                                    ]);
+                                    ];
+                                    // The editor may have corrected the transaction's displayed identity.
+                                    $linked = $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->first(['id']);
+                                    if ($linked) {
+                                        $db->table('finance_payment_transactions')->where('id', $linked->id)->update($transactionValues);
+                                    } else {
+                                        $db->table('finance_payment_transactions')->updateOrInsert([
+                                            'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
+                                        ], $transactionValues);
+                                    }
                                     if ($record->raw_type) {
                                         app(FinanceWorkbookService::class)->registerType($record->raw_type);
                                     }

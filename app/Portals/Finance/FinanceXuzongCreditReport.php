@@ -124,6 +124,21 @@ class FinanceXuzongCreditReport
         return $orders;
     }
 
+    public function regionsForRecords(Collection $records): Collection
+    {
+        $orders = $this->linkedOrders($records);
+        $attribution = $this->attribution ??= $this->settlements->liveOrderAttributionResolver();
+        return $records->mapWithKeys(function (FinanceRecord $record) use ($orders, $attribution): array {
+            if (array_key_exists('地区', $record->payload['_edited_report_fields'] ?? [])) {
+                return [$record->id => (string) $record->payload['_edited_report_fields']['地区']];
+            }
+            $display = clone $record;
+            $order = $orders->get($record->id);
+            if (blank($display->domain)) $display->domain = $order->report_domain ?? null;
+            return [$record->id => FinanceSettlementService::operationRegion($attribution($display, $order)['department'])];
+        });
+    }
+
     public function rows(Collection $records, string $timezone): Collection
     {
         if ($records->isEmpty()) {
@@ -163,6 +178,9 @@ class FinanceXuzongCreditReport
                     '商户名称', '商户订单号', '交易流水号', '订单币种', '订单金额', '支付方式', '是否3D',
                     '发卡国家', '卡号', '消费者邮箱', '通途订单', '物流-元', '采购成本-元', '备注',
                 ])), fn ($value) => filled($value)));
+                // Empty edits must win over linked orders and imported statement fallbacks too.
+                $sourceEdits = $record->payload[FinanceSourceEdits::KEY]['payload'] ?? [];
+                $row = array_replace($row, array_intersect_key($sourceEdits, array_flip(FinanceXuzongOrderImport::EDITABLE_ORDER_FIELDS)));
                 $row['创建时间'] = $record->occurred_at?->setTimezone($timezone)->format('Y-m-d H:i:s') ?? '';
                 $missingPlatform = $record->payload['_platform_missing'] ?? false;
                 $sourceFlow = trim((string) ($record->payload['交易流水号'] ?? ''));
@@ -173,7 +191,8 @@ class FinanceXuzongCreditReport
                 if ($missingPlatform && ! $canUsePaymentIds) {
                     $row['交易流水号'] = $sourceFlow;
                 }
-                if (blank($row['订单币种']) && blank($row['订单金额'])) {
+                if (blank($row['订单币种']) && blank($row['订单金额'])
+                    && ! array_key_exists('订单币种', $sourceEdits) && ! array_key_exists('订单金额', $sourceEdits)) {
                     $shopify = json_decode($order->shopify_payload ?? '', true) ?? [];
                     $shopMoney = data_get($shopify, 'totalPriceSet.presentmentMoney')
                         ?? data_get($shopify, 'total_price_set.presentment_money');
@@ -195,7 +214,9 @@ class FinanceXuzongCreditReport
                 }
                 $row['平台订单号'] = $record->payload['_edited_platform_order_id'] ?? $row['平台订单号'];
                 $completed = $record->payload['完成时间'] ?? '';
-                if ($completed !== '') {
+                if (array_key_exists('完成时间', $sourceEdits) && $completed === '') {
+                    $row['完成时间'] = '';
+                } elseif ($completed !== '') {
                     $row['完成时间'] = CarbonImmutable::parse($completed, 'UTC')->setTimezone($timezone)->format('Y-m-d H:i:s');
                 }
             }
@@ -240,7 +261,6 @@ class FinanceXuzongCreditReport
             $row[self::PLATFORM_RESULT] = self::platformResult($record->payload);
             if (array_key_exists('备注', $overrides)) {
                 $row['备注'] = $overrides['备注'];
-                unset($overrides['备注']);
             }
             if ($record->match_status === '失败') {
                 $note = trim((string) ($row['备注'] ?? ''));

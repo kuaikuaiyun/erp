@@ -160,7 +160,10 @@ class FinanceXuzongOrderImport
                     ->lockForUpdate()->get()->groupBy('reference');
                 foreach ($batch as $reference => $group) {
                     $matches = $orders->get($reference, collect())->filter(fn ($order) =>
-                        $group['merchant'] === '' || trim((string) ($order->payload['商户订单号'] ?? '')) === $group['merchant']);
+                        $group['merchant'] === '' || in_array($group['merchant'], [
+                            trim((string) ($order->payload['商户订单号'] ?? '')),
+                            (string) ($order->payload[FinanceSourceEdits::KEY]['identity']['merchant_order'] ?? ''),
+                        ], true));
                     if ($matches->count() !== 1) {
                         throw ValidationException::withMessages(['file' => '第'.$group['line'].'行无法匹配唯一订单，请先导入对应账户的逐笔订单。']);
                     }
@@ -225,11 +228,26 @@ class FinanceXuzongOrderImport
                 $this->guardStatementDates($order, []);
                 $created = \Carbon\CarbonImmutable::parse($fields['创建时间'], 'UTC');
                 app(FinanceAccountingService::class)->guardUnlocked($created->setTimezone('Asia/Shanghai')->format('Y-m'));
-                $fields['卡号'] = preg_match('/(\d{4})$/D', $fields['卡号'] ?? '', $lastFour) ? '****'.$lastFour[1] : '';
+                if (array_key_exists('卡号', $fields)) {
+                    $fields['卡号'] = preg_match('/(\d{4})$/D', $fields['卡号'] ?? '', $lastFour) ? '****'.$lastFour[1] : '';
+                }
                 $platform = $fields['平台订单号'] ?? '';
+                $currentPlatform = $payload['_edited_platform_order_id'] ?? (($payload['_platform_missing'] ?? false)
+                    ? ($payload['_linked_platform_order_id'] ?? '') : $order->reference);
+                if (array_key_exists('平台订单号', $fields) && (string) $platform !== (string) $currentPlatform) {
+                    $payload['_edited_platform_order_id'] = $platform;
+                }
                 unset($fields['平台订单号']);
-                $payload = array_replace($payload, array_map(fn ($value) => $value ?? '', $fields));
-                $payload['_edited_platform_order_id'] = $platform;
+                foreach ($fields as $field => $value) {
+                    $currentValue = match ($field) {
+                        '商户名称' => $order->payload[$field] ?? $order->account,
+                        '创建时间' => $order->occurred_at?->utc()->toDateTimeString(),
+                        '交易币种' => $order->currency,
+                        '支付状态' => $order->status,
+                        default => $order->payload[$field] ?? '',
+                    };
+                    if ((string) $value !== (string) $currentValue) $payload[$field] = $value ?? '';
+                }
                 $costChanged = false;
                 if (! empty($data['report_fields'])) {
                     $current = app(FinanceXuzongCreditReport::class)->orderValues($order->id);
@@ -240,10 +258,9 @@ class FinanceXuzongOrderImport
                         }
                     }
                 }
-                $order->update([
-                    'payload' => $payload, 'occurred_at' => $created,
-                    'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态'],
-                ]);
+                $attributes = ['occurred_at' => $created, 'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态']];
+                $payload = FinanceSourceEdits::remember($order, $attributes, $payload);
+                $order->update([...$attributes, 'payload' => $payload]);
                 if ($costChanged) {
                     $records = $this->creditOrders->query(xuzongReport: true, ids: [-$order->id])->get();
                     app(FinanceXuzongCostEligibility::class)->guard($records, 'report_fields');
@@ -349,14 +366,6 @@ class FinanceXuzongOrderImport
         } else {
             $payload['结算币种'] = 'USD';
         }
-        foreach ($amounts as $field => $value) {
-            $label = $field === '应结算' ? '应结算（USD）' : (FinanceXuzongCreditReport::DISPLAY_HEADERS[$field] ?? $field);
-            if (is_numeric($payload['_edited_report_fields'][$label] ?? null)) {
-                $delta = bcsub($value, is_numeric($payload[$field] ?? null) ? $payload[$field] : '0', 8);
-                $payload['_edited_report_fields'][$label] = bcadd($payload['_edited_report_fields'][$label], $delta, 8);
-            }
-        }
-
         return [...$payload, ...$amounts, '_xuzong_statement_import' => [
             ...array_intersect_key($existing, array_flip(['notice', 'suppressed'])),
             'events' => $events, 'legacy' => $legacy, 'prior_refund' => $priorRefund, 'base' => $base,
@@ -419,7 +428,8 @@ class FinanceXuzongOrderImport
                     ->lockForUpdate()->get()->groupBy('reference');
                 foreach ($batch as $reference => $entries) {
                     $matches = $orders->get($reference, collect())->filter(fn ($order) => $entries->every(fn ($entry) =>
-                        (string) ($order->payload['商户订单号'] ?? '') === $entry['merchant']));
+                        in_array($entry['merchant'], [(string) ($order->payload['商户订单号'] ?? ''),
+                            (string) ($order->payload[FinanceSourceEdits::KEY]['identity']['merchant_order'] ?? '')], true)));
                     if ($matches->count() !== 1) {
                         throw ValidationException::withMessages(['file' => '退款订单 '.$reference.' 无法唯一匹配，请先导入对应账户的逐笔订单。']);
                     }

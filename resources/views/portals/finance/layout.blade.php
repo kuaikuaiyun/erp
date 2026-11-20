@@ -42,7 +42,8 @@ document.addEventListener('change', function (event) {
     else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
 });
-function financeStartDownload(url) {
+async function financeStartDownload(url) {
+    if (window.financePrepareReport) url = await window.financePrepareReport(url);
     var frame = document.createElement('iframe');
     frame.hidden = true;
     frame.title = '财务报表下载';
@@ -91,3 +92,5 @@ document.querySelectorAll('form').forEach(function (form) {
 });
 </script>
 @endpush
+
+@push('scripts')<script src="{{ asset('assets/erp/finance-report-preparing.js') }}?v=2"></script>@endpush

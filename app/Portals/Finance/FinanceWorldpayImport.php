@@ -99,9 +99,12 @@ class FinanceWorldpayImport
         $records = FinanceRecord::query()->where('dataset', 'xuzong2-details')
             ->when($account !== self::SOURCE_ACCOUNT, fn ($query) => $query->where('account', $account))
             ->where('payload->_card_channel', 'worldpay');
-        $matchesByKey = (clone $records)->whereIn('reference', array_unique(array_column($rows, '流水订单号')))
+        $sourceReferences = array_unique(array_column($rows, '流水订单号'));
+        $matchesByKey = (clone $records)->where(fn ($query) => $query->whereIn('reference', $sourceReferences)
+                ->orWhereIn('payload->'.FinanceSourceEdits::KEY.'->identity->reference', $sourceReferences))
             ->orderBy('id')->lockForUpdate()->get()
-            ->groupBy(fn (FinanceRecord $record) => $record->reference."\0".($record->payload['网关接入号'] ?? ''));
+            ->groupBy(fn (FinanceRecord $record) => ($record->payload[FinanceSourceEdits::KEY]['identity']['reference'] ?? $record->reference)
+                ."\0".($record->payload[FinanceSourceEdits::KEY]['identity']['gateway'] ?? $record->payload['网关接入号'] ?? ''));
         $createdKeys = [];
         $pending = [];
         $count = 0;
@@ -167,7 +170,9 @@ class FinanceWorldpayImport
                 $createdKeys[$key] = true;
                 continue;
             }
-            $record->fill(['payload' => $payload, 'status' => $payload['支付状态'] ?: null, 'currency' => $payload['交易币种']]);
+            $record->fill(FinanceSourceEdits::apply($record, [
+                'payload' => $payload, 'status' => $payload['支付状态'] ?: null, 'currency' => $payload['交易币种'],
+            ]));
             if ($record->isDirty()) {
                 app(FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
                 $record->save();
@@ -259,6 +264,7 @@ class FinanceWorldpayImport
             $values['per_order_fee'] = '0.30';
         }
         foreach ($saved['_worldpay_bill_deltas'] ?? [] as $field => $delta) {
+            if (array_key_exists($field, $saved['_edited_fields'] ?? [])) continue;
             $values[$field] = bcadd(self::amount($values[$field] ?? null), $delta, 8);
         }
         if (! array_key_exists('payable', $saved) && blank($values['payable'])

@@ -55,6 +55,14 @@ class FinanceCreditSettlementLayout
         };
     }
 
+    public static function numericFields(?string $channel): array
+    {
+        $fields = ['gross', 'settlement', 'source_settlement_usd', 'statement_amount', 'statement_rate', 'order_refund', 'refund_count',
+            'hold', 'fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee',
+            'rdr_refund', 'rdr_fee', 'release', 'nbc_fee', 'store_fee', 'pre_arbitration', 'pre_arbitration_fee', 'rdr_appeal', 'appeal'];
+        return array_values(array_intersect($fields, array_keys(self::columns($channel))));
+    }
+
     public static function displayColumns(?string $channel): array
     {
         $columns = self::withDisplayLabels(self::columns($channel));
@@ -95,13 +103,15 @@ class FinanceCreditSettlementLayout
             ->filter(fn (FinancePaymentAccount $account) => self::accountPlatform($account) === $channel)
             ->pluck('activity_account');
         [$sourceField, $otherField] = $channel === 'ye' ? ['网站名称', '网关接入号'] : ['网关接入号', '网站名称'];
+        $payload = $query->qualifyColumn('payload');
+        $account = $query->qualifyColumn('account');
 
-        $query->where(function (Builder $query) use ($channel, $accounts, $sourceField, $otherField): void {
-            $query->where('payload->_card_channel', $channel)
-                ->orWhere(fn (Builder $query) => $query->whereNull('payload->_card_channel')
-                    ->where(fn (Builder $query) => $query->where('payload->'.$sourceField, '!=', '')
-                        ->orWhere(fn (Builder $query) => $query->whereIn('account', $accounts)
-                            ->where(fn (Builder $query) => $query->whereNull('payload->'.$otherField)->orWhere('payload->'.$otherField, '')))));
+        $query->where(function (Builder $query) use ($channel, $accounts, $sourceField, $otherField, $payload, $account): void {
+            $query->where($payload.'->_card_channel', $channel)
+                ->orWhere(fn (Builder $query) => $query->whereNull($payload.'->_card_channel')
+                    ->where(fn (Builder $query) => $query->where($payload.'->'.$sourceField, '!=', '')
+                        ->orWhere(fn (Builder $query) => $query->whereIn($account, $accounts)
+                            ->where(fn (Builder $query) => $query->whereNull($payload.'->'.$otherField)->orWhere($payload.'->'.$otherField, '')))));
         });
     }
 
@@ -148,7 +158,7 @@ class FinanceCreditSettlementLayout
             '拒付预警ethoca' => $values['ethoca_fee'], 'ethoca预警退款' => $values['ethoca_refund'] ?? ''];
     }
 
-    public static function values(string $channel, array $row, array $payload, array $saved, string $sourceTimezone, bool $summaryOnly = false): array
+    public static function values(string $channel, array $row, array $payload, array $saved, string $sourceTimezone, bool $summaryOnly = false, bool $settlementOnly = false): array
     {
         $aliases = [
             'website_name' => $payload['商户名称'] ?? $payload['店铺名称'] ?? null,
@@ -164,6 +174,13 @@ class FinanceCreditSettlementLayout
         ];
         $values = [];
         $columns = self::columns($channel);
+        if ($settlementOnly && $channel === 'ye') {
+            // Keep the detail shape for ledger reconciliation, while parsing only
+            // the fields used by the five-column settlement overview.
+            $values = array_fill_keys(array_keys($columns), null);
+            $columns = array_intersect_key($columns, array_fill_keys(['website_name', 'month', 'settlement', 'source_settlement_usd',
+                'settlement_currency', 'domain', 'owner', 'team', 'store_platform', 'project', 'nbc_fee', 'store_fee', 'payable'], true));
+        }
         if ($summaryOnly && $channel === 'ye') {
             $columns = array_intersect_key($columns, FinanceSettlementService::MONEY + FinanceSettlementService::CONDITION_FIELDS
                 + array_fill_keys(['settlement', 'source_settlement_usd', 'settlement_currency', 'website_name',

@@ -54,7 +54,7 @@
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
-@if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
+@if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ $loadedLossScope ?? request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
 <div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
 <div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
 @php
@@ -87,6 +87,11 @@
     channel.addEventListener('change', function () {
         sourceWrap.hidden = this.value !== 'xuzong';
         source.value = '';
+        var lossScope = form.querySelector('[name="loss_scope"]');
+        if (lossScope) {
+            lossScope.value = '';
+            form.querySelector('[name="loss_category"]').value = '总计';
+        }
         clearDependentFilters();
         form.requestSubmit();
     });
@@ -116,13 +121,13 @@
     $panelCategory = fn ($group) => $group['category'] ?? (explode(' / ', $group['name'], 2)[1] ?? '总计');
     $availableScopes = $allPanels->map($panelScope)->unique();
     $scopes = collect(['Shopify', ...array_values(\App\Portals\Finance\FinanceTransactionSummary::VIEWS)])->merge($availableScopes)->unique()->values();
-    $selectedScope = in_array(request('loss_scope'), $scopes->all(), true) ? request('loss_scope') : ($availableScopes->first() ?? 'Shopify');
+    $selectedScope = $loadedLossScope ?? (in_array(request('loss_scope'), $scopes->all(), true) ? request('loss_scope') : ($availableScopes->first() ?? 'Shopify'));
     $scopePanels = $allPanels->filter(fn ($group) => $panelScope($group) === $selectedScope);
     $categoriesByScope = $scopes->mapWithKeys(function ($scope) use ($allPanels, $panelScope, $panelCategory) {
         $base = ['总计', '订阅', '无订阅', '加购', '订阅复购1次', '订阅复购2次'];
-        if (in_array($scope, ['Shopify', 'PayPal'], true)) { $base[] = '刷单'; }
+        if (in_array($scope, ['Shopify', 'PayPal', '合计'], true)) { $base[] = '刷单'; }
         $categories = collect($base)->merge($allPanels->filter(fn ($panel) => $panelScope($panel) === $scope)->map($panelCategory))
-            ->reject(fn ($category) => $category === '未分类' || (! in_array($scope, ['Shopify', 'PayPal'], true) && $category === '刷单'))->unique()->values();
+            ->reject(fn ($category) => $category === '未分类' || (! in_array($scope, ['Shopify', 'PayPal', '合计'], true) && $category === '刷单'))->unique()->values();
         return [$scope => $categories];
     });
     $categories = $categoriesByScope[$selectedScope];
@@ -178,7 +183,7 @@
 @php
     $lossMetricKeys = array_values(array_unique(array_merge(...array_map(fn ($group) => array_keys($group['ratios']), $groups))));
 @endphp
-<div class="loss-browser" data-loss-browser>
+<div class="loss-browser" data-loss-browser data-loss-loaded-scopes="{{ json_encode(collect([$selectedScope])->merge($availableScopes)->unique()->values()->all()) }}">
 <nav class="loss-scope-tabs" aria-label="损耗报表项目">
 @foreach($scopes as $scope)<a href="{{ route('finance.report', ['report' => $report, ...$switchFilters, 'loss_scope' => $scope]) }}" @class(['is-active' => $scope === $selectedScope]) @if($scope === $selectedScope) aria-current="page" @endif>{{ $scope }}</a>@endforeach
 </nav>
@@ -186,7 +191,7 @@
 @foreach($categories as $category)<a href="{{ route('finance.report', ['report' => $report, ...$switchFilters, 'loss_scope' => $selectedScope, 'loss_category' => $category]) }}" @class(['is-active' => $category === $selectedCategory]) @if($category === $selectedCategory) aria-current="page" @endif>{{ $category }}</a>@endforeach
 </nav>
 <p class="loss-selection">{{ $selectedScope }} / {{ $selectedCategory }}<span>月度对照 · {{ array_key_first($comparison) }} 至 {{ array_key_last($comparison) }}</span></p>
-<p class="overview-rate">Shopify 仅汇总 PayPal 和徐总信用卡；叶总支付、Worldpay 请查看对应通道。横线表示无法计算，悬停可查看原因。</p>
+<p class="overview-rate">Shopify 仅汇总 PayPal 和徐总信用卡；合计汇总 PayPal、徐总信用卡、叶总支付和 Worldpay，Shopify 不重复计入。横线表示无法计算，悬停可查看原因。</p>
 <div class="loss-comparison">
 @forelse($panels as $panel)
 <div class="box loss-month-panel">@include('portals.finance.partials.loss-month-table')</div>
@@ -204,5 +209,5 @@
 @endsection
 
 @push('scripts')
-@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=5"></script>@endif
+@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=6"></script>@endif
 @endpush
