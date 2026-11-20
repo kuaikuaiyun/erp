@@ -32,7 +32,7 @@ return [
     'title' => '日报提醒工具', 'subtitle' => '每日复盘与广告费提交提醒，时间均为北京时间',
     'date_format' => 'Y年n月j日',
     'rounds' => [1 => '一', 2 => '二', 3 => '三', 4 => '四', 5 => '五', 6 => '六', 7 => '七', 8 => '八', 9 => '九', 10 => '十'],
-    'groups' => '接收群配置', 'rules' => '部门提醒规则', 'filters' => '筛选条件',
+    'groups' => '接收群配置', 'rules' => '提醒与通知规则', 'filters' => '筛选条件',
     'usage_help' => '使用说明',
     'add_group' => '添加接收群', 'add_rule' => '添加提醒规则', 'edit' => '编辑', 'view' => '查看',
     'save' => '保存', 'close' => '关闭', 'stop' => '停用', 'remove' => '删除', 'actions' => '操作',
@@ -68,7 +68,9 @@ return [
     'department_legacy' => '（原配置一级部门）', 'department_no_children' => '暂无可管理的二级部门',
     'department_selected' => '已选 :count 个部门', 'department_no_match' => '没有匹配的部门', 'department_remove' => '移除部门',
     'department_search' => '搜索部门；勾选一级部门可全选当前可管理的二级部门',
+    'instant_trigger' => '提交后即时通知',
     'fields' => [
+        'trigger' => '触发方式',
         'submission_types' => '通知类型', 'submission_types.*' => '通知类型',
         'department_ids' => '管理部门（多选）', 'department_ids.*' => '管理部门',
         'department_id' => '管理部门', 'company_id' => '钉钉企业', 'name' => '接收群名称',

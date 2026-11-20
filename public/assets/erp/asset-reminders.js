@@ -150,8 +150,9 @@
                 var hint = node('p', t.config_hint, 'ar-hint ar-wide'); grid.appendChild(hint);
                 if (!options.companies.length) grid.appendChild(node('p', t.no_company, 'ar-hint ar-wide'));
             } else {
-                var typeSelect = field(grid, 'type', row.type || (notification ? 'submission' : 'advertising'), choices(t.types)); typeSelect.disabled = !!id || !!notification;
-                Array.from(typeSelect.options).forEach(function (option) { if (option.value === 'recap' || (option.value === 'submission' && !notification && !id)) option.disabled = true; });
+                var selectedType = row.type || (notification ? 'submission' : 'advertising');
+                var typeSelect = field(grid, 'type', selectedType, choices(t.types).filter(function (choice) { return choice.id === selectedType; }));
+                typeSelect.disabled = !!id || !!notification;
                 if (row.type === 'recap') { status.value = '0'; grid.appendChild(node('p', t.recap_disabled, 'ar-hint ar-wide')); }
                 var group = field(grid, 'group_id', row.group_id, options.groups.map(function (g) { return {id: g.id, name: g.name}; }));
                 var attendance = field(grid, 'attendance_group_id', '', []), refresh = node('button', t.refresh, 'btn btn-default btn-sm'), info = node('p', '', 'ar-week');

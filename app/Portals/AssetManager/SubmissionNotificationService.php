@@ -3,6 +3,7 @@
 namespace App\Portals\AssetManager;
 
 use App\Jobs\SendAssetSubmissionNotification;
+use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Models\DailyAccountOpening;
 use App\Models\DailyStoreLaunch;
@@ -36,10 +37,12 @@ class SubmissionNotificationService
         };
         $db = $this->reminders->db();
         if (! $type || ! Schema::connection($db->getName())->hasColumn('asset_reminder_rules', 'submission_types')) return;
+        $member = AdminUser::find($record->operator_user_id);
+        $memberDepartments = $member ? $member->departments()->pluck(config('admin.database.roles_table').'.id')->map(fn ($id) => (int) $id)->all() : [];
         $matches = [];
         foreach ($db->table('asset_reminder_rules')->where('type', 'submission')->where('enabled', true)->whereNull('deleted_at')->get() as $rule) {
             if (! in_array($type, json_decode($rule->submission_types ?? '[]', true), true)
-                || ! in_array((int) $record->operation_department_id, $this->reminders->ruleDepartments($rule), true)) continue;
+                || ! array_intersect($memberDepartments, $this->reminders->ruleDepartments($rule))) continue;
             try { $this->reminders->runtime($rule); } catch (\Throwable) { continue; }
             $matches[$rule->group_id][] = $rule;
         }
@@ -50,6 +53,7 @@ class SubmissionNotificationService
                 'type' => $type, 'id' => (int) $record->id, 'name' => $record->operator_name,
                 'department' => $record->operation_department_name,
                 'department_id' => (int) $record->operation_department_id,
+                'matched_department_ids' => array_values(array_unique(array_merge(...array_map(fn ($r) => array_values(array_intersect($memberDepartments, $this->reminders->ruleDepartments($r))), $rules)))),
                 'time' => $record->created_at->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
                 'quantity' => $type === 'advertising-recharge' ? count($record->entries ?? []) : ($record->quantity ?? 1),
                 'amount' => $record->total_amount ?? '', 'project' => $record->project_name ?? '',
@@ -87,7 +91,7 @@ class SubmissionNotificationService
                 if (! $candidate || $candidate->deleted_at || ! $candidate->enabled || $candidate->type !== 'submission'
                     || (int) $candidate->group_id !== (int) $run->group_id
                     || ! in_array($payload['type'], json_decode($candidate->submission_types ?? '[]', true), true)
-                    || ! in_array($payload['department_id'], $this->reminders->ruleDepartments($candidate), true)) continue;
+                    || ! array_intersect($payload['matched_department_ids'] ?? [$payload['department_id']], $this->reminders->ruleDepartments($candidate))) continue;
                 try { [$group] = $this->reminders->runtime($candidate); $rule = $candidate; break; } catch (\Throwable) { continue; }
             }
             if (! $rule) { $db->table('asset_reminder_runs')->where('id', $id)->update(['status' => 'cancelled', 'updated_at' => now('UTC')]); return; }
@@ -104,7 +108,7 @@ class SubmissionNotificationService
     public function message(array $data, string $url): string
     {
         $safe = fn ($text) => str_replace(['\\', '`', '*', '_', '[', ']', '<', '>', '#', "\r", "\n"], ['\\\\', '\\`', '\\*', '\\_', '\\[', '\\]', '&lt;', '&gt;', '\\#', ' ', ' '], mb_substr((string) $text, 0, 200));
-        $parameters = array_map($safe, $data);
+        $parameters = array_map($safe, array_filter($data, fn ($value) => is_scalar($value) || $value === null));
         $parameters['type'] = __('asset_reminders.submission_types.'.$data['type'], [], 'zh-CN');
         $text = __('asset_reminders.submission_body', $parameters, 'zh-CN');
         $text .= "\n\n".__('asset_reminders.submission_details.'.$data['type'], $parameters, 'zh-CN');

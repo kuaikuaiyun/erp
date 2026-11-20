@@ -45,7 +45,7 @@ class AssetSubmissionNotificationsTest extends TestCase
 
     private function requestData(): array
     {
-        return ['operator_user_id' => $this->hrActor->id, 'operator_name' => '测试提报人',
+        return ['operator_user_id' => $this->hrMember($this->teamA)->id, 'operator_name' => '测试提报人',
             'operation_department_id' => $this->teamA->id, 'operation_department_name' => $this->teamA->name,
             'status' => 'pending', 'quantity' => 2];
     }
@@ -79,7 +79,7 @@ class AssetSubmissionNotificationsTest extends TestCase
         $this->configuration($this->reminderGroup()); $service = app(SubmissionNotificationService::class);
         DB::beginTransaction(); $service->create(DailyAccountOpening::class, $this->requestData()); DB::rollBack();
         $this->assertSame(0, DB::table('asset_reminder_runs')->count()); Queue::assertNothingPushed();
-        $data = $this->requestData(); $data['operation_department_id'] = $this->outside->id;
+        $data = $this->requestData(); $data['operation_department_id'] = $this->outside->id; $data['operator_user_id'] = $this->hrMember($this->outside)->id;
         $service->create(DailyAccountOpening::class, $data);
         $this->assertSame(0, DB::table('asset_reminder_runs')->count());
     }
@@ -180,5 +180,54 @@ class AssetSubmissionNotificationsTest extends TestCase
         $this->assertNotNull(DailyAccountOpening::find($record->id));
         Queue::assertNothingPushed();
         \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->once()->withArgs(fn ($event, $metadata) => $event === 'asset_reminder.check_failed' && $metadata['stage'] === 'submission_capture' && ! isset($metadata['sql'], $metadata['bindings'], $metadata['exception']));
+    }
+
+    public function test_reminders_and_notifications_share_the_list_filters_and_toolbar(): void
+    {
+        $group = $this->reminderGroup(); $this->configuration($group); $this->reminderRule($group);
+        $response = $this->get($this->remindersUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 2);
+        $this->assertSame(1, substr_count($response->getContent(), 'data-ar-guide="robot"'));
+        $this->assertSame(1, substr_count($response->getContent(), 'data-ar-notification'));
+        $response->assertSee('提交后即时通知')->assertSee('提醒与通知规则');
+        $this->get($this->remindersUrl.'?type=submission')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1 && $rows->first()->type === 'submission');
+        $this->get($this->remindersUrl.'?type=advertising')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1 && $rows->first()->type === 'advertising');
+        $this->get($this->remindersUrl.'?department_id='.$this->teamB->id)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+    }
+
+    public function test_child_membership_matches_parent_owned_requests_without_notifying_sibling_teams(): void
+    {
+        $parent = \App\Models\Department::create(['name' => '一级运营', 'slug' => 'notification-root']);
+        $this->teamA->update(['parent_id' => $parent->id]);
+        $this->outside->update(['parent_id' => $parent->id]);
+        $this->configuration($this->reminderGroup());
+        $service = app(SubmissionNotificationService::class);
+        foreach ([DailyAccountOpening::class, DailyAdvertisingRecharge::class, DailyStoreLaunch::class] as $model) {
+            $data = $this->requestData(); $data['operation_department_id'] = $parent->id;
+            $data['operation_department_name'] = $parent->name;
+            $record = $service->create($model, $data);
+            $this->assertSame($parent->id, (int) $record->fresh()->operation_department_id);
+        }
+        $this->assertSame(3, DB::table('asset_reminder_runs')->count());
+        $payload = json_decode(DB::table('asset_reminder_runs')->first()->snapshot, true);
+        $this->assertSame([$this->teamA->id], $payload['matched_department_ids']);
+        $data = $this->requestData(); $data['operation_department_id'] = $parent->id;
+        $data['operator_user_id'] = $this->hrMember($this->outside)->id;
+        $service->create(DailyAccountOpening::class, $data);
+        $this->assertSame(3, DB::table('asset_reminder_runs')->count());
+        foreach (DB::table('asset_reminder_runs')->pluck('id') as $id) $service->send($id);
+        $this->assertSame(3, DB::table('asset_reminder_runs')->where('status', 'accepted')->count());
+    }
+
+    public function test_submission_membership_snapshot_survives_later_member_transfer(): void
+    {
+        $group = $this->reminderGroup(); $id = $this->configuration($group);
+        $data = $this->requestData(); $service = app(SubmissionNotificationService::class);
+        $member = \App\Models\AdminUser::find($data['operator_user_id']);
+        $member->roles()->attach($this->teamB->id, ['position' => 'member']);
+        $record = $service->create(DailyAccountOpening::class, $data); $service->capture($record);
+        $this->assertSame(1, DB::table('asset_reminder_runs')->count());
+        $member->roles()->detach([$this->teamA->id, $this->teamB->id]);
+        $service->send(DB::table('asset_reminder_runs')->first()->id);
+        $this->assertSame('accepted', DB::table('asset_reminder_runs')->first()->status);
     }
 }
