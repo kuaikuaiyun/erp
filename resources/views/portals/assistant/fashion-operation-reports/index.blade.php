@@ -13,6 +13,7 @@
 .employment-resigned{display:inline-block;margin-left:5px;padding:2px 7px;border-radius:10px;background:#f8d7da;color:#9c2430;font-size:11px;font-weight:700}
 .fashion-report-table tbody tr.report-main-row.team-band-0>td{background:#f1f7fb!important}.fashion-report-table tbody tr.report-main-row.team-band-1>td{background:#fff6eb!important}.fashion-report-table tbody tr.report-main-row.team-band-0:hover>td{background:#e8f2f8!important}.fashion-report-table tbody tr.report-main-row.team-band-1:hover>td{background:#ffeedb!important}
 .personal-profit{font-weight:800}.personal-profit.profit{color:#16805c}.personal-profit.loss{color:#c2410c}.personal-profit.even{color:#738596}.profit-status{display:inline-block;padding:4px 9px;border-radius:12px;font-size:12px;font-weight:700}.profit-status.profit{background:#dff5e9;color:#18764d}.profit-status.loss{background:#fde2e2;color:#b42318}.profit-status.even{background:#eef1f4;color:#6f7d87}
+.report-card-button{width:100%;border-top:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer}.report-card-button:hover{background:#fff7f7;box-shadow:0 5px 16px rgba(180,45,45,.12)}.report-card-button small{display:block;margin-top:5px;color:#a84a4a}
 </style>
 @endpush
 @section('content')
@@ -41,9 +42,10 @@
 @endphp
 @if($isPersonalMode)
 <div class="report-note"><i class="fa fa-user"></i> 个人模式按每天计算：<b>当天营业额 ÷ {{ number_format((float)$filters['profit_coefficient'], 2) }} − 当天广告费</b>。列表按人员汇总筛选期间的数据；无论选择近 7 天或近 14 天，只要其中有连续 6 天亏损，人员姓名将标红。</div>
-<div class="report-summary"><div class="report-card"><span>筛选期间计算结果</span><strong class="personal-profit {{ $personalSummary['profit'] > 0 ? 'profit' : ($personalSummary['profit'] < 0 ? 'loss' : 'even') }}">${{ number_format($personalSummary['profit'],2) }}</strong></div></div>
+<div class="report-summary"><div class="report-card"><span>筛选期间计算结果</span><strong class="personal-profit {{ $personalSummary['profit'] > 0 ? 'profit' : ($personalSummary['profit'] < 0 ? 'loss' : 'even') }}">${{ number_format($personalSummary['profit'],2) }}</strong></div><button type="button" class="report-card report-card-button" id="continuousLossPeople"><span>连续亏损人数</span><strong class="text-red">{{ $personalSummary['continuous_loss_people'] }}</strong><small>点击查看具体人员</small></button></div>
 <div class="box fashion-report-box"><div class="box-header with-border"><h3 class="box-title">个人盈亏汇总 <small>近 {{ $filters['personal_range'] }} 天 · 系数 {{ number_format((float)$filters['profit_coefficient'], 2) }}</small></h3></div><div class="table-responsive"><table class="table table-bordered fashion-report-table"><thead><tr><th>运营部门</th><th>人员</th><th>订单量</th><th>筛选期间营业额($)</th><th>系数</th><th>筛选期间广告费($)</th><th>ROI</th><th>计算结果($)</th><th>详情</th></tr></thead><tbody>@forelse($personalSummaryRows as $row)<tr class="report-main-row"><td>{{ $row['department'] }}</td><td><b class="{{ $row['continuous_loss'] ? 'text-red' : '' }}" @if($row['continuous_loss']) title="存在连续 6 天亏损" @endif>{{ $row['operator'] }}</b></td><td class="text-right">{{ $row['order_count'] }}</td><td class="text-right">${{ number_format($row['revenue'],2) }}</td><td class="text-right">{{ number_format((float)$filters['profit_coefficient'],2) }}</td><td class="text-right">${{ number_format($row['ad_spend'],2) }}</td><td class="text-center roi"><span class="roi-tier {{ $row['roi_class'] }}">{{ $row['roi']!==null?number_format($row['roi'],2):'—' }}</span></td><td class="text-right personal-profit {{ $row['profit'] > 0 ? 'profit' : ($row['profit'] < 0 ? 'loss' : 'even') }}">${{ number_format($row['profit'],2) }}</td><td class="text-center"><button type="button" class="btn btn-info btn-xs personal-detail-trigger" data-personal-index="{{ $loop->index }}"><i class="fa fa-eye"></i> 查看详情</button></td></tr>@empty<tr><td colspan="9" class="empty"><i class="fa fa-inbox fa-2x"></i><br>当前近 {{ $filters['personal_range'] }} 天暂无人员数据</td></tr>@endforelse</tbody></table></div></div>
 <div class="modal fade" id="personalReportDetailModal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" id="personalReportDetailTitle">个人每日数据</h4></div><div class="modal-body table-responsive" id="personalReportDetailBody"></div></div></div></div>
+<div class="modal fade" id="continuousLossModal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-exclamation-triangle text-red"></i> 亏损人员</h4></div><div class="modal-body table-responsive" id="continuousLossBody"></div></div></div></div>
 @else
 <div class="box fashion-report-box"><div class="box-header with-border"><h3 class="box-title">运营统计明细 <small>{{ $filters['date_from'] }} 至 {{ $filters['date_to'] }} · {{ $timezoneOptions[$filters['timezone']] }}</small></h3></div><div class="table-responsive"><table class="table table-bordered fashion-report-table"><thead><tr><th>运营部门</th><th>人名</th><th>入职天数</th><th>订单量 <a class="report-sort-button {{ $orderSortActive ? 'active' : '' }}" href="{{ $orderSortUrl }}" title="按订单量{{ $orderSortDirection === 'desc' ? '从高到低' : '从低到高' }}排序"><i class="fa {{ $orderSortActive && ($filters['sort_order'] ?? 'desc') === 'asc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i></a></th><th>总业绩($) <a class="report-sort-button {{ $revenueSortActive ? 'active' : '' }}" href="{{ $revenueSortUrl }}" title="按总业绩{{ $revenueSortDirection === 'desc' ? '从高到低' : '从低到高' }}排序"><i class="fa {{ $revenueSortActive && ($filters['sort_order'] ?? 'desc') === 'asc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i></a></th><th>客单价($)</th><th>各媒体 / 广告费</th><th>广告费($)</th><th>总 ROI</th><th>操作</th><th>广告费提报</th></tr></thead><tbody>
 @forelse($rows as $row)
@@ -164,7 +166,7 @@ $(function(){
 @if($isPersonalMode)
 <script>
 (function($){
-    var rows=@json($personalSummaryRows),modal=$('#personalReportDetailModal'),title=$('#personalReportDetailTitle'),body=$('#personalReportDetailBody');
+    var rows=@json($personalSummaryRows),modal=$('#personalReportDetailModal'),title=$('#personalReportDetailTitle'),body=$('#personalReportDetailBody'),lossModal=$('#continuousLossModal'),lossBody=$('#continuousLossBody');
     function escapeHtml(value){return $('<div>').text(value==null?'':String(value)).html();}
     function money(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
     $(document).on('click','.personal-detail-trigger',function(){
@@ -173,6 +175,13 @@ $(function(){
         var html='<table class="table table-bordered table-hover"><thead><tr><th>日期</th><th>订单量</th><th>当天营业额($)</th><th>当天广告费($)</th><th>ROI</th><th>计算结果($)</th><th>状态</th></tr></thead><tbody>';
         (row.days||[]).forEach(function(day){var status=day.profit_status==='profit'?'盈利':(day.profit_status==='loss'?'亏损':'持平');html+='<tr><td>'+escapeHtml(day.date)+'</td><td class="text-right">'+Number(day.order_count||0)+'</td><td class="text-right">'+money(day.revenue)+'</td><td class="text-right">'+money(day.ad_spend)+'</td><td class="text-center">'+(day.roi==null?'—':Number(day.roi).toFixed(2))+'</td><td class="text-right '+escapeHtml(day.profit_status)+'">'+money(day.profit)+'</td><td class="text-center">'+status+'</td></tr>';});
         body.html(html+'</tbody></table>');modal.modal('show');
+    });
+    $('#continuousLossPeople').on('click',function(){
+        var losses=rows.filter(function(row){return !!row.continuous_loss;});
+        if(!losses.length){lossBody.html('<p class="text-muted" style="margin:0">当前筛选范围没有连续亏损的人员。</p>');lossModal.modal('show');return;}
+        var html='<table class="table table-bordered table-hover"><thead><tr><th>运营部门</th><th>人员</th><th>筛选期间营业额($)</th><th>筛选期间广告费($)</th><th>计算结果($)</th></tr></thead><tbody>';
+        losses.forEach(function(row){html+='<tr><td>'+escapeHtml(row.department)+'</td><td class="text-red"><b>'+escapeHtml(row.operator)+'</b></td><td class="text-right">'+money(row.revenue)+'</td><td class="text-right">'+money(row.ad_spend)+'</td><td class="text-right text-red">'+money(row.profit)+'</td></tr>';});
+        lossBody.html(html+'</tbody></table>');lossModal.modal('show');
     });
 })(jQuery);
 </script>

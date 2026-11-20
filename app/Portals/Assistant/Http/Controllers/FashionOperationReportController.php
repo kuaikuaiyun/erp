@@ -371,7 +371,8 @@ class FashionOperationReportController extends Controller
         $summaryRoi = $summarySpend > 0 ? $roiRevenue / $summarySpend : null;
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'personalRows' => $personalRows, 'personalSummaryRows' => $personalSummaryRows, 'isPersonalMode' => $isPersonalMode,
-            'personalSummary' => ['profit' => (float) $personalSummaryRows->sum('profit')],
+            'personalSummary' => ['profit' => (float) $personalSummaryRows->sum('profit'),
+                'continuous_loss_people' => $personalSummaryRows->where('continuous_loss', true)->count()],
             'isDashboard' => $isDashboard, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
             'fashionReportIndexRoute' => $isDashboard
                 ? 'operation-dashboard.fashion-operation-reports.index'
