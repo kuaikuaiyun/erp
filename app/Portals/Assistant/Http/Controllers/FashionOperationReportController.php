@@ -104,8 +104,11 @@ class FashionOperationReportController extends Controller
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
         if ($isPersonalMode) {
-            $dateFrom = $reportNow->copy()->subDays($personalRange - 1)->toDateString();
-            $dateTo = $reportNow->toDateString();
+            // Personal mode always uses completed natural days. Excluding today
+            // avoids mixing an in-progress day with already settled daily data.
+            $personalDateTo = $reportNow->copy()->subDay();
+            $dateFrom = $personalDateTo->copy()->subDays($personalRange - 1)->toDateString();
+            $dateTo = $personalDateTo->toDateString();
         }
         // Keep the assistant report on the exact same time basis as the fashion
         // performance report. The legacy paid_at_utc column stores a
@@ -330,7 +333,7 @@ class FashionOperationReportController extends Controller
             })->sortByDesc(fn (array $row): string => $row['date'].'|'.$row['operator'])->values()
             : collect();
         $personalSummaryRows = $isPersonalMode
-            ? $rows->map(function (array $row) use ($profitCoefficient): array {
+            ? $rows->map(function (array $row) use ($profitCoefficient, $personalRange): array {
                 $days = collect($row['personal_days'] ?? []);
                 $revenue = round((float) $days->sum('revenue'), 2);
                 $adSpend = round((float) $days->sum('ad_spend'), 2);
@@ -345,7 +348,9 @@ class FashionOperationReportController extends Controller
                     'roi' => $adSpend > 0 ? $revenue / $adSpend : null,
                     'roi_class' => $this->roiClass($adSpend > 0 ? $revenue / $adSpend : null),
                     'profit' => $profit,
-                    'continuous_loss' => $this->hasConsecutiveLosses($days, 6),
+                    // The red flag follows the selected personal range: all 7
+                    // days when 7 is selected, or all 14 days when 14 is selected.
+                    'continuous_loss' => $this->hasLossesForSelectedRange($days, $personalRange),
                     'days' => $days->values(),
                 ];
             })->sortByDesc('profit')->values()
@@ -419,17 +424,9 @@ class FashionOperationReportController extends Controller
     }
 
     /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
-    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $minimumDays): bool
+    private function hasLossesForSelectedRange(\Illuminate\Support\Collection $days, int $rangeDays): bool
     {
-        $consecutiveDays = 0;
-
-        foreach ($days as $day) {
-            $consecutiveDays = ($day['profit_status'] ?? null) === 'loss' ? $consecutiveDays + 1 : 0;
-            if ($consecutiveDays >= $minimumDays) {
-                return true;
-            }
-        }
-
-        return false;
+        return $days->count() === $rangeDays
+            && $days->every(fn (array $day): bool => ($day['profit_status'] ?? null) === 'loss');
     }
 }
