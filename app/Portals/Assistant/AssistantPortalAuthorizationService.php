@@ -197,7 +197,10 @@ class AssistantPortalAuthorizationService
         return $departmentId !== null
             && $this->canManage($user)
             && $user->departments()
-                ->whereKey($departmentId)
+                ->where(function ($query) use ($departmentId): void {
+                    $query->whereKey($departmentId)
+                        ->orWhere('parent_id', $departmentId);
+                })
                 ->wherePivotIn('position', [
                     Department::POSITION_MANAGER,
                     Department::POSITION_DEPUTY,
