@@ -15,6 +15,12 @@ class FinancePayPalSettlementProjection
         private readonly FinanceSummaryDataVersion $versions,
     ) {}
 
+    private function sourceRevision(): ?string
+    {
+        $source = $this->versions->current('paypal');
+        return $source === null ? null : hash('sha256', 'paypal-settlement-attribution-v2:'.$source);
+    }
+
     public function refresh(): bool
     {
         $db = $this->workbooks->database();
@@ -24,7 +30,7 @@ class FinancePayPalSettlementProjection
             return true;
         }
 
-        $revision = $this->versions->current('paypal');
+        $revision = $this->sourceRevision();
         if ($revision === null) {
             return true;
         }
@@ -86,7 +92,7 @@ class FinancePayPalSettlementProjection
             if ($batch !== []) {
                 $db->table('finance_paypal_settlement_rows')->insert($batch);
             }
-            if ($revision !== $this->versions->current('paypal')) {
+            if ($revision !== $this->sourceRevision()) {
                 $db->table('finance_paypal_settlement_rows')->where('generation', $generation)->delete();
 
                 return false;
@@ -121,17 +127,22 @@ class FinancePayPalSettlementProjection
         if (! $schema->hasTable('finance_paypal_settlement_projections')
             || ! $schema->hasTable('finance_paypal_settlement_rows')
             || ($filters['timezone'] ?? 'Asia/Shanghai') !== 'Asia/Shanghai'
-            || collect($filters)->only(['account', 'reference', 'from', 'to', 'team', 'subscription', 'domain', 'order_status', 'conditions'])
+            || collect($filters)->only(['account', 'accounts', 'reference', 'from', 'to', 'team', 'teams', 'region', 'regions', 'subscription', 'subscriptions', 'domain', 'order_status', 'conditions'])
                 ->contains(fn ($value) => filled($value))) {
             return null;
         }
         $published = $db->table('finance_paypal_settlement_projections')->where('id', 1)->first();
-        if (! $published) {
+        $revision = $this->sourceRevision();
+        if (! $published || $revision === null || ! hash_equals((string) $published->source_revision, $revision)) {
             return null;
         }
         $rows = $db->table('finance_paypal_settlement_rows')->where('generation', $published->generation)
             ->orderBy('position')->offset($offset)->limit($limit)->pluck('payload')
-            ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR));
+            ->map(function ($payload) {
+                $row = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+                $row['operation_region'] = FinanceSettlementService::operationRegion((string) ($row['team'] ?? ''));
+                return $row;
+            });
 
         return [$rows, (int) $published->row_count, $published->published_at];
     }

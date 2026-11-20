@@ -3,7 +3,7 @@
     $panelKeys = $panelMonths->filter()->flatMap(fn ($item) => array_keys($item['ratios']))->unique();
 @endphp
 <div class="loss-month-scroll"><table class="table" style="min-width:{{ max(420, 200 + count($comparison) * 110) }}px"><colgroup><col style="width:36px"><col style="width:200px">@foreach($comparison as $period => $items)<col>@endforeach</colgroup><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>{{ $panel['name'] }}</th>@foreach($comparison as $period => $items)<th>{{ $period }}</th>@endforeach</tr></thead><tbody>
-<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|success_count') }}" aria-label="选择此行"></td><td>成功订单数</td>@foreach($panelMonths as $period => $item)<td>{{ isset($reportStatuses[$period]) && $reportStatuses[$period]['state'] !== 'ready' && !isset($reportStatuses[$period]['updated_at']) ? '—' : number_format($item['success_count'] ?? 0) }}</td>@endforeach</tr>
+<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|success_count') }}" aria-label="选择此行"></td><td>成功订单数</td>@foreach($panelMonths as $period => $item)<td>{{ number_format($item['success_count'] ?? 0) }}</td>@endforeach</tr>
 @foreach($panelKeys as $key)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|'.$key) }}" aria-label="选择此行"></td><td>{{ $metrics[$key] }}</td>@foreach($panelMonths as $period => $item)
 @php
     $missingReason = ! $item ? '当前月份无符合筛选的记录' : '缺少计算资料或结算金额为零';

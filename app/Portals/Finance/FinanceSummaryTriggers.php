@@ -16,7 +16,8 @@ class FinanceSummaryTriggers
         $names = [];
         foreach (['record', 'supplement', 'payment', 'ledger', 'account', 'type', 'rate', 'statement',
             'dependency_order', 'dependency_reference', 'dependency_item', 'dependency_sku',
-            'dependency_fashion', 'dependency_fashion_item', 'dependency_store', 'dependency_owner'] as $source) {
+            'dependency_fashion', 'dependency_fashion_item', 'dependency_store', 'dependency_owner',
+            ...FinanceLiveSourceChanges::ATTRIBUTION_SOURCES] as $source) {
             foreach (['insert', 'update', 'delete'] as $event) {
                 $names[] = "finance_summary_{$source}_{$event}";
             }

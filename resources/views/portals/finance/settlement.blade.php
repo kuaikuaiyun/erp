@@ -106,7 +106,7 @@
 @elseif($channel === 'credit_card')
 <div>
     <label for="settlement-card-group">归属主体</label>
-    <select id="settlement-card-group" name="card_group" class="form-control" onchange="this.form.elements.account.value='';this.form.requestSubmit()">
+    <select id="settlement-card-group" name="card_group" class="form-control" onchange="this.form.querySelectorAll('[data-filter-choices][data-name=accounts] input').forEach(function(input){input.checked=false});this.form.requestSubmit()">
         <option value="">全部主体</option>
         @foreach($cardGroups as $groupId => $groupName)
             <option value="{{ $groupId }}" @selected((string) ($filters['card_group'] ?? '') === (string) $groupId)>{{ $groupName }}</option>
@@ -115,7 +115,7 @@
 </div>
 <div>
     <label for="settlement-card-channel">支付平台</label>
-    <select id="settlement-card-channel" name="card_channel" class="form-control" onchange="this.form.elements.account.value='';this.form.requestSubmit()">
+    <select id="settlement-card-channel" name="card_channel" class="form-control" onchange="this.form.querySelectorAll('[data-filter-choices][data-name=accounts] input').forEach(function(input){input.checked=false});this.form.requestSubmit()">
         @unless($fixedCardChannel)<option value="">全部平台</option>@endunless
         @foreach($cardPlatformOptions as $key => $label)
         <option value="{{ $key }}" @selected(($filters['card_channel'] ?? '') === $key)>{{ $label }}</option>
@@ -124,7 +124,7 @@
 </div>
 @endif
 @if($fixedCardChannel !== 'worldpay')
-<div><label for="settlement-account">{{ $channel === 'credit_card' ? '商户账户' : '支付账户' }}</label><select id="settlement-account" name="account" class="form-control"><option value="">{{ $channel === 'credit_card' ? '全部商户' : '全部账户' }}</option>@foreach($filterAccounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $cardChannel === 'ye' && filled($account->card_merchant_key) ? $account->card_merchant_key : \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
+@include('portals.finance.partials.filter-multiselect', ['id' => 'settlement-account', 'name' => 'accounts', 'label' => $channel === 'credit_card' ? '商户账户' : '支付账户', 'placeholder' => $channel === 'credit_card' ? '全部商户' : '全部账户', 'selected' => $filters['accounts'] ?? (filled($filters['account'] ?? '') ? [$filters['account']] : []), 'choices' => $filterAccounts->map(fn ($account) => ['value' => $account->activity_account, 'label' => $cardChannel === 'ye' && filled($account->card_merchant_key) ? $account->card_merchant_key : \App\Portals\Finance\FinanceCatalog::simplified($account->account_name)])])
 @endif
 <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
 <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
@@ -136,9 +136,10 @@
 <option @selected(($filters['order_status'] ?? '') === $status)>{{ $status }}</option>@endforeach
 </select></div>
 @endif
-<div><label for="settlement-team">{{ $orderView ? '运营所属部门' : '团队' }}</label><select id="settlement-team" name="team" class="form-control"><option value="">{{ $orderView ? '全部运营部门' : '全部团队' }}</option>@foreach($teams as $team)<option @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
-<div><label for="settlement-subscription">订阅类型</label><input id="settlement-subscription" class="form-control" name="subscription" list="settlement-subscriptions" value="{{ $filters['subscription'] ?? '' }}"></div>
+@include('portals.finance.partials.filter-multiselect', ['id' => 'settlement-team', 'name' => 'teams', 'label' => $orderView ? '运营所属部门' : '团队', 'placeholder' => $orderView ? '全部运营部门' : '全部团队', 'selected' => $filters['teams'] ?? (filled($filters['team'] ?? '') ? [$filters['team']] : []), 'choices' => $teams->map(fn ($team) => ['value' => $team, 'label' => $team])])
+@include('portals.finance.partials.filter-multiselect', ['id' => 'settlement-subscription', 'name' => 'subscriptions', 'label' => '订阅类型', 'placeholder' => '全部订阅类型', 'selected' => $filters['subscriptions'] ?? (filled($filters['subscription'] ?? '') ? [$filters['subscription']] : []), 'choices' => $subscriptionOptions->reject(fn ($type) => $type === '未匹配')->map(fn ($type) => ['value' => $type, 'label' => $type]), 'optionsUrl' => route('finance.report', ['report' => $report, 'subscription_options' => 1])])
 <div><label for="settlement-domain">域名</label><input id="settlement-domain" class="form-control" name="domain" value="{{ $filters['domain'] ?? '' }}"></div>
+@include('portals.finance.partials.filter-multiselect', ['id' => 'settlement-region', 'name' => 'regions', 'label' => '地区', 'placeholder' => '全部地区', 'selected' => $filters['regions'] ?? (filled($filters['region'] ?? '') ? [$filters['region']] : []), 'choices' => $regions->map(fn ($region) => ['value' => $region, 'label' => $region])])
 @if($channel === 'credit_card' && ($filters['card_channel'] ?? '') === 'ye')
 <div><label for="settlement-ledger-type">账单结算类型</label><select id="settlement-ledger-type" name="ledger_settlement_type" class="form-control">
     <option value="">全部类型</option>
@@ -246,6 +247,7 @@
 @if($channel === 'paypal')
 @include('portals.finance.partials.paypal-settlement-editor')
 @else
+@if($cardChannel)<input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">@endif
 <div class="settlement-edit-grid">
 @foreach($editorFields as $field => $label)<div><label for="edit-{{ $field }}">{{ $label }}</label>
 @if($field === 'timezone')
@@ -257,7 +259,7 @@
 <input id="edit-{{ $field }}" name="{{ $field }}" class="form-control" @if(in_array($field, $editorNumericFields, true)) type="number" step="0.00000001" @if(isset($moneyFields[$field]) && $field !== 'usd_rate') data-settlement-cost @endif @else maxlength="{{ $field === 'note' ? 2000 : 191 }}" @endif @if($field === 'subscription') list="settlement-subscriptions" @elseif($field === 'account') list="settlement-accounts" @endif>
 @endif
 </div>@endforeach
-<div style="grid-column:1/-1" class="settlement-note">记录ID由系统生成。交易ID及支付记录须保持唯一；日期时间填写 YYYY-MM-DD HH:mm:ss，月份填写 YYYY-MM。已锁定月份不可修改。</div>
+<div style="grid-column:1/-1" class="settlement-note">{{ $cardChannel === 'ye' ? '叶总支付专用字段。' : ($cardChannel === 'worldpay' ? 'Worldpay专用字段。' : '') }}记录ID由系统生成。交易ID及支付记录须保持唯一；日期时间填写 YYYY-MM-DD HH:mm:ss，月份填写 YYYY-MM。日期、地区和应结算由对应来源及公式计算，物流及采购通过成本导入维护。已锁定月份不可修改。</div>
 </div>
 @endif
 <footer><button class="btn btn-primary">保存</button><button type="button" class="btn btn-danger" id="settlement-editor-delete">删除</button><button type="button" class="btn btn-default" data-settlement-close>取消</button></footer></form></dialog>

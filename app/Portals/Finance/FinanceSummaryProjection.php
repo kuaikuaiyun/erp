@@ -32,6 +32,28 @@ class FinanceSummaryProjection
         return $rows === null ? null : collect(iterator_to_array($rows, false));
     }
 
+    /** Losses use Beijing dates and USD amounts, including imported CNY costs. */
+    public function lossStream(string $channel, array $filters, array $paymentChannels = []): ?iterable
+    {
+        // Xu Zong's transaction rows are already USD. Ye/Worldpay's transaction
+        // rows retain settlement currency, so use their USD settlement rows.
+        $variants = $channel === 'paypal' ? [[false, ['paypal']]]
+            : [[true, ['xuzong1', 'xuzong2']], [false, ['ye', 'worldpay']]];
+        $streams = [];
+        foreach ($variants as [$transactions, $platforms]) {
+            $selected = $paymentChannels === [] ? $platforms : array_values(array_intersect($platforms, $paymentChannels));
+            if ($selected === []) continue;
+            $rows = $this->stream($channel, [...$filters, 'timezone' => 'Asia/Shanghai'], $transactions, paymentChannels: $selected);
+            // Never mix current calculated rows with an incomplete publication.
+            if ($rows === null) return null;
+            $streams[] = $rows;
+        }
+
+        return \Illuminate\Support\LazyCollection::make(function () use ($streams) {
+            foreach ($streams as $rows) yield from $rows;
+        });
+    }
+
     public function stream(string $channel, array $filters, bool $transactions, ?string $currency = null, array $paymentChannels = [], bool $aggregateTransactions = false): ?iterable
     {
         $db = $this->workbooks->database();
@@ -121,7 +143,7 @@ class FinanceSummaryProjection
                 return $this->aggregateTransactions($rows);
             }
 
-            return $rows->select('position', 'payload')->lazyById(10000, 'position')
+            return $rows->select('position', 'payload')->lazyById(500, 'position')
                 ->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))
                 ->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['_summary_team'] === $filters['team'])
                 && (! filled($filters['subscription'] ?? null) || $row['subscription'] === FinanceSettlementService::subscriptionLabel($filters['subscription'])))

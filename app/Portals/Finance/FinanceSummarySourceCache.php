@@ -12,6 +12,19 @@ class FinanceSummarySourceCache
 
     public function __construct(private readonly FinanceSummaryDataVersion $versions) {}
 
+    public function ready(string $channel, array $filters): bool
+    {
+        $version = $this->versions->current($channel);
+        if ($version === null) return false;
+        unset($filters['team'], $filters['subscription'], $filters['summary_currency'], $filters['summary_row_filters']);
+        $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
+        if ($channel === 'paypal') unset($filters['include_unmatched_fees']);
+        ksort($filters);
+        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
+        $path = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope.'/v-'.$version.'.jsonl';
+        return is_file($path) || $this->preparedParts($channel, $filters, $version) !== null;
+    }
+
     public function stream(string $channel, array $filters, bool $transactions, callable $build, ?callable $options = null): iterable
     {
         $team = $filters['team'] ?? null;
@@ -57,6 +70,13 @@ class FinanceSummarySourceCache
         $path = $directory.'/v-'.$version.'.jsonl';
         if (is_file($path)) {
             yield from $this->read($path, $build, $constraints, $options);
+            return;
+        }
+        $parts = $this->preparedParts($channel, $filters, $version);
+        if ($parts !== null) {
+            foreach ($parts as $part) {
+                yield from $this->read($part, static fn () => throw new \RuntimeException('已计算的源数据损坏，请重试查询。'), $constraints, $options);
+            }
             return;
         }
         try {
@@ -135,6 +155,24 @@ class FinanceSummarySourceCache
             }
             if ($acquired) $lock->release();
         }
+    }
+
+    private function preparedParts(string $channel, array $filters, string $version): ?array
+    {
+        if (empty($filters['from']) || empty($filters['to'])) return null;
+        $start = \Carbon\CarbonImmutable::parse($filters['from'])->startOfMonth();
+        $end = $start->endOfMonth();
+        if ($filters['from'] !== $start->toDateString() || $filters['to'] !== $end->toDateString()) return null;
+        $parts = [];
+        for ($day = $start; $day <= $end; $day = $day->addDays(7)) {
+            $chunk = [...$filters, 'from' => $day->toDateString(), 'to' => min($day->addDays(6)->toDateString(), $end->toDateString())];
+            ksort($chunk);
+            $scope = hash('sha256', json_encode([4, $channel, $chunk], JSON_THROW_ON_ERROR));
+            $path = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope.'/v-'.$version.'.jsonl';
+            if (! is_file($path)) return null;
+            $parts[] = $path;
+        }
+        return array_reverse($parts);
     }
 
     private function uncached(callable $build, ?callable $options): iterable

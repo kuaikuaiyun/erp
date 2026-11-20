@@ -87,10 +87,12 @@ class FinanceYeBillAdjustments
                     $query->where('account', $account);
                 }
                 if ($group['reference'] !== '') {
-                    $query->where('reference', $group['reference']);
+                    $query->where(fn ($scope) => $scope->where('reference', $group['reference'])
+                        ->orWhere('payload->'.FinanceSourceEdits::KEY.'->identity->reference', $group['reference']));
                 }
                 if ($group['merchant'] !== '') {
-                    $query->where('payload->商户订单号', $group['merchant']);
+                    $query->where(fn ($scope) => $scope->where('payload->商户订单号', $group['merchant'])
+                        ->orWhere('payload->'.FinanceSourceEdits::KEY.'->identity->merchant_order', $group['merchant']));
                 }
                 if ($group['website'] !== '') {
                     $query->where('payload->'.(static::CHANNEL === 'worldpay' ? '网关接入号' : '网站名称'), $group['website']);

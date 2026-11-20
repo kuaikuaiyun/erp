@@ -2,12 +2,10 @@
 
 return [
     'summaries' => [
-        // Legacy report-snapshot options; ordinary reports no longer use them.
-        'web_refresh' => env('FINANCE_SUMMARY_WEB_REFRESH', false),
-        'snapshots_per_run' => 2,
-        'snapshot_budget_seconds' => 45,
         'paypal_rebuild_cooldown_seconds' => 300,
         'dependency_changes_per_run' => 100,
+        // Used only by bounded source-row scans; smaller workers retain 500.
+        'source_batch_size' => 2000,
     ],
     'relay' => [
         'ca_bundle' => env('FINANCE_RELAY_CA_BUNDLE'),

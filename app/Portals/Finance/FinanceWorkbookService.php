@@ -460,9 +460,12 @@ class FinanceWorkbookService
             $affected = 0;
             $checkedMonths = [];
             foreach ($records as $record) {
-                $model = $createOnly
-                    ? FinanceRecord::query()->firstOrCreate(['fingerprint' => $record['fingerprint']], $record)
-                    : FinanceRecord::query()->updateOrCreate(['fingerprint' => $record['fingerprint']], $record);
+                $model = FinanceRecord::query()->where('fingerprint', $record['fingerprint'])->lockForUpdate()->first();
+                if ($model === null) {
+                    $model = FinanceRecord::query()->create($record);
+                } elseif (! $createOnly) {
+                    $model->forceFill(FinanceSourceEdits::apply($model, $record))->save();
+                }
                 $created = $model->wasRecentlyCreated;
                 if ($fillMissing && ! $created) {
                     $model = FinanceRecord::query()->whereKey($model->id)->lockForUpdate()->firstOrFail();
@@ -478,10 +481,9 @@ class FinanceWorkbookService
                             $payload[$key] = $value;
                         }
                     }
-                    $model->payload = $payload;
-                    if (blank($model->domain) && filled($record['domain'])) {
-                        $model->domain = $record['domain'];
-                    }
+                    $model->forceFill(FinanceSourceEdits::apply($model, [
+                        'payload' => $payload, 'domain' => $model->domain ?: $record['domain'],
+                    ]));
                 }
                 $updated = $fillMissing && ! $created && $model->isDirty();
                 if ($guardSettlementMonth && ($created || $updated)) {
@@ -548,9 +550,10 @@ class FinanceWorkbookService
                             $payload[$key] = $value;
                         }
                     }
-                    $model->domain = $model->domain ?: $record['domain'];
                 }
-                $model->payload = $payload;
+                $model->forceFill(FinanceSourceEdits::apply($model, [
+                    'payload' => $payload, 'domain' => $fillMissing ? ($model->domain ?: $record['domain']) : $model->domain,
+                ]));
                 if ($model->isDirty()) {
                     $model->save();
                     $updated++;
@@ -679,12 +682,8 @@ class FinanceWorkbookService
             if ($value === null) {
                 continue;
             }
-            $label = $field === '应结算' ? '应结算（USD）' : (FinanceXuzongCreditReport::DISPLAY_HEADERS[$field] ?? $field);
             $prior = $numbers->number($payload[$field] ?? null) ?? '0';
             $payload[$field] = bcadd($prior, $value, 8);
-            if (is_numeric($payload['_edited_report_fields'][$label] ?? null)) {
-                $payload['_edited_report_fields'][$label] = bcadd($payload['_edited_report_fields'][$label], $value, 8);
-            }
             $payload['_xuzong_bill_deltas'][$field] = bcadd($payload['_xuzong_bill_deltas'][$field] ?? '0', $value, 8);
         }
 
@@ -694,12 +693,11 @@ class FinanceWorkbookService
     private function addCreditCosts(array $payload, array $incoming): array
     {
         foreach (FinanceXuzongCostEligibility::FIELDS as $field) {
-            if (! is_numeric($incoming[$field] ?? null)) {
+            if (! is_numeric($incoming[$field] ?? null) || array_key_exists($field, $payload['_edited_report_fields'] ?? [])) {
                 continue;
             }
             $prior = $payload['_edited_report_fields'][$field] ?? $payload[$field] ?? null;
             $payload[$field] = bcadd(is_numeric($prior) ? (string) $prior : '0', (string) $incoming[$field], 8);
-            unset($payload['_edited_report_fields'][$field]);
         }
 
         return $payload;

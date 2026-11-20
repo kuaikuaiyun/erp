@@ -9,6 +9,7 @@
         monthTo.addEventListener('change', function () { monthFrom.max = monthTo.value; });
     }
     var panels = JSON.parse(root.querySelector('[data-loss-panels]').textContent);
+    var loadedScopes = root.dataset.lossLoadedScopes ? JSON.parse(root.dataset.lossLoadedScopes) : null;
     var scopes = root.querySelector('.loss-scope-tabs');
     var categories = root.querySelector('.loss-category-tabs');
     var results = root.querySelector('.loss-comparison');
@@ -20,7 +21,7 @@
     function activate(url, push) {
         var scope = url.searchParams.get('loss_scope');
         var validScopes = Array.from(scopes.querySelectorAll('a')).map(function (link) { return link.textContent; });
-        if (!validScopes.includes(scope)) scope = validScopes[0];
+        if (!validScopes.includes(scope)) scope = loadedScopes ? loadedScopes[0] : validScopes[0];
         var options = categoriesByScope[scope] || ['总计'];
         var category = url.searchParams.get('loss_category');
         if (!options.includes(category)) category = options[0];
@@ -82,8 +83,18 @@
     root.addEventListener('click', function (event) {
         var link = event.target.closest('.loss-scope-tabs a, .loss-category-tabs a');
         if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        // A different source is calculated only when selected. Let the normal
+        // link navigate instead of displaying an uncomputed scope as empty.
+        if (loadedScopes && !loadedScopes.includes(new URL(link.href).searchParams.get('loss_scope'))) return;
         event.preventDefault();
         activate(new URL(link.href), true);
     });
-    window.addEventListener('popstate', function () { activate(new URL(window.location.href), false); });
+    window.addEventListener('popstate', function () {
+        var url = new URL(window.location.href);
+        if (loadedScopes && !loadedScopes.includes(url.searchParams.get('loss_scope') || loadedScopes[0])) {
+            window.location.assign(url.href);
+            return;
+        }
+        activate(url, false);
+    });
 }());

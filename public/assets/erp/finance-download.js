@@ -19,6 +19,7 @@
         }
         notice.textContent = '正在生成文件，请稍候…';
         try {
+            if (window.financePrepareReport) url = await window.financePrepareReport(url, function (message) { notice.textContent = message; });
             var response = await fetch(url, {credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
             var disposition = response.headers.get('Content-Disposition') || '';
             if (!response.ok || !/attachment/i.test(disposition)) {
