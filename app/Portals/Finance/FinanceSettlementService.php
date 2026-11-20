@@ -136,23 +136,23 @@ class FinanceSettlementService
         if (! empty($filters['summary_only'])) {
             $creditSources = [...$creditSources, ...array_values(FinanceCatalog::XUZONG_REPORT_IMPORTS), FinanceLogisticsCreditOrders::IMPORTED_DATASET];
         }
-        $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
+        $query = FinanceRecord::query()->whereIn('finance_records.dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
         $query->whereNotIn('finance_records.id', function ($deleted): void {
-            $deleted->select('finance_record_id')->from('finance_settlement_supplements')
-                ->whereNotNull('finance_record_id')
-                ->whereNotNull('payload->_deleted_at');
+            $deleted->select('finance_settlement_supplements.finance_record_id')->from('finance_settlement_supplements')
+                ->whereNotNull('finance_settlement_supplements.finance_record_id')
+                ->whereNotNull('finance_settlement_supplements.payload->_deleted_at');
         });
         $this->filterAccountHistory($query, $channel);
         if ($channel === 'paypal') {
             $types = $this->workbooks->database()->table('finance_transaction_types')->where('category', '结账付款')->pluck('raw_type');
-            $query->whereIn('raw_type', $types)->where('raw_type', 'not like', 'T04%')
-                ->where('raw_type', 'not like', 'T02%');
+            $query->whereIn('finance_records.raw_type', $types)->where('finance_records.raw_type', 'not like', 'T04%')
+                ->where('finance_records.raw_type', 'not like', 'T02%');
         } elseif (($filters['source'] ?? '') !== '') {
-            $query->where('dataset', $filters['source']);
+            $query->where('finance_records.dataset', $filters['source']);
         } else {
             // Imported current-card details take precedence over an order with the same account/reference.
             $query->where(function ($query): void {
-                $query->whereNotIn('dataset', ['xuzong2-orders', FinanceLogisticsCreditOrders::IMPORTED_DATASET])->orWhereNotExists(function ($sub): void {
+                $query->whereNotIn('finance_records.dataset', ['xuzong2-orders', FinanceLogisticsCreditOrders::IMPORTED_DATASET])->orWhereNotExists(function ($sub): void {
                     $sub->selectRaw('1')->from('finance_records as detail')->where('detail.dataset', 'xuzong2-details')
                         ->whereColumn('detail.account', 'finance_records.account')->whereColumn('detail.reference', 'finance_records.reference')
                         ->where(function ($match): void {
@@ -201,17 +201,17 @@ class FinanceSettlementService
             $query->whereIntegerInRaw('finance_records.id', $filters['export_record_ids']);
         }
         if (($filters['card_channel'] ?? null) === 'worldpay' && filled($filters['gateway'] ?? null)) {
-            $query->where('payload->网关接入号', $filters['gateway']);
+            $query->where('finance_records.payload->网关接入号', $filters['gateway']);
         }
         if (($filters['card_channel'] ?? null) === 'worldpay') {
             match ($filters['worldpay_exception'] ?? null) {
-                'yes' => $query->whereNotNull('payload->_worldpay_events'),
-                'no' => $query->whereNull('payload->_worldpay_events'),
+                'yes' => $query->whereNotNull('finance_records.payload->_worldpay_events'),
+                'no' => $query->whereNull('finance_records.payload->_worldpay_events'),
                 default => null,
             };
         }
         if ($channel === 'credit_card' && filled($filters['card_group'] ?? null)) {
-            $query->whereIn('account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
+            $query->whereIn('finance_records.account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
                 ->where('card_group_id', $filters['card_group'])->select('activity_account'));
         }
         $statusCodes = self::TRANSACTION_STATUS_CODES[$filters['card_transaction_status'] ?? ''] ?? null;
@@ -220,16 +220,16 @@ class FinanceSettlementService
         }
         foreach (['account', 'reference'] as $field) {
             if (filled($filters[$field] ?? null)) {
-                $query->where($field, $filters[$field]);
+                $query->where('finance_records.'.$field, $filters[$field]);
             }
         }
-        if ($channel === 'credit_card') FinanceFilterSelection::applyQuery($query, 'account', $filters['accounts'] ?? []);
+        if ($channel === 'credit_card') FinanceFilterSelection::applyQuery($query, 'finance_records.account', $filters['accounts'] ?? []);
         $zone = $filters['timezone'] ?? 'Asia/Shanghai';
         if (filled($filters['from'] ?? null)) {
-            $query->where('occurred_at', '>=', CarbonImmutable::parse($filters['from'], $zone)->utc());
+            $query->where('finance_records.occurred_at', '>=', CarbonImmutable::parse($filters['from'], $zone)->utc());
         }
         if (filled($filters['to'] ?? null)) {
-            $query->where('occurred_at', '<', CarbonImmutable::parse($filters['to'], $zone)->addDay()->utc());
+            $query->where('finance_records.occurred_at', '<', CarbonImmutable::parse($filters['to'], $zone)->addDay()->utc());
         }
 
         return $query;

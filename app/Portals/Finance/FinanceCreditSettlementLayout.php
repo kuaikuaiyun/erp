@@ -103,13 +103,15 @@ class FinanceCreditSettlementLayout
             ->filter(fn (FinancePaymentAccount $account) => self::accountPlatform($account) === $channel)
             ->pluck('activity_account');
         [$sourceField, $otherField] = $channel === 'ye' ? ['网站名称', '网关接入号'] : ['网关接入号', '网站名称'];
+        $payload = $query->qualifyColumn('payload');
+        $account = $query->qualifyColumn('account');
 
-        $query->where(function (Builder $query) use ($channel, $accounts, $sourceField, $otherField): void {
-            $query->where('payload->_card_channel', $channel)
-                ->orWhere(fn (Builder $query) => $query->whereNull('payload->_card_channel')
-                    ->where(fn (Builder $query) => $query->where('payload->'.$sourceField, '!=', '')
-                        ->orWhere(fn (Builder $query) => $query->whereIn('account', $accounts)
-                            ->where(fn (Builder $query) => $query->whereNull('payload->'.$otherField)->orWhere('payload->'.$otherField, '')))));
+        $query->where(function (Builder $query) use ($channel, $accounts, $sourceField, $otherField, $payload, $account): void {
+            $query->where($payload.'->_card_channel', $channel)
+                ->orWhere(fn (Builder $query) => $query->whereNull($payload.'->_card_channel')
+                    ->where(fn (Builder $query) => $query->where($payload.'->'.$sourceField, '!=', '')
+                        ->orWhere(fn (Builder $query) => $query->whereIn($account, $accounts)
+                            ->where(fn (Builder $query) => $query->whereNull($payload.'->'.$otherField)->orWhere($payload.'->'.$otherField, '')))));
         });
     }
 

@@ -764,6 +764,33 @@ class FinancePortalTest extends TestCase
         $this->assertSame('OLD-COPY', $record->fresh()->payload['通途订单']);
     }
 
+    public function test_ye_region_options_disambiguate_order_and_supplement_payloads(): void
+    {
+        $account = $this->financePayPalAccount('地区查询叶总账户', ['account_type' => 'credit_card', 'card_platform' => 'ye']);
+        foreach (['source.example' => '厦门团队', 'edited.example' => '西安团队',
+            'deleted.example' => '北京团队', 'worldpay.example' => '郑州团队'] as $domain => $team) {
+            DB::table('finance_domain_groups')->insert(['domain' => $domain, 'owner' => '运营人员', 'team' => $team]);
+        }
+        foreach (['tagged', 'legacy', 'deleted', 'worldpay'] as $kind) {
+            $payload = ['团队' => $kind === 'worldpay' ? '郑州团队' : '厦门团队'];
+            if ($kind !== 'legacy') $payload['_card_channel'] = $kind === 'worldpay' ? 'worldpay' : 'ye';
+            $record = FinanceRecord::create(['dataset' => 'xuzong2-details', 'account' => $account->activity_account,
+                'reference' => 'REGION-JOIN-'.$kind, 'occurred_at' => '2026-11-02 01:00:00', 'source_timezone' => 'UTC',
+                'currency' => 'USD', 'status' => 'SUCCESS', 'domain' => match ($kind) {
+                    'deleted' => 'deleted.example', 'worldpay' => 'worldpay.example', default => 'source.example',
+                }, 'fingerprint' => hash('sha256', 'region-payload-join-'.$kind), 'payload' => $payload]);
+            if (in_array($kind, ['tagged', 'deleted'], true)) {
+                DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $record->id,
+                    'payload' => json_encode($kind === 'deleted' ? ['_deleted_at' => '2026-11-20 00:00:00'] : [
+                        '_card_channel' => 'worldpay', 'domain' => 'source.example', 'team' => '深圳团队',
+                        '_edited_fields' => ['domain' => 'edited.example', 'team' => '西安团队'],
+                    ], JSON_UNESCAPED_UNICODE)]);
+            }
+        }
+        $regions = app(\App\Portals\Finance\FinanceSettlementService::class)->regionOptions('ye-settlement')->all();
+        $this->assertEqualsCanonicalizing(['厦门', '西安'], $regions);
+    }
+
     public function test_four_finance_detail_menus_filter_and_export_the_displayed_region(): void
     {
         (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
