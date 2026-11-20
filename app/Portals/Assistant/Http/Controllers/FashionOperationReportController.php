@@ -330,7 +330,7 @@ class FashionOperationReportController extends Controller
             })->sortByDesc(fn (array $row): string => $row['date'].'|'.$row['operator'])->values()
             : collect();
         $personalSummaryRows = $isPersonalMode
-            ? $rows->map(function (array $row) use ($profitCoefficient, $personalRange): array {
+            ? $rows->map(function (array $row) use ($profitCoefficient): array {
                 $days = collect($row['personal_days'] ?? []);
                 $revenue = round((float) $days->sum('revenue'), 2);
                 $adSpend = round((float) $days->sum('ad_spend'), 2);
@@ -345,7 +345,7 @@ class FashionOperationReportController extends Controller
                     'roi' => $adSpend > 0 ? $revenue / $adSpend : null,
                     'roi_class' => $this->roiClass($adSpend > 0 ? $revenue / $adSpend : null),
                     'profit' => $profit,
-                    'continuous_loss' => $days->count() === $personalRange && $days->every(fn (array $day): bool => $day['profit_status'] === 'loss'),
+                    'continuous_loss' => $this->hasConsecutiveLosses($days, 6),
                     'days' => $days->values(),
                 ];
             })->sortByDesc('profit')->values()
@@ -415,5 +415,20 @@ class FashionOperationReportController extends Controller
         [$hours, $minutes] = array_map('intval', explode(':', ltrim($timezone, '+-')));
 
         return $sign * ($hours * 60 + $minutes);
+    }
+
+    /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
+    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $minimumDays): bool
+    {
+        $consecutiveDays = 0;
+
+        foreach ($days as $day) {
+            $consecutiveDays = ($day['profit_status'] ?? null) === 'loss' ? $consecutiveDays + 1 : 0;
+            if ($consecutiveDays >= $minimumDays) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
