@@ -22,7 +22,7 @@ class ReminderController extends Controller
         abort_unless($context['portal']->code === 'asset-manager' && $request->routeIs('asset-manager.reminders.*'), 404);
         $menu = $context['portal']->menus->firstWhere('code', 'asset_manager_reminders');
         abort_unless($menu && $menu->is_enabled && $context['user']->can('asset-manager.computers'), 403);
-        abort_if($write && $this->service->ids($context['user'], true) === [], 403);
+        abort_if($write && $this->service->ids($context['user'], true) === [] && $this->service->sourceIds($context['user'], true) === [] && ! $context['user']->isAdministrator(), 403);
         app()->setLocale('zh-CN');
         return $context;
     }
@@ -47,13 +47,14 @@ class ReminderController extends Controller
         $rows = $query->orderByDesc('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString();
         $departments = Department::whereIn('id', $this->service->ids($actor))->with('parent:id,name')->orderBy('sort')->orderBy('name')->get()
             ->mapWithKeys(fn ($d) => [$d->id => ($d->parent ? $d->parent->name.' / ' : '').$d->name]);
-        $groups = $this->service->query($actor, 'groups')->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->orderBy('name')->paginate(20, ['*'], 'group_page')->withQueryString();
-        $groups->setCollection($groups->getCollection()->map(fn ($group) => $this->service->publicGroup($group)));
+        $groups = $this->service->query($actor, 'groups')->orderBy('name')->paginate(20, ['*'], 'group_page')->withQueryString();
+        $groups->setCollection($groups->getCollection()->map(fn ($group) => $this->service->publicGroup($group, $actor)));
         $groupNames = $this->service->query($actor, 'groups')->whereIn('id', $rows->pluck('group_id'))->pluck('name', 'id');
         return view('portals.asset-manager.reminders', $context + compact('rows', 'filters', 'departments', 'groups') + [
+            'canManageGroups' => $actor->isAdministrator() || $this->service->sourceIds($actor, true) !== [],
             'canManage' => $this->service->ids($actor, true) !== [],
             'writeIds' => $this->service->ids($actor, true), 'groupNames' => $groupNames,
-            'companyNames' => $this->service->companies($actor)->pluck('name', 'id'),
+            'companyNames' => \App\Models\DingTalkCompany::whereIn('id', $groups->pluck('company_id'))->pluck('name', 'id'),
         ]);
     }
 
@@ -64,7 +65,7 @@ class ReminderController extends Controller
         return response()->json([
             'departments' => Department::whereIn('id', $this->service->ids($actor, true))->with('parent:id,name')->withExists('children')->get()->map(fn ($d) => ['id' => $d->id, 'name' => ($d->parent ? $d->parent->name.' / ' : '').$d->name, 'short_name' => $d->name, 'parent_id' => $d->parent_id, 'parent_name' => $d->parent?->name, 'has_children' => (bool) $d->children_exists]),
             'companies' => $this->service->companies($actor),
-            'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get()->map(fn ($group) => $this->service->publicGroup($group)),
+            'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get()->map(fn ($group) => $this->service->publicGroup($group, $actor)),
             'today' => now('Asia/Shanghai')->toDateString(), 'yesterday' => now('Asia/Shanghai')->subDay()->toDateString(),
         ])->header('Cache-Control', 'no-store');
     }
@@ -85,7 +86,7 @@ class ReminderController extends Controller
     {
         $c = $this->context($request);
         $record = $this->service->record($c['user'], $kind, $id);
-        return response()->json(['record' => $kind === 'groups' ? $this->service->publicGroup($record) : $record])->header('Cache-Control', 'no-store');
+        return response()->json(['record' => $kind === 'groups' ? $this->service->publicGroup($record, $c['user']) : $record])->header('Cache-Control', 'no-store');
     }
 
     public function save(Request $request, string $kind, ?int $id = null)

@@ -42,6 +42,7 @@ trait AssetRemindersEnvironment
         (require database_path('migrations/2026_11_19_000200_add_webhook_to_asset_reminder_groups.php'))->up();
         (require database_path('migrations/2026_11_19_000300_add_departments_to_asset_reminder_rules.php'))->up();
         (require database_path('migrations/2026_11_20_000100_extend_asset_reminder_notifications.php'))->up();
+        (require database_path('migrations/2026_11_20_000200_add_asset_reminder_group_owners.php'))->up();
         Schema::create('operation_task_recaps', function (Blueprint $t) {
             $t->id(); $t->unsignedBigInteger('user_id'); $t->date('data_date');
             $t->string('workflow_status')->default('pending_leader'); $t->timestamp('submitted_at')->nullable();
@@ -113,6 +114,62 @@ trait AssetRemindersEnvironment
 class AssetRemindersTest extends TestCase
 {
     use AssetRemindersEnvironment;
+
+    public function test_group_owner_is_automatic_and_cannot_be_forged_or_changed_on_edit(): void
+    {
+        $values = $this->groupValues(); unset($values['department_id']);
+        $values['owner_source_ids'] = [$this->outside->id];
+        $id = $this->postJson($this->remindersUrl.'/groups', $values)->assertOk()->json('id');
+        $stored = DB::table('asset_reminder_groups')->find($id);
+        $this->assertSame([$this->hrSource->id], json_decode($stored->owner_source_ids, true));
+        $values['version'] = 1; $values['department_id'] = $this->outside->id;
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $values)->assertOk();
+        $this->assertSame($stored->owner_source_ids, DB::table('asset_reminder_groups')->find($id)->owner_source_ids);
+        $this->getJson($this->remindersUrl.'/groups/'.$id)->assertOk()->assertJsonPath('record.can_manage', true);
+    }
+
+    public function test_same_source_members_are_readonly_without_company_grants_and_deputies_can_manage(): void
+    {
+        $id = $this->reminderGroup();
+        $member = $this->hrMember($this->hrSource);
+        $this->hrActor = $member;
+        $this->get($this->remindersUrl)->assertOk()->assertViewHas('groups', fn ($groups) => $groups->total() === 1)->assertViewHas('canManageGroups', false);
+        $this->getJson($this->remindersUrl.'/groups/'.$id)->assertOk()->assertJsonPath('record.can_manage', false);
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 1]))->assertForbidden();
+        $deputy = $this->hrMember($this->hrSource, 'deputy');
+        DingTalkCompanyGrant::create(['company_id' => $this->company->id, 'user_id' => $deputy->id, 'created_by' => 1]);
+        $this->hrActor = $deputy;
+        $this->putJson($this->remindersUrl.'/groups/'.$id, $this->groupValues(['version' => 1, 'name' => 'Updated by deputy']))->assertOk();
+    }
+
+    public function test_same_business_targets_do_not_share_groups_between_different_source_departments(): void
+    {
+        $id = $this->reminderGroup();
+        $other = $this->manager(); $source = $other->departments()->first();
+        DB::table('portal_departments')->insert(['portal_id' => $this->hrPortal->id, 'department_id' => $source->id]);
+        DB::table('asset_computer_department_bindings')->insert(['source_department_id' => $source->id, 'target_department_id' => $this->teamA->id, 'updated_by' => 1]);
+        $service = app(ReminderService::class);
+        $this->assertContains($this->teamA->id, $service->ids($other, true));
+        $this->assertSame(0, $service->query($other, 'groups')->count());
+        $this->assertFalse($service->canManageGroup($other, DB::table('asset_reminder_groups')->find($id)));
+        $this->assertSame(1, $service->query($this->hrOwner, 'groups')->count());
+    }
+
+    public function test_ownership_backfill_preserves_data_and_unresolved_groups_are_admin_only(): void
+    {
+        $id = $this->reminderGroup();
+        $before = DB::table('asset_reminder_groups')->find($id);
+        DB::table('asset_reminder_groups')->where('id', $id)->update(['owner_source_ids' => null]);
+        $migration = require database_path('migrations/2026_11_20_000200_add_asset_reminder_group_owners.php');
+        $migration->up(); $migration->up();
+        $this->assertSame((array) $before, (array) DB::table('asset_reminder_groups')->find($id));
+        DB::table('asset_reminder_groups')->where('id', $id)->update(['owner_source_ids' => null, 'updated_by' => 999999]);
+        $migration->up();
+        $service = app(ReminderService::class);
+        $this->assertSame('[]', DB::table('asset_reminder_groups')->find($id)->owner_source_ids);
+        $this->assertSame(0, $service->query($this->hrActor, 'groups')->count());
+        $this->assertSame(1, $service->query($this->hrOwner, 'groups')->count());
+    }
 
     public function test_department_options_include_hierarchy_without_exposing_unauthorized_children(): void
     {
@@ -206,7 +263,9 @@ class AssetRemindersTest extends TestCase
 
     public function test_department_and_company_scope_cannot_be_bypassed(): void
     {
-        $this->postJson($this->remindersUrl.'/groups', $this->groupValues(['department_id' => $this->outside->id]))->assertUnprocessable();
+        $this->postJson($this->remindersUrl.'/groups', $this->groupValues(['department_id' => $this->outside->id]))->assertOk();
+        $this->assertSame([$this->hrSource->id], json_decode(DB::table('asset_reminder_groups')->first()->owner_source_ids, true));
+        DB::table('asset_reminder_groups')->delete();
         DingTalkCompanyGrant::where('user_id', $this->hrActor->id)->delete();
         $this->postJson($this->remindersUrl.'/groups', $this->groupValues())->assertForbidden();
         $this->getJson($this->remindersUrl.'/attendance?company_id='.$this->company->id)->assertForbidden();
@@ -431,7 +490,7 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
         $history = (array) DB::table('asset_reminder_runs')->first();
         $legacy = (array) DB::table('asset_reminder_groups')->find($id);
-        unset($legacy['webhook'], $legacy['webhook_secret'], $legacy['webhook_hash']);
+        unset($legacy['webhook'], $legacy['webhook_secret'], $legacy['webhook_hash'], $legacy['owner_source_ids']);
         $legacy['robot_code'] = 'old-robot'; $legacy['conversation_id'] = 'old-conversation';
         // Recreate the original schema inside this in-memory fixture to exercise a populated upgrade.
         Schema::drop('asset_reminder_groups');
@@ -439,6 +498,7 @@ class AssetRemindersTest extends TestCase
         DB::table('asset_reminder_groups')->insert($legacy);
         $migration = require database_path('migrations/2026_11_19_000200_add_webhook_to_asset_reminder_groups.php');
         $migration->up();
+        (require database_path('migrations/2026_11_20_000200_add_asset_reminder_group_owners.php'))->up();
         $migration->up();
         $stored = DB::table('asset_reminder_groups')->find($id);
         $this->assertFalse((bool) $stored->enabled);

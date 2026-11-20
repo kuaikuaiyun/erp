@@ -55,7 +55,7 @@
         Object.keys(t.fields).forEach(function (key) {
             if (row[key] == null || key === 'version') return;
             var value = row[key];
-            if (key === 'department_id' && row.department_ids) return;
+            if (key === 'department_id' && (row.department_ids || row.owner_source_ids != null)) return;
             if (key === 'department_ids') value = JSON.parse(value).map(function (id) { return c.departments[id] || id; }).join(' / ');
             if (key === 'department_id') value = c.departments[value] || value;
             if (key === 'company_id') value = c.companies[value] || value;
@@ -81,6 +81,7 @@
             if (readonly) { viewRecord(row); return; }
             var grid = node('div', null, 'ar-form-grid'); fields.appendChild(grid);
             var department = field(grid, 'department_id', row.department_id, options.departments);
+            if (type === 'groups') { department.removeAttribute('name'); department.parentElement.remove(); grid.appendChild(node('p', t.group_owner_hint, 'ar-hint ar-wide')); }
             department.disabled = type === 'groups' && !!id;
             if (type === 'rules') {
                 department.removeAttribute('name'); department.parentElement.remove();

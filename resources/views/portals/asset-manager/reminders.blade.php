@@ -1,7 +1,7 @@
 @extends('portal.layout')
 @section('page_title', __('asset_reminders.title'))
 @push('styles')
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261120-4">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261120-6">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_reminders.title') }} <small>{{ __('asset_reminders.subtitle') }}</small></h1></section>
@@ -46,14 +46,14 @@
         </tbody></table></div></div>
         <div class="box-footer ar-pagination"><span>{{ __('asset_reminders.total',['count'=>$rows->total()]) }}</span><div class="ar-page-links">@if($rows->previousPageUrl())<a class="btn btn-default btn-sm" href="{{ $rows->previousPageUrl() }}">{{ __('asset_reminders.previous') }}</a>@endif <span>{{ $rows->currentPage() }} / {{ $rows->lastPage() }}</span> @if($rows->nextPageUrl())<a class="btn btn-default btn-sm" href="{{ $rows->nextPageUrl() }}">{{ __('asset_reminders.next') }}</a>@endif</div></div>
     </div>
-    <div class="box box-default"><div class="box-header with-border ar-heading"><h3 class="box-title">{{ __('asset_reminders.groups') }}</h3>@if($canManage)<button type="button" class="btn btn-primary btn-sm" data-ar-create="groups"><i class="fa fa-plus"></i> {{ __('asset_reminders.add_group') }}</button>@endif</div>
+    <div class="box box-default"><div class="box-header with-border ar-heading"><h3 class="box-title">{{ __('asset_reminders.groups') }}</h3>@if($canManageGroups)<button type="button" class="btn btn-primary btn-sm" data-ar-create="groups"><i class="fa fa-plus"></i> {{ __('asset_reminders.add_group') }}</button>@endif</div>
         <div class="box-body ar-groups-body"><details class="ar-help"><summary>{{ __('asset_reminders.usage_help') }}</summary><p class="ar-hint">{{ __('asset_reminders.config_hint') }}</p></details><div class="ar-group-grid">
         @forelse($groups as $group)<article class="ar-group"><div class="ar-heading"><strong><i class="fa fa-comments-o"></i> {{ $group->name }}</strong><span class="ar-badge {{ $group->enabled?'is-on':'' }}">{{ __('asset_reminders.'.($group->enabled?'enabled':'disabled')) }}</span></div>
-            <p>{{ $departments[$group->department_id]??$group->department_id }}</p><p class="ar-hint">{{ $companyNames[$group->company_id]??$group->company_id }} · {{ $group->remark }}</p>
+            <p>{{ $group->owner_label }}</p><p class="ar-hint">{{ $companyNames[$group->company_id]??$group->company_id }} · {{ $group->remark }}</p>
             <p class="ar-hint">{{ __('asset_reminders.fields.webhook') }}：{{ __('asset_reminders.'.($group->webhook_configured?'configured':'not_configured')) }} · {{ __('asset_reminders.fields.webhook_secret') }}：{{ __('asset_reminders.'.($group->webhook_secret_configured?'configured':'not_configured')) }}</p><div class="ar-tools">
                 <button type="button" class="btn btn-default btn-sm" data-ar-view="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.view') }}</button>
                 <button type="button" class="btn btn-default btn-sm" data-ar-runs="{{ $group->id }}">{{ __('asset_reminders.runs') }}</button>
-                @if(in_array((int)$group->department_id,$writeIds,true))<button type="button" class="btn btn-primary btn-sm" data-ar-edit="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.edit') }}</button><button type="button" class="btn btn-default btn-sm" data-ar-remove="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.remove') }}</button>@endif
+                @if($group->can_manage)<button type="button" class="btn btn-primary btn-sm" data-ar-edit="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.edit') }}</button><button type="button" class="btn btn-default btn-sm" data-ar-remove="groups" data-id="{{ $group->id }}">{{ __('asset_reminders.remove') }}</button>@endif
             </div></article>@empty<p class="ar-empty">{{ __('asset_reminders.empty') }}</p>@endforelse
         </div></div><div class="box-footer ar-pagination"><span>{{ __('asset_reminders.total',['count'=>$groups->total()]) }}</span><div class="ar-page-links">@if($groups->previousPageUrl())<a class="btn btn-default btn-sm" href="{{ $groups->previousPageUrl() }}">{{ __('asset_reminders.previous') }}</a>@endif <span>{{ $groups->currentPage() }} / {{ $groups->lastPage() }}</span> @if($groups->nextPageUrl())<a class="btn btn-default btn-sm" href="{{ $groups->nextPageUrl() }}">{{ __('asset_reminders.next') }}</a>@endif</div></div>
     </div>
@@ -79,5 +79,5 @@
 @push('scripts')
 @php($reminderConfig = ['defaultEntryUrl'=>\App\Portals\AssetManager\ReminderService::DEFAULT_ENTRY_URL,'base'=>url('/asset-manager/reminders'),'text'=>__('asset_reminders'),'departments'=>$departments,'companies'=>$companyNames,'groups'=>$groupNames])
 <script>window.AssetRemindersConfig=@json($reminderConfig);</script>
-<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261120-5"></script>
+<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261120-6"></script>
 @endpush

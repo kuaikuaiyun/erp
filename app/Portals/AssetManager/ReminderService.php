@@ -38,6 +38,19 @@ class ReminderService
         return $this->bindings->departmentIds($actor, $write);
     }
 
+    public function sourceIds(AdminUser $actor, bool $write = false): array
+    {
+        $managed = app(\App\Services\DepartmentAuthorizationService::class)->managedDepartmentIds($actor);
+        $memberships = $actor->departments()->pluck(config('admin.database.roles_table').'.id');
+        $ids = $actor->isAdministrator() ? $memberships : ($write ? $managed : $memberships->merge($managed));
+        return $ids->intersect($this->bindings->sourceDepartments()->pluck('id'))->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
+    }
+
+    public function canManageGroup(AdminUser $actor, object $group): bool
+    {
+        return $actor->isAdministrator() || array_intersect($this->sourceIds($actor, true), json_decode($group->owner_source_ids ?? '[]', true)) !== [];
+    }
+
     public function companies(AdminUser $actor)
     {
         return DingTalkCompany::where('enabled', true)
@@ -54,8 +67,18 @@ class ReminderService
     public function query(AdminUser $actor, string $kind, bool $write = false): Builder
     {
         abort_unless(in_array($kind, ['groups', 'rules'], true), 404);
-        $query = $this->db()->table('asset_reminder_'.$kind)->whereIn('department_id', $this->ids($actor, $write));
+        $query = $this->db()->table('asset_reminder_'.$kind);
+        if ($kind === 'groups') {
+            if (! $actor->isAdministrator()) {
+                $sources = $this->sourceIds($actor, $write);
+                $query->where(function ($q) use ($sources) {
+                    $q->whereRaw('1 = 0');
+                    foreach ($sources as $source) $q->orWhereJsonContains('owner_source_ids', $source);
+                });
+            }
+        } else { $query->whereIn('department_id', $this->ids($actor, $write)); }
         if ($kind === 'rules') {
+            $query->whereIn('group_id', $this->query($actor, 'groups', $write)->select('id'));
             $allowed = $this->ids($actor, $write);
             foreach ($this->db()->table('asset_reminder_rules')->pluck('department_ids') as $json) {
                 foreach (json_decode($json ?? '[]', true) as $department) {
@@ -74,15 +97,17 @@ class ReminderService
         if ($kind === 'rules') {
             $this->record($actor, 'groups', (int) $row->group_id, $write);
         }
-        if ($kind === 'groups') {
+        if ($kind === 'groups' && $write) {
             $this->company($actor, (int) $row->company_id);
         }
         return $row;
     }
 
-    public function publicGroup(object $group): object
+    public function publicGroup(object $group, ?AdminUser $actor = null): object
     {
         $safe = clone $group;
+        $safe->owner_label = Department::whereIn('id', json_decode($safe->owner_source_ids ?? '[]', true))->orderBy('id')->pluck('name')->implode(' / ') ?: __('asset_reminders.owner_unresolved');
+        $safe->can_manage = $actor ? $this->canManageGroup($actor, $group) : false;
         $safe->webhook_configured = ! empty($safe->webhook);
         $safe->webhook_secret_configured = ! empty($safe->webhook_secret);
         unset($safe->webhook, $safe->webhook_secret, $safe->webhook_hash, $safe->robot_code, $safe->conversation_id);
@@ -135,8 +160,15 @@ class ReminderService
             $rules['submission_types'] = ['required', 'array', 'min:1', 'max:3'];
             $rules['submission_types.*'] = ['required', 'distinct', Rule::in(SubmissionNotificationService::TYPES)];
         }
+        if ($kind === 'groups') unset($common['department_id']);
         $data = Validator::make($input, $common + $rules, __('asset_reminders.validation'), __('asset_reminders.fields'))->validate();
         unset($data['version']);
+        if ($kind === 'groups') {
+            $sources = $this->sourceIds($actor, true);
+            abort_unless($actor->isAdministrator() || $sources !== [], 403);
+            $data['department_id'] = $old?->department_id ?? ($sources[0] ?? 0);
+            if (! $old) $data['owner_source_ids'] = json_encode($sources);
+        }
         if ($kind === 'rules' && $data['type'] === 'recap' && (! $old || $data['enabled'])) throw ValidationException::withMessages(['type' => __('asset_reminders.recap_disabled')]);
         if ($kind === 'groups' && $old && (int) $old->department_id !== (int) $data['department_id']) {
             throw ValidationException::withMessages(['department_id' => __('asset_reminders.department_locked')]);
@@ -262,7 +294,7 @@ class ReminderService
         }
         $group = $this->record($actor, 'groups', (int) $rule->group_id, true);
         $editor = AdminUser::find($group->updated_by);
-        if (! $editor || (int) $editor->status !== 1 || ! $editor->can('asset-manager.computers') || ! in_array((int) $group->department_id, $this->ids($editor, true), true)) {
+        if (! $editor || (int) $editor->status !== 1 || ! $editor->can('asset-manager.computers') || ! $this->canManageGroup($editor, $group)) {
             throw new ReminderCheckException('check_group_authorization');
         }
         $company = $this->company($editor, (int) $group->company_id);
