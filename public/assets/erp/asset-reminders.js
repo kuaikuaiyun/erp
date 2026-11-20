@@ -61,6 +61,7 @@
             if (key === 'company_id') value = c.companies[value] || value;
             if (key === 'group_id') value = c.groups[value] || value;
             if (key === 'type') value = t.types[value];
+            if (key === 'submission_types') value = JSON.parse(value).map(function (key) { return t.submission_types[key]; }).join(' / ');
             if (key === 'enabled') value = Number(value) ? t.enabled : t.disabled;
             if (key === 'webhook_configured' || key === 'webhook_secret_configured') value = value ? t.configured : t.not_configured;
             if (key === 'work_times' || key === 'rest_times') value = JSON.parse(value).join(' / ') || '—';
@@ -68,10 +69,10 @@
         });
         fields.appendChild(grid);
     }
-    async function edit(type, id, readonly) {
+    async function edit(type, id, readonly, notification) {
         if (busy) return;
         kind = type; recordId = id || null;
-        var requestSeq = show(readonly ? t.view : id ? t.edit : t[type === 'groups' ? 'add_group' : 'add_rule'], readonly ? 'view' : 'edit');
+        var requestSeq = show(readonly ? t.view : id ? t.edit : t[notification ? 'add_notification' : type === 'groups' ? 'add_group' : 'add_rule'], readonly ? 'view' : 'edit');
         fields.appendChild(node('p', t.loading));
         try {
             var result = await Promise.all([readonly ? Promise.resolve(null) : api('/options'), id ? api('/' + type + '/' + id) : Promise.resolve({record: {}})]);
@@ -149,7 +150,9 @@
                 var hint = node('p', t.config_hint, 'ar-hint ar-wide'); grid.appendChild(hint);
                 if (!options.companies.length) grid.appendChild(node('p', t.no_company, 'ar-hint ar-wide'));
             } else {
-                var typeSelect = field(grid, 'type', row.type || 'recap', choices(t.types)); typeSelect.disabled = !!id;
+                var typeSelect = field(grid, 'type', row.type || (notification ? 'submission' : 'advertising'), choices(t.types)); typeSelect.disabled = !!id || !!notification;
+                Array.from(typeSelect.options).forEach(function (option) { if (option.value === 'recap' || (option.value === 'submission' && !notification && !id)) option.disabled = true; });
+                if (row.type === 'recap') { status.value = '0'; grid.appendChild(node('p', t.recap_disabled, 'ar-hint ar-wide')); }
                 var group = field(grid, 'group_id', row.group_id, options.groups.map(function (g) { return {id: g.id, name: g.name}; }));
                 var attendance = field(grid, 'attendance_group_id', '', []), refresh = node('button', t.refresh, 'btn btn-default btn-sm'), info = node('p', '', 'ar-week');
                 refresh.type = 'button'; attendance.parentElement.append(refresh, info);
@@ -157,7 +160,7 @@
                 async function loadAttendance(force) {
                     var n = ++attendanceSeq, selectedGroup = options.groups.find(function (g) { return String(g.id) === group.value; });
                     attendance.replaceChildren(new Option(t.choose, '')); info.textContent = ''; attendance.disabled = true;
-                    if (!selectedGroup) return;
+                    if (!selectedGroup || typeSelect.value === 'submission') return;
                     refresh.disabled = true; info.textContent = t.loading;
                     try {
                         var result = await api('/attendance?company_id=' + encodeURIComponent(selectedGroup.company_id) + (force ? '&refresh=1' : ''));
@@ -174,7 +177,15 @@
                 times(grid, 'work_times', row.work_times ? JSON.parse(row.work_times) : []);
                 times(grid, 'rest_times', row.rest_times ? JSON.parse(row.rest_times) : []);
                 grid.appendChild(node('p', t.times_hint, 'ar-hint ar-wide'));
-                if (group.value) await loadAttendance(false);
+                var submissions = node('section', null, 'ar-wide ar-submission-types'); submissions.dataset.submissions = 'true'; submissions.appendChild(node('label', t.fields.submission_types));
+                var chosen = row.submission_types ? JSON.parse(row.submission_types) : [];
+                Object.entries(t.submission_types).forEach(function (entry) { var label = node('label'), check = node('input'); check.type = 'checkbox'; check.dataset.submissionType = entry[0]; check.checked = chosen.includes(entry[0]); label.append(check, document.createTextNode(' ' + entry[1])); submissions.appendChild(label); }); grid.appendChild(submissions);
+                function toggleKind() {
+                    var instant = typeSelect.value === 'submission'; submissions.hidden = !instant;
+                    [attendance.parentElement, start.parentElement].concat(Array.from(grid.querySelectorAll('[data-times]'))).forEach(function (box) { box.hidden = instant; box.querySelectorAll('input,select,button').forEach(function (input) { input.disabled = instant; }); });
+                    if (!instant && group.value) loadAttendance(false);
+                }
+                typeSelect.onchange = toggleKind; toggleKind();
             }
             if (seq === requestSeq) save.disabled = false;
         } catch (e) { if (seq === requestSeq) { fields.replaceChildren(); fail(e.message); } }
@@ -217,16 +228,17 @@
             if (result.current_page < result.last_page) { var next = node('button', t.next, 'btn btn-default'); next.type = 'button'; next.onclick = function () { runs(id, result.current_page + 1); }; nav.appendChild(next); } fields.appendChild(nav);
         } catch (e) { if (seq === n) { fields.replaceChildren(); fail(e.message); } }
     }
-    async function remove(type, id) {
+    async function remove(type, id, permanent) {
         if (busy) return;
-        show(t[type === 'rules' ? 'stop' : 'remove'], 'remove'); fields.appendChild(node('p', t.remove_confirm, 'alert alert-warning'));
-        var confirm = node('button', t[type === 'rules' ? 'stop' : 'remove'], 'btn btn-danger'); confirm.type = 'button'; fields.appendChild(confirm);
-        confirm.onclick = async function () { if (busy) return; busy = true; confirm.disabled = true; try { await api('/' + type + '/' + id, 'DELETE'); window.location.reload(); } catch (e) { fail(e.message); confirm.disabled = false; busy = false; } };
+        show(t[permanent ? 'remove' : type === 'rules' ? 'stop' : 'remove'], 'remove'); fields.appendChild(node('p', permanent ? t.rule_delete_confirm : t.remove_confirm, 'alert alert-warning'));
+        var confirm = node('button', t[permanent ? 'remove' : type === 'rules' ? 'stop' : 'remove'], 'btn btn-danger'); confirm.type = 'button'; fields.appendChild(confirm);
+        confirm.onclick = async function () { if (busy) return; busy = true; confirm.disabled = true; try { await api('/' + type + '/' + id + (permanent ? '?permanent=1' : ''), 'DELETE'); window.location.reload(); } catch (e) { fail(e.message); confirm.disabled = false; busy = false; } };
     }
     form.addEventListener('submit', async function (event) {
         event.preventDefault(); if (busy || mode !== 'edit' || save.disabled || !form.reportValidity()) return;
         var data = {version: version}; fields.querySelectorAll('[name]').forEach(function (e) { data[e.name] = e.value; }); data.enabled = data.enabled === '1';
         if (kind === 'rules') data.department_ids = Array.from(fields.querySelectorAll('[data-department]:checked')).map(function (input) { return Number(input.dataset.department); });
+        if (data.type === 'submission') data.submission_types = Array.from(fields.querySelectorAll('[data-submission-type]:checked')).map(function (input) { return input.dataset.submissionType; });
         var clearSecret = fields.querySelector('[name=clear_webhook_secret]'); if (clearSecret) data.clear_webhook_secret = clearSecret.checked;
         fields.querySelectorAll('[data-times]').forEach(function (section) { data[section.dataset.times] = Array.from(section.querySelectorAll('input[type=time]')).map(function (input) { return input.value; }); });
         busy = true; fail(''); save.textContent = t.saving; form.setAttribute('aria-busy', 'true');
@@ -242,12 +254,13 @@
             show(t.guides[key].title, 'guide'); fields.appendChild(template.content.cloneNode(true));
         };
     });
-    document.querySelectorAll('[data-ar-create]').forEach(function (b) { b.onclick = function () { edit(b.dataset.arCreate, null, false); }; });
+    document.querySelectorAll('[data-ar-create]').forEach(function (b) { b.onclick = function () { edit(b.dataset.arCreate, null, false, b.hasAttribute('data-ar-notification')); }; });
     document.querySelectorAll('[data-ar-edit]').forEach(function (b) { b.onclick = function () { edit(b.dataset.arEdit, b.dataset.id, false); }; });
     document.querySelectorAll('[data-ar-view]').forEach(function (b) { b.onclick = function () { edit(b.dataset.arView, b.dataset.id, true); }; });
     document.querySelectorAll('[data-ar-preview]').forEach(function (b) { b.onclick = function () { message('preview', b.dataset.arPreview); }; });
     document.querySelectorAll('[data-ar-test]').forEach(function (b) { b.onclick = function () { message('test', b.dataset.arTest); }; });
     document.querySelectorAll('[data-ar-remove]').forEach(function (b) { b.onclick = function () { remove(b.dataset.arRemove, b.dataset.id); }; });
+    document.querySelectorAll('[data-ar-delete]').forEach(function (b) { b.onclick = function () { remove('rules', b.dataset.arDelete, true); }; });
     document.querySelectorAll('[data-ar-runs]').forEach(function (b) { b.onclick = function () { runs(b.dataset.arRuns, 1); }; });
     dialog.querySelectorAll('[data-ar-close]').forEach(function (b) { b.onclick = function () { if (!busy) dialog.close(); }; });
     dialog.addEventListener('cancel', function (event) { if (busy) event.preventDefault(); });

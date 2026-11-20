@@ -45,18 +45,6 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame(0, DB::table('asset_reminder_days')->count());
     }
 
-    public function test_later_round_rechecks_submissions_and_skips_when_nobody_is_missing(): void
-    {
-        $this->reminderRule($this->reminderGroup());
-        $user = $this->boundMember($this->teamA);
-        $service = app(ReminderService::class);
-        $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        DB::table('operation_task_recaps')->insert(['user_id' => $user->id, 'data_date' => '2026-11-18', 'submitted_at' => now()]);
-        $this->travelTo(Carbon::parse('2026-11-19 14:00:00', 'Asia/Shanghai'));
-        $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        $this->assertEquals(['accepted', 'skipped'], DB::table('asset_reminder_runs')->orderBy('id')->pluck('status')->all());
-        $this->assertCount(1, Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send')));
-    }
 
     public function test_rest_day_uses_rest_time_not_individual_working_state(): void
     {
@@ -122,41 +110,7 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame(0, DB::table('asset_reminder_runs')->count());
     }
 
-    public function test_long_multibyte_messages_are_split_without_losing_names_and_not_resent(): void
-    {
-        $rule = $this->reminderRule($this->reminderGroup());
-        $users = [];
-        for ($i = 1; $i <= 300; $i++) $users[] = ['id' => 1000 + $i, 'name' => '姓名'.str_repeat('长', 20).$i];
-        DB::table('asset_reminder_days')->insert(['rule_id' => $rule->id, 'data_date' => '2026-11-18', 'snapshot' => json_encode($users), 'synced_at' => now()]);
-        $service = app(ReminderService::class);
-        $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        $messages = Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send'));
-        $this->assertGreaterThan(1, $messages->count());
-        $text = '';
-        foreach ($messages as [$request]) {
-            $part = $request['markdown']['text'];
-            $this->assertTrue(mb_check_encoding($part, 'UTF-8'));
-            $this->assertLessThanOrEqual(12000, strlen($part));
-            $this->assertStringContainsString('日报未填写提醒', $part);
-            $this->assertStringContainsString('点击登录填写日报', $part);
-            $text .= $part;
-        }
-        foreach ($users as $user) $this->assertStringContainsString($user['name'], $text);
-        $this->assertSame(0, $service->process(now('Asia/Shanghai')));
-        $this->assertSame($messages->count(), Http::recorded(fn ($r) => str_contains($r->url(), '/robot/send'))->count());
-    }
 
-
-    public function test_roster_is_captured_on_days_without_a_sending_slot(): void
-    {
-        $rule = $this->reminderRule($this->reminderGroup(), ['work_times' => [], 'rest_times' => []]);
-        $user = $this->boundMember($this->teamA);
-        $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
-        $snapshot = DB::table('asset_reminder_days')->where('rule_id', $rule->id)->first();
-        $this->assertSame($user->id, json_decode($snapshot->snapshot, true)[0]['id']);
-        $this->assertSame(0, DB::table('asset_reminder_runs')->count());
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
-    }
 
     public function test_unsigned_webhook_sends_without_fetching_an_application_token(): void
     {

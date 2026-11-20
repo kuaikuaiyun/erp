@@ -31,13 +31,13 @@ class ReminderController extends Controller
     {
         $context = $this->context($request);
         $filters = $request->validate([
-            'department_id' => ['nullable', 'integer'], 'type' => ['nullable', 'in:recap,advertising'],
+            'department_id' => ['nullable', 'integer'], 'type' => ['nullable', 'in:recap,advertising,submission'],
             'enabled' => ['nullable', 'in:0,1'], 'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'in:20,50,100'],
-            'group_page' => ['nullable', 'integer', 'min:1'],
+            'group_page' => ['nullable', 'integer', 'min:1'], 'notification_page' => ['nullable', 'integer', 'min:1'],
         ], __('asset_reminders.validation'), __('asset_reminders.fields'));
         $actor = $context['user'];
-        $query = $this->service->query($actor, 'rules');
+        $query = $this->service->query($actor, 'rules')->where('type', '!=', 'submission');
         foreach (['department_id', 'type', 'enabled'] as $key) {
             if ($request->filled($key)) {
                 if ($key === 'department_id') { $query->where(fn ($q) => $q->where('department_id', $filters[$key])->orWhereJsonContains('department_ids', (int) $filters[$key])); }
@@ -45,12 +45,17 @@ class ReminderController extends Controller
             }
         }
         $rows = $query->orderByDesc('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString();
+        $notificationQuery = $this->service->query($actor, 'rules')->where('type', 'submission');
+        if ($request->filled('department_id')) $notificationQuery->where(fn ($q) => $q->where('department_id', $filters['department_id'])->orWhereJsonContains('department_ids', (int) $filters['department_id']));
+        if ($request->filled('enabled')) $notificationQuery->where('enabled', $filters['enabled']);
+        if ($request->filled('type') && $filters['type'] !== 'submission') $notificationQuery->whereRaw('1 = 0');
+        $notificationRows = $notificationQuery->orderByDesc('id')->paginate(20, ['*'], 'notification_page')->withQueryString();
         $departments = Department::whereIn('id', $this->service->ids($actor))->with('parent:id,name')->orderBy('sort')->orderBy('name')->get()
             ->mapWithKeys(fn ($d) => [$d->id => ($d->parent ? $d->parent->name.' / ' : '').$d->name]);
         $groups = $this->service->query($actor, 'groups')->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->orderBy('name')->paginate(20, ['*'], 'group_page')->withQueryString();
         $groups->setCollection($groups->getCollection()->map(fn ($group) => $this->service->publicGroup($group)));
-        $groupNames = $this->service->query($actor, 'groups')->whereIn('id', $rows->pluck('group_id'))->pluck('name', 'id');
-        return view('portals.asset-manager.reminders', $context + compact('rows', 'filters', 'departments', 'groups') + [
+        $groupNames = $this->service->query($actor, 'groups')->whereIn('id', $rows->pluck('group_id')->merge($notificationRows->pluck('group_id')))->pluck('name', 'id');
+        return view('portals.asset-manager.reminders', $context + compact('rows', 'notificationRows', 'filters', 'departments', 'groups') + [
             'canManage' => $this->service->ids($actor, true) !== [],
             'writeIds' => $this->service->ids($actor, true), 'groupNames' => $groupNames,
             'companyNames' => $this->service->companies($actor)->pluck('name', 'id'),
@@ -105,7 +110,7 @@ class ReminderController extends Controller
     {
         $c = $this->context($request, true);
         try {
-            $this->service->remove($c['user'], $kind, $id);
+            $this->service->remove($c['user'], $kind, $id, $request->boolean('permanent'));
             return response()->json(['message' => __('asset_reminders.saved')]);
         } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
             throw $e;
@@ -114,10 +119,22 @@ class ReminderController extends Controller
         }
     }
 
+    public function notificationPreview(Request $request, int $id)
+    {
+        $c = $this->context($request, true);
+        $rule = $this->service->record($c['user'], 'rules', $id, true);
+        abort_unless($rule->type === 'submission', 404);
+        return response()->json(['message' => app(\App\Portals\AssetManager\SubmissionNotificationService::class)->message([
+            'type' => 'account-opening', 'id' => 0, 'name' => __('asset_reminders.sample_person'), 'department' => __('asset_reminders.sample_department'),
+            'time' => now('Asia/Shanghai')->format('Y-m-d H:i:s'), 'quantity' => 1, 'amount' => '', 'project' => '', 'system' => '',
+        ], $rule->entry_url)])->header('Cache-Control', 'no-store');
+    }
+
     public function preview(Request $request, int $id)
     {
         $c = $this->context($request, true);
         $rule = $this->service->record($c['user'], 'rules', $id, true);
+        if ($rule->type === 'submission') return $this->notificationPreview($request, $id);
         try {
             $data = $this->service->build([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), 1, false, true);
             return response()->json(['message' => $data['text']])->header('Cache-Control', 'no-store');
@@ -130,6 +147,7 @@ class ReminderController extends Controller
     {
         $c = $this->context($request, true);
         $rule = $this->service->record($c['user'], 'rules', $id, true);
+        if ($rule->type === 'submission') return response()->json(['message' => __('asset_reminders.notification_no_test')], 422);
         $request->validate(['confirmed' => ['required', 'accepted']], __('asset_reminders.validation'), __('asset_reminders.fields'));
         try {
             $data = $this->service->deliver([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), now('Asia/Shanghai')->format('H:i'), 1, true, $c['user']);

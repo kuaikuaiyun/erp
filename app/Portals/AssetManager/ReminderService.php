@@ -63,6 +63,7 @@ class ReminderService
                 }
             }
         }
+        if ($kind === 'rules') $query->whereNull('deleted_at');
         return $query;
     }
 
@@ -123,14 +124,20 @@ class ReminderService
             'clear_webhook_secret' => ['sometimes', 'boolean'],
             'remark' => ['nullable', 'string', 'max:500'],
         ] : [
-            'group_id' => ['required', 'integer'], 'type' => ['required', Rule::in(['recap', 'advertising'])],
+            'group_id' => ['required', 'integer'], 'type' => ['required', Rule::in(['recap', 'advertising', 'submission'])],
             'attendance_group_id' => ['required', 'integer', 'min:1'],
             'work_times' => ['present', 'array', 'max:3'], 'work_times.*' => ['required', 'date_format:H:i', 'distinct'],
             'rest_times' => ['present', 'array', 'max:3'], 'rest_times.*' => ['required', 'date_format:H:i', 'distinct'],
             'starts_on' => ['required', 'date_format:Y-m-d'], 'entry_url' => ['required', 'url:http,https', 'max:1000'],
         ];
+        if ($kind === 'rules' && ($input['type'] ?? '') === 'submission') {
+            unset($rules['attendance_group_id'], $rules['work_times'], $rules['work_times.*'], $rules['rest_times'], $rules['rest_times.*'], $rules['starts_on']);
+            $rules['submission_types'] = ['required', 'array', 'min:1', 'max:3'];
+            $rules['submission_types.*'] = ['required', 'distinct', Rule::in(SubmissionNotificationService::TYPES)];
+        }
         $data = Validator::make($input, $common + $rules, __('asset_reminders.validation'), __('asset_reminders.fields'))->validate();
         unset($data['version']);
+        if ($kind === 'rules' && $data['type'] === 'recap' && (! $old || $data['enabled'])) throw ValidationException::withMessages(['type' => __('asset_reminders.recap_disabled')]);
         if ($kind === 'groups' && $old && (int) $old->department_id !== (int) $data['department_id']) {
             throw ValidationException::withMessages(['department_id' => __('asset_reminders.department_locked')]);
         }
@@ -169,14 +176,20 @@ class ReminderService
             $selected = $input['department_ids'] ?? ($old ? $this->ruleDepartments($old) : [(int) $data['department_id']]);
             $data['department_id'] = $selected[0];
             $data['department_ids'] = json_encode($selected);
-            foreach ($this->db()->table('asset_reminder_rules')->where('type', $data['type'])->when($id, fn ($q) => $q->where('id', '!=', $id))->get() as $existing) {
+            foreach ($this->db()->table('asset_reminder_rules')->whereNull('deleted_at')->where('type', $data['type'])->when($id, fn ($q) => $q->where('id', '!=', $id))->get() as $existing) {
                 if (array_intersect($selected, $this->ruleDepartments($existing))) { throw ValidationException::withMessages(['department_ids' => __('asset_reminders.rule_duplicate')]); }
             }
             $group = $this->record($actor, 'groups', (int) $data['group_id'], true);
             $company = $this->company($actor, (int) $group->company_id);
+            if ($data['type'] !== 'submission') {
             $attendance = $this->attendance->group($company, (int) $data['attendance_group_id']);
             $this->attendance->dayType($attendance, now('Asia/Shanghai'));
             $data['attendance_group_name'] = $attendance['group_name'];
+            } else {
+                $data['attendance_group_id'] = 0; $data['attendance_group_name'] = '';
+                $data['work_times'] = []; $data['rest_times'] = []; $data['starts_on'] = $old?->starts_on ?? now('Asia/Shanghai')->toDateString();
+                $data['submission_types'] = json_encode($data['submission_types']);
+            }
             if (! $old) { $data['operator_userid'] = ''; } // Unused legacy NOT NULL column.
             if ($old && ($old->starts_on !== $data['starts_on'] || $old->type !== $data['type'])) {
                 throw ValidationException::withMessages(['starts_on' => __('asset_reminders.start_locked')]);
@@ -189,7 +202,7 @@ class ReminderService
                 sort($data[$key]);
                 $data[$key] = json_encode($data[$key], JSON_THROW_ON_ERROR);
             }
-            if ($this->db()->table('asset_reminder_rules')->where('department_id', $data['department_id'])->where('type', $data['type'])
+            if ($this->db()->table('asset_reminder_rules')->where('department_id', $data['department_id'])->whereNull('deleted_at')->where('type', $data['type'])
                 ->when($id, fn ($q) => $q->where('id', '!=', $id))->exists()) {
                 throw ValidationException::withMessages(['type' => __('asset_reminders.rule_duplicate')]);
             }
@@ -217,7 +230,7 @@ class ReminderService
         } finally { foreach ($locks as $lock) { $lock->release(); } }
     }
 
-    public function remove(AdminUser $actor, string $kind, int $id): void
+    public function remove(AdminUser $actor, string $kind, int $id, bool $delete = false): void
     {
         $record = $this->record($actor, $kind, $id, true);
         $lock = Cache::lock('asset-reminder:delivery:'.($kind === 'groups' ? $id : $record->group_id), 300);
@@ -228,7 +241,7 @@ class ReminderService
         }
         if ($kind === 'rules') {
             // Preserve rule identity and historical snapshots. Deletion is an explicit stop.
-            $this->query($actor, $kind, true)->where('id', $id)->update(['enabled' => false, 'updated_by' => $actor->id, 'version' => DB::raw('version + 1'), 'updated_at' => now('UTC')]);
+            $this->query($actor, $kind, true)->where('id', $id)->update(($delete ? ['deleted_at' => now('UTC'), 'deletion_key' => $id] : []) + ['enabled' => false, 'updated_by' => $actor->id, 'version' => DB::raw('version + 1'), 'updated_at' => now('UTC')]);
         } else {
             $this->query($actor, $kind, true)->where('id', $id)->delete();
         }
@@ -237,6 +250,8 @@ class ReminderService
 
     public function runtime(object $rule, bool $allowDisabled = false): array
     {
+        if ($rule->deleted_at ?? null) throw new ReminderCheckException('check_config_missing');
+        if ($rule->type === 'recap') throw new ReminderCheckException('recap_disabled');
         $portal = Portal::where('code', 'asset-manager')->first();
         if (! $portal || ! $portal->isEnabled() || ! $portal->menus()->where('code', 'asset_manager_reminders')->where('is_enabled', true)->exists()) {
             throw new ReminderCheckException('check_portal_unavailable');
@@ -386,7 +401,7 @@ class ReminderService
         $this->db()->table('asset_reminder_runs')->whereIn('status', ['preparing', 'sending'])->where('updated_at', '<', now('UTC')->subMinutes(30))
             ->update(['status' => 'uncertain', 'error' => __('asset_reminders.interrupted'), 'updated_at' => now('UTC')]);
         $batches = []; $errors = 0;
-        foreach ($this->db()->table('asset_reminder_rules')->where('enabled', true)->orderBy('department_id')->cursor() as $rule) {
+        foreach ($this->db()->table('asset_reminder_rules')->whereNull('deleted_at')->where('type', 'advertising')->where('enabled', true)->orderBy('department_id')->cursor() as $rule) {
             if ($rule->starts_on > $now->copy()->subDay()->toDateString()) { continue; }
             try {
                 [, $company] = $this->runtime($rule);

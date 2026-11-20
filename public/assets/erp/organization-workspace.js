@@ -220,8 +220,15 @@
             Array.prototype.forEach.call(table.querySelectorAll('.organization-tree-child'), function (node) {
                 var row = node.closest('tr');
                 if (row) {
-                    row.classList.add('organization-tree-child-row');
+                    row.classList.add('organization-tree-child-row', 'organization-tree-row-collapsed');
                 }
+            });
+
+            Array.prototype.forEach.call(table.querySelectorAll('[data-department-tree-toggle]'), function (toggle) {
+                toggle.setAttribute('aria-expanded', 'false');
+                toggle.setAttribute('title', toggle.getAttribute('data-expand-label'));
+                var icon = toggle.querySelector('.fa');
+                if (icon) icon.className = 'fa fa-chevron-right';
             });
 
             table.addEventListener('click', function (event) {

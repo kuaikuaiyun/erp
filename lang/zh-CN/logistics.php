@@ -2,6 +2,8 @@
 
 return [
     'common' => [
+        'historical_domain_unknown' => '历史域名未确定',
+        'store_domain' => '店铺域名',
         'all' => '全部',
         'search' => '查询',
         'reset' => '重置',

@@ -153,7 +153,7 @@ class DailySubmissionController extends Controller
             ];
         })->values()->all();
 
-        DailyAdvertisingRecharge::query()->create([
+        app(\App\Portals\AssetManager\SubmissionNotificationService::class)->create(DailyAdvertisingRecharge::class, [
             'report_date' => $now->toDateString(),
             'operator_user_id' => (int) $operator->getKey(),
             'operator_name' => (string) ($operator->name ?: $operator->username),
@@ -210,7 +210,7 @@ class DailySubmissionController extends Controller
         /** @var AssistantAdvertisingAgency $selectedAgency */
         $selectedAgency = $agencies->get((int) $validated['agency_id']);
 
-        DailyAccountOpening::query()->create([
+        app(\App\Portals\AssetManager\SubmissionNotificationService::class)->create(DailyAccountOpening::class, [
             'operator_user_id' => (int) $operator->getKey(),
             'operator_name' => (string) ($operator->name ?: $operator->username),
             'operation_department_id' => $operationDepartment?->getKey(),
@@ -263,7 +263,7 @@ class DailySubmissionController extends Controller
         $project = $projects->get((int) $validated['project_id']);
         $system = $systems->get((int) $validated['website_system_id']);
         abort_unless($project && $system && (int) $system->project_id === (int) $project->id, 422, '建站系统与所选项目不匹配。');
-        DailyStoreLaunch::query()->create([
+        app(\App\Portals\AssetManager\SubmissionNotificationService::class)->create(DailyStoreLaunch::class, [
             'operator_user_id' => $operator->id, 'operator_name' => $operator->name ?: $operator->username,
             'operation_department_id' => $operationDepartment?->id, 'operation_department_name' => $operationDepartment?->name,
             'assistant_department_id' => $project->assistant_department_id,

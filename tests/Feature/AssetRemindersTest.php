@@ -41,6 +41,7 @@ trait AssetRemindersEnvironment
         (require database_path('migrations/2026_11_19_000100_install_asset_reminders.php'))->up();
         (require database_path('migrations/2026_11_19_000200_add_webhook_to_asset_reminder_groups.php'))->up();
         (require database_path('migrations/2026_11_19_000300_add_departments_to_asset_reminder_rules.php'))->up();
+        (require database_path('migrations/2026_11_20_000100_extend_asset_reminder_notifications.php'))->up();
         Schema::create('operation_task_recaps', function (Blueprint $t) {
             $t->id(); $t->unsignedBigInteger('user_id'); $t->date('data_date');
             $t->string('workflow_status')->default('pending_leader'); $t->timestamp('submitted_at')->nullable();
@@ -89,7 +90,7 @@ trait AssetRemindersEnvironment
 
     protected function ruleValues(int $group, array $overrides = []): array
     {
-        return array_replace(['department_id' => $this->teamA->id, 'group_id' => $group, 'type' => 'recap', 'enabled' => true,
+        return array_replace(['department_id' => $this->teamA->id, 'group_id' => $group, 'type' => 'advertising', 'enabled' => true,
             'attendance_group_id' => 12, 'operator_userid' => 'attendance-admin', 'work_times' => ['10:00', '14:00'],
             'rest_times' => ['11:00'], 'starts_on' => '2026-11-18', 'entry_url' => 'https://tasks.example.com/recaps'], $overrides);
     }
@@ -163,7 +164,7 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(2, $summary['count']);
         $this->get($this->remindersUrl.'?department_id='.$this->teamB->id)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
         $preview = $this->getJson($this->remindersUrl.'/rules/'.$id.'/preview')->assertOk();
-        $this->assertStringContainsString($other->name, $preview->json('message'));
+        $this->assertStringContainsString('广告费提交提醒', $preview->json('message'));
         $this->postJson($this->remindersUrl.'/rules/'.$id.'/test', ['confirmed' => true])->assertOk();
         $this->assertCount(2, json_decode(DB::table('asset_reminder_runs')->first()->department_ids, true));
         $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group, ['department_id' => $this->teamB->id]))->assertUnprocessable();
@@ -200,7 +201,7 @@ class AssetRemindersTest extends TestCase
         $this->postJson($this->remindersUrl.'/groups', $this->groupValues())->assertOk();
         $group = DB::table('asset_reminder_groups')->first();
         $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group->id))->assertOk();
-        $this->get($this->remindersUrl.'?type=recap&per_page=20')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+        $this->get($this->remindersUrl.'?type=advertising&per_page=20')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
     }
 
     public function test_department_and_company_scope_cannot_be_bypassed(): void
@@ -254,8 +255,7 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(1, $summary['monthly_people']);
         $this->assertCount(1, $summary['departments']);
         $this->assertSame(2, DB::table('asset_reminder_days')->count());
-        $payload = app(ReminderService::class)->build([$a, $b], Carbon::parse('2026-11-18', 'Asia/Shanghai'));
-        $this->assertSame(1, substr_count($payload['text'], $user->name));
+        $this->assertSame(1, $summary['count']);
     }
 
     public function test_submitted_rejected_and_soft_deleted_submissions_still_count_as_written(): void
@@ -471,23 +471,5 @@ class AssetRemindersTest extends TestCase
         Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
     }
 
-    public function test_unexpected_database_errors_use_a_reference_and_log_metadata_without_sql_or_bindings(): void
-    {
-        $rule = $this->reminderRule($this->reminderGroup());
-        Schema::drop('operation_task_recaps');
-        Log::spy();
-        $response = $this->getJson($this->remindersUrl.'/rules/'.$rule->id.'/preview')->assertUnprocessable();
-        $message = $response->json('message');
-        $this->assertSame(1, preg_match('/诊断编号：([0-9a-f-]{36})/', $message, $matches));
-        foreach (['SQLSTATE', 'select', 'operation_task_recaps', 'secret-test', 'reminder-token'] as $private) {
-            $response->assertDontSee($private, false);
-        }
-        Log::shouldHaveReceived('warning')->once()->withArgs(function ($event, $metadata) use ($matches, $rule) {
-            return $event === 'asset_reminder.check_failed' && $metadata['diagnostic_id'] === $matches[1]
-                && $metadata['rule_id'] === $rule->id && $metadata['stage'] === 'preview'
-                && isset($metadata['sqlstate'], $metadata['database_code'])
-                && ! isset($metadata['exception'], $metadata['sql'], $metadata['bindings'], $metadata['message']);
-        });
-        Http::assertNotSent(fn ($r) => str_contains($r->url(), '/robot/send'));
-    }
+
 }

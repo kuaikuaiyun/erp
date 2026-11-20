@@ -414,7 +414,9 @@ GRAPHQL, [
         $paidTransaction = self::successfulPayment($transactions);
         $orderNumber = preg_replace('/^#/', '', (string) ($payload['name'] ?? ''));
         $isAssigned = $store instanceof AssistantDomainStore;
-        $tongtuOrderNumber = $isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null;
+        $tongtuOrderNumber = filled($current->tongtu_order_number)
+            ? $current->tongtu_order_number
+            : ($isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null);
 
         // Existing Shopify lines retain ERP-corrected SKUs. Therefore an incoming
         // blank SKU must not turn a manually repaired order back into an exception.

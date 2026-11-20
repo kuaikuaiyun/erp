@@ -384,7 +384,7 @@ class DepartmentController extends Controller
                 ? '<span class="organization-tree-branch" data-tree-child-of="'.e((string) $this->parent_id).'" aria-hidden="true"><i class="fa fa-level-down"></i></span>'
                 : '';
             $toggle = !$isChild && $hasChildren
-                ? '<button type="button" class="organization-tree-toggle" data-department-tree-toggle data-tree-department-id="'.e((string) $this->getKey()).'" aria-expanded="true" title="'.e(__('organization.departments.collapse_children')).'" data-collapse-label="'.e(__('organization.departments.collapse_children')).'" data-expand-label="'.e(__('organization.departments.expand_children')).'"><i class="fa fa-chevron-down"></i></button>'
+                ? '<button type="button" class="organization-tree-toggle" data-department-tree-toggle data-tree-department-id="'.e((string) $this->getKey()).'" aria-expanded="false" title="'.e(__('organization.departments.expand_children')).'" data-collapse-label="'.e(__('organization.departments.collapse_children')).'" data-expand-label="'.e(__('organization.departments.expand_children')).'"><i class="fa fa-chevron-right"></i></button>'
                 : '';
 
             return '<span class="organization-tree-node '.$nodeClass.'">'.$connector.$toggle

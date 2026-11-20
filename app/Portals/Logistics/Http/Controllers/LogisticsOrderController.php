@@ -96,6 +96,8 @@ class LogisticsOrderController extends Controller
         return view('portals.logistics.orders.index', [
             ...$this->viewContext($context),
             'orders' => $orders,
+            'historicalDomains' => app(\App\Portals\Assistant\AssistantStoreDomainTimelineService::class)
+                ->domainsForOrders($orders->getCollection()),
             'filters' => $filters,
             'filterOptions' => $this->filterOptions(),
             'statusOptions' => LogisticsOrder::dataStatusOptions(),
@@ -813,7 +815,9 @@ class LogisticsOrderController extends Controller
 
             $orderNumber = trim((string) $order->shopify_order_number);
             $missingSku = $this->hasMissingShopifySku($order);
-            $tongtuOrderNumber = $store->makeTongtuOrderNumber($orderNumber);
+            $tongtuOrderNumber = filled($order->tongtu_order_number)
+                ? $order->tongtu_order_number
+                : $store->makeTongtuOrderNumber($orderNumber);
             $order->fill([
                 'assistant_domain_store_id' => $store->getKey(),
                 'store_name' => $store->shop_name,
