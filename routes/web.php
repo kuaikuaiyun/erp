@@ -378,6 +378,8 @@ Route::get('/operation-dashboard/applovin-account-statistics/accounts', [AppLovi
     ->name('operation-dashboard.applovin-account-statistics.spend-band');
 Route::get('/operation-dashboard/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
     ->whereNumber('operator')->name('operation-dashboard.applovin-account-statistics.show');
+Route::get('/operation-dashboard/applovin-personal-situations', [AppLovinAccountStatisticsController::class, 'personalSituation'])
+    ->name('operation-dashboard.applovin-personal-situations.index');
 Route::get('/operation-dashboard/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
     ->name('operation-dashboard.applovin-performance-reports.index');
 Route::get('/operation-dashboard/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])
