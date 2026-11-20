@@ -76,7 +76,7 @@ class FashionOperationReportController extends Controller
         $displayMode = (string) ($validated['display_mode'] ?? ($isDashboard ? 'personal' : 'performance'));
         $isPersonalMode = $isDashboard && $displayMode === 'personal';
         $personalRange = (int) ($validated['personal_range'] ?? 7);
-        $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1);
+        $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1.65);
         $reportNow = now($timezone);
         $dateRange = (string) ($validated['date_range'] ?? (
             $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
@@ -219,7 +219,7 @@ class FashionOperationReportController extends Controller
             ]);
         });
         $personalDates = $isPersonalMode
-            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => $reportNow->copy()->subDays($offset)->toDateString())->reverse()->values()
+            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => CarbonImmutable::parse($dateTo, $timezone)->subDays($offset)->toDateString())->reverse()->values()
             : collect();
 
         $selectedDepartmentIds = $request->has('department_ids')
