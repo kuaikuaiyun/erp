@@ -102,6 +102,9 @@
                         parent.checked = inputs.length > 0 && chosen === inputs.length; parent.indeterminate = chosen > 0 && chosen < inputs.length;
                         var matching = group.dataset.search.toLowerCase().includes(search.value.toLowerCase());
                         group.hidden = !matching;
+                        var children = group.querySelector('.ar-department-children'), toggle = group.querySelector('.ar-department-toggle');
+                        var expanded = search.value.trim() !== '' || group.dataset.expanded === 'true';
+                        children.hidden = !expanded; toggle.setAttribute('aria-expanded', String(expanded)); toggle.setAttribute('aria-label', (expanded ? t.department_collapse : t.department_expand) + ' ' + toggle.dataset.title);
                         inputs.forEach(function (input) {
                             var label = input.closest('label'); label.classList.toggle('is-selected', input.checked);
                             if (input.checked) { var chip = node('button', input.dataset.label + ' ×', 'ar-department-chip'); chip.type = 'button'; chip.setAttribute('aria-label', t.department_remove + ' ' + input.dataset.label); chip.onclick = function () { input.checked = false; refreshDepartments(); }; chips.appendChild(chip); }
@@ -110,9 +113,15 @@
                     chips.hidden = !checked.length; empty.hidden = Array.from(list.children).some(function (group) { return !group.hidden; });
                 }
                 groups.forEach(function (data, key) {
-                    var group = node('section', null, 'ar-department-group'), heading = node('label', null, 'ar-department-parent'), parent = node('input'), children = node('div', null, 'ar-department-children');
+                    var group = node('section', null, 'ar-department-group'), heading = node('div', null, 'ar-department-parent'), parent = node('input'), children = node('div', null, 'ar-department-children');
                     parent.type = 'checkbox'; parent.dataset.departmentParent = key; parent.disabled = !data.items.length;
-                    heading.append(parent, node('span', data.name)); group.append(heading, children); group.dataset.search = data.name + ' ' + data.items.map(function (d) { return d.name; }).join(' ');
+                    var toggle = node('button', null, 'ar-department-toggle'); toggle.type = 'button'; toggle.dataset.title = data.name;
+                    toggle.append(node('span', '▸', 'ar-department-arrow'), node('span', data.name));
+                    children.id = 'ar-department-children-' + key; toggle.setAttribute('aria-controls', children.id);
+                    parent.setAttribute('aria-label', t.department_select_all + ' ' + data.name);
+                    group.dataset.expanded = 'false';
+                    toggle.onclick = function () { group.dataset.expanded = group.dataset.expanded === 'true' ? 'false' : 'true'; refreshDepartments(); };
+                    heading.append(parent, toggle); group.append(heading, children); group.dataset.search = data.name + ' ' + data.items.map(function (d) { return d.name; }).join(' ');
                     data.items.forEach(function (d) {
                         var label = node('label', null, 'ar-department-option'), checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.department = d.id; checkbox.dataset.label = d.name; checkbox.checked = selected.map(String).includes(String(d.id));
                         label.append(checkbox, node('span', (d.short_name || d.name) + (d.has_children && !d.parent_id ? t.department_legacy : ''))); checkbox.onchange = refreshDepartments; children.appendChild(label);
@@ -121,7 +130,7 @@
                     parent.onchange = function () { children.querySelectorAll('[data-department]').forEach(function (input) { input.checked = parent.checked; }); refreshDepartments(); };
                     list.appendChild(group);
                 });
-                search.oninput = refreshDepartments; refreshDepartments();
+                search.oninput = function () { if (!search.value.trim()) list.querySelectorAll('.ar-department-group').forEach(function (group) { group.dataset.expanded = 'false'; }); refreshDepartments(); }; refreshDepartments();
             }
             var status = field(grid, 'enabled', row.enabled == null ? '0' : row.enabled, [{id: 0, name: t.disabled}, {id: 1, name: t.enabled}]);
             if (type === 'groups') {

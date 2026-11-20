@@ -106,6 +106,8 @@ return [
             'origin_hint' => '续费订单填写订阅首单的 Shopify 原生 ID。首单未入库时，系统不会猜测订阅归属。',
             'groups' => ['basic' => '店铺与订单', 'customer' => '客户信息', 'payment' => '订阅与支付', 'shipping' => '物流信息', 'items' => '商品明细'],
             'choose_store' => '请选择店铺', 'no' => '否', 'yes' => '是',
+            'store_search_placeholder' => '输入店铺名称搜索',
+            'store_no_results' => '未找到匹配的店铺', 'store_searching' => '搜索中…',
             'subscription_options' => ['none' => '非订阅', 'initial' => '订阅首次购买', 'renewal' => '订阅续费'],
             'add_item' => '添加商品', 'remove_item' => '删除', 'paid_only' => '仅补录已付款订单，保存后的支付状态为“已付款”。',
             'invalid_store' => '请选择当前在用的 Shopify 店铺。',

@@ -21,6 +21,7 @@
 
 @push('styles')
 <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/assets/erp/logistics.css?v=20261009-10">
+<link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css">
 @endpush
 
 @section('content')
@@ -89,6 +90,7 @@
 @endsection
 
 @push('scripts')
+<script src="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/vendor/laravel-admin/AdminLTE/plugins/select2/select2.full.min.js"></script>
 <script>
 (function () {
     var form = document.getElementById('logistics-manual-order');
@@ -97,6 +99,24 @@
     var error = document.getElementById('manual-item-error');
     var kind = document.getElementById('manual-subscription_kind');
     var copy = @json(__('logistics.orders.manual'));
+    var store = form.elements.assistant_domain_store_id;
+    if (window.jQuery && window.jQuery.fn.select2) {
+        var picker = window.jQuery(store);
+        picker.select2({
+            width: '100%', placeholder: copy.choose_store, minimumResultsForSearch: 0,
+            language: { noResults: function () { return copy.store_no_results; }, searching: function () { return copy.store_searching; } }
+        });
+        var storeError = document.createElement('span');
+        storeError.className = 'text-danger'; storeError.textContent = copy.required_error; storeError.hidden = true;
+        store.parentElement.appendChild(storeError);
+        picker.on('select2:open', function () {
+            window.jQuery('.select2-container--open .select2-search__field').attr('placeholder', copy.store_search_placeholder);
+        });
+        picker.on('change', function () { storeError.hidden = !!store.value; });
+        store.addEventListener('invalid', function (event) {
+            event.preventDefault(); storeError.hidden = false; picker.select2('open');
+        });
+    }
     var next = Math.max.apply(null, Array.from(list.querySelectorAll('input')).map(function (input) { return Number((input.name.match(/^items\[(\d+)\]/) || [0,0])[1]); })) + 1;
     var template = list.querySelector('[data-manual-item]').cloneNode(true);
     var saving = false;

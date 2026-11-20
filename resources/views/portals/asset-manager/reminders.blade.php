@@ -1,7 +1,7 @@
 @extends('portal.layout')
 @section('page_title', __('asset_reminders.title'))
 @push('styles')
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261119-8">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261120-1">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_reminders.title') }} <small>{{ __('asset_reminders.subtitle') }}</small></h1></section>
@@ -70,5 +70,5 @@
 @push('scripts')
 @php($reminderConfig = ['defaultEntryUrl'=>\App\Portals\AssetManager\ReminderService::DEFAULT_ENTRY_URL,'base'=>url('/asset-manager/reminders'),'text'=>__('asset_reminders'),'departments'=>$departments,'companies'=>$companyNames,'groups'=>$groupNames])
 <script>window.AssetRemindersConfig=@json($reminderConfig);</script>
-<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261119-8"></script>
+<script src="{{ asset('assets/erp/asset-reminders.js') }}?v=20261120-1"></script>
 @endpush
