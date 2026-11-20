@@ -130,7 +130,7 @@ class FinanceXuzongCreditReport
         $attribution = $this->attribution ??= $this->settlements->liveOrderAttributionResolver();
         return $records->mapWithKeys(function (FinanceRecord $record) use ($orders, $attribution): array {
             if (array_key_exists('地区', $record->payload['_edited_report_fields'] ?? [])) {
-                return [$record->id => (string) $record->payload['_edited_report_fields']['地区']];
+                return [$record->id => FinanceSettlementService::normaliseRegionLabel((string) $record->payload['_edited_report_fields']['地区'])];
             }
             $display = clone $record;
             $order = $orders->get($record->id);
@@ -382,6 +382,7 @@ class FinanceXuzongCreditReport
     private static function reportOverrides(array $payload): array
     {
         $overrides = $payload['_edited_report_fields'] ?? [];
+        if (isset($overrides['地区'])) $overrides['地区'] = FinanceSettlementService::normaliseRegionLabel((string) $overrides['地区']);
         if (array_key_exists('应结算（USD）', $overrides) || ! is_numeric($payload['应结算'] ?? null)) {
             return $overrides;
         }

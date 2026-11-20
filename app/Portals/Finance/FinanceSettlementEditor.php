@@ -65,14 +65,21 @@ class FinanceSettlementEditor
         if (isset($columns['completed_at'])) $rules['completed_at'] = 'sometimes|nullable|date_format:Y-m-d H:i:s';
         if (isset($columns['refund_count'])) $rules['refund_count'] = 'sometimes|nullable|integer|min:0';
         if (isset($columns['statement_rate'])) $rules['statement_rate'] = 'sometimes|nullable|numeric|gt:0';
-        $values = validator($input, $rules)->validate();
+        // Excel and gateway imports can represent whole counts as "0.0" or "2.000".
+        // Preserve the integer rule while accepting the unchanged value shown by the editor.
+        if (isset($columns['refund_count'], $input['refund_count']) && is_scalar($input['refund_count'])
+            && preg_match('/^\d{1,18}(?:\.0{1,8})?$/D', (string) $input['refund_count'])) {
+            $input['refund_count'] = bcadd((string) $input['refund_count'], '0', 0);
+        }
+        $values = validator($input, $rules, [], $columns + ['timezone' => '时区', 'usd_rate' => '汇率'])->validate();
         if ($cardChannel === 'ye' && isset($values['initiated_at'])) $values['date'] = $values['initiated_at'];
         $db = $this->workbooks->database();
         $db->transaction(function () use ($db, $record, $values, $channel, $actor, $addImportedCosts, $cardChannel): void {
             $record = FinanceRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
             $accounting = app(FinanceAccountingService::class);
             $accounting->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
-            $scope = $cardChannel === null ? [] : ['card_channel' => $cardChannel, 'timezone' => $values['timezone'] ?? 'Asia/Shanghai'];
+            $scope = ['timezone' => $values['timezone'] ?? 'Asia/Shanghai'];
+            if ($cardChannel !== null) $scope['card_channel'] = $cardChannel;
             $current = $this->settlements->rows($channel, $scope, new \Illuminate\Database\Eloquent\Collection([$record]))->sole();
             if ($cardChannel !== null) $current = array_replace($current, $current['card_layout'] ?? []);
             $accounting->guardUnlocked($current['month']);

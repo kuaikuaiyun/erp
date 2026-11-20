@@ -8,6 +8,10 @@ class FinanceFilterSelection
 
     public static function availableRegions(array $filters, array $available): array
     {
+        if (isset($filters['region'])) $filters['region'] = FinanceSettlementService::normaliseRegionLabel($filters['region']);
+        if (isset($filters['regions'])) $filters['regions'] = array_values(array_unique(array_filter(array_map(
+            FinanceSettlementService::normaliseRegionLabel(...), $filters['regions'],
+        ), fn ($region) => $region !== '')));
         if (filled($filters['region'] ?? null) && ! in_array($filters['region'], $available, true)) unset($filters['region']);
         if (isset($filters['regions'])) $filters['regions'] = array_values(array_intersect($filters['regions'], [...$available, self::EMPTY]));
         return $filters;

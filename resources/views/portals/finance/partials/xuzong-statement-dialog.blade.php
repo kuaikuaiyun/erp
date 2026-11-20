@@ -33,12 +33,17 @@
     const save = dialog.querySelector('[data-statement-save]');
     const notices = document.getElementById('xuzong-notices');
     let returnToNotices = false;
+    let savedChanges = false;
     let url;
     dialog.querySelector('[data-statement-back]').addEventListener('click', () => {
         if (!busy) dialog.close();
     });
     dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
     dialog.addEventListener('close', () => {
+        if (savedChanges) {
+            window.location.reload();
+            return;
+        }
         if (returnToNotices && document.getElementById('xuzong-notice-open')?.hidden === false) {
             notices.showModal();
         }
@@ -78,14 +83,17 @@
         busy = true;
         save.disabled = true;
         status.textContent = '正在保存…';
+        let persisted = false;
         try {
             const data = new FormData(form);
             const query = new URLSearchParams(window.location.search);
             data.set('notice_page', query.get('statement_notice_page') || '1');
             data.set('notice_per_page', query.get('statement_notice_per_page') || '10');
-            const response = await fetch(form.action, {method: 'POST', body: data, headers: {'Accept': 'application/json'}});
+            // The hidden input named "action" shadows HTMLFormElement.action.
+            const response = await fetch(form.getAttribute('action'), {method: 'POST', body: data, headers: {'Accept': 'application/json'}});
             const result = await response.json();
             if (!response.ok) throw new Error(Object.values(result.errors || {}).flat()[0] || result.message || '保存失败。');
+            persisted = savedChanges = true;
             if (result.handled) {
                 const target = new URL(window.location.href);
                 if (notices) target.searchParams.set('statement_notice_page', String(result.noticePage));
@@ -95,7 +103,7 @@
             await load(url);
             status.textContent = '结算明细已更新。';
         } catch (error) {
-            status.textContent = error.message;
+            status.textContent = persisted ? '已保存，但重新读取明细失败。返回列表后可查看最新数据。' : error.message;
         } finally {
             busy = false;
             save.disabled = false;

@@ -186,9 +186,8 @@ class FinancePayPalSettlementOrders
     {
         $db = $this->workbooks->database();
         $graph = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
-            ? $this->orderGraphCache()->remember(
-                $this->orderGraphCacheKey(),
-                15,
+            ? app(FinanceReportCache::class)->remember(
+                'paypal-order-graph:v3', ['paypal'],
                 fn () => $this->orderGraph(null),
             )
             : $this->orderGraph(null);
@@ -416,6 +415,7 @@ class FinancePayPalSettlementOrders
     public function forgetOrderGraph(): void
     {
         if (in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            app(FinanceReportCache::class)->forget('paypal-order-graph:v3');
             $this->orderGraphCache()->forget($this->orderGraphCacheKey());
         }
     }

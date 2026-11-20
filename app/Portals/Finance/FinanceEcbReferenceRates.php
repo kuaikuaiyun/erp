@@ -17,6 +17,22 @@ class FinanceEcbReferenceRates
         return hash('sha256', json_encode($usable, JSON_THROW_ON_ERROR));
     }
 
+    public function rangeFingerprint(string $from, string $to): string
+    {
+        $default = config('cache.default');
+        $cache = Cache::store(config("cache.stores.{$default}.driver") === 'database' ? 'file' : $default);
+        $rates = [];
+        for ($date = CarbonImmutable::parse($from)->startOfMonth(); $date->toDateString() <= $to; $date = $date->addMonth()) {
+            [, $usable] = $this->cachedMonth($cache, $date->format('Y-m'));
+            foreach ($usable as $day => $values) if ($day >= $from && $day <= $to) {
+                ksort($values);
+                $rates[$day] = $values;
+            }
+        }
+        ksort($rates);
+        return hash('sha256', json_encode($rates, JSON_THROW_ON_ERROR));
+    }
+
     private function cachedMonth($cache, string $month): array
     {
         $fresh = $cache->get('finance:ecb-reference:'.$month);

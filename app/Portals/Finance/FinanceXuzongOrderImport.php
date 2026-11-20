@@ -260,7 +260,8 @@ class FinanceXuzongOrderImport
                 }
                 $attributes = ['occurred_at' => $created, 'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态']];
                 $payload = FinanceSourceEdits::remember($order, $attributes, $payload);
-                $order->update([...$attributes, 'payload' => $payload]);
+                $order->fill([...$attributes, 'payload' => $payload]);
+                if ($order->isDirty()) $order->save();
                 if ($costChanged) {
                     $records = $this->creditOrders->query(xuzongReport: true, ids: [-$order->id])->get();
                     app(FinanceXuzongCostEligibility::class)->guard($records, 'report_fields');

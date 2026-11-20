@@ -775,9 +775,11 @@ class FinanceConfluxSettlement
         $keys = (clone $query)->select(['entry.payment_account_id', 'entry.reference'])
             ->groupBy('entry.payment_account_id', 'entry.reference');
         $db = $this->workbooks->database();
-        $total = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
-            ? (int) (clone $query)->selectRaw('COUNT(DISTINCT entry.payment_account_id, entry.reference) AS total')->first()->total
-            : $db->query()->fromSub(clone $keys, 'statement_orders')->count();
+        $total = app(FinanceReportCache::class)->remember('conflux-unmatched-total:v1:'.hash('sha256',
+            json_encode([$query->toSql(), $query->getBindings()], JSON_THROW_ON_ERROR)), ['ye'],
+            fn () => in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+                ? (int) (clone $query)->selectRaw('COUNT(DISTINCT entry.payment_account_id, entry.reference) AS total')->first()->total
+                : $db->query()->fromSub(clone $keys, 'statement_orders')->count());
         if ($limit <= 0 || $offset >= $total) {
             return [$total, collect()];
         }

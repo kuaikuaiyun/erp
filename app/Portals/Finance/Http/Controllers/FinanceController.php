@@ -18,6 +18,7 @@ use App\Portals\Finance\FinancePayPalBalanceService;
 use App\Portals\Finance\FinancePayPalSettlementProjection;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
 use App\Portals\Finance\FinanceProductNames;
+use App\Portals\Finance\FinanceReportCache;
 use App\Portals\Finance\FinanceSettlementEditor;
 use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
@@ -778,7 +779,11 @@ class FinanceController extends Controller
             ? app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: $xuzongReport, indexOnly: true)
             : $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
         $perPage = (int) ($filters['per_page'] ?? 10);
-        $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
+        $accountCounts = fn () => (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
+        $exportAccounts = $xuzongReport
+            ? app(FinanceReportCache::class)->remember('xuzong-account-counts:v1:'.hash('sha256',
+                json_encode([$query->toSql(), $query->getBindings()], JSON_THROW_ON_ERROR)), ['xuzong1', 'xuzong2'], $accountCounts)
+            : $accountCounts();
         $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
             ->paginate($perPage, $hydratePage ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
         if ($hydratePage && $records->isNotEmpty()) {
@@ -2189,14 +2194,19 @@ class FinanceController extends Controller
             && $canDeferTotal) {
             $perPage = (int) ($filters['per_page'] ?? 10);
             $query = $service->query($channel, $filters);
+            $totalScope = $this->settlementTotalScope($query, $filters);
+            $reportCache = app(FinanceReportCache::class);
             $queryParams = $request->except('settlement_total');
             $paginationOptions = ['path' => $request->url(), 'query' => $queryParams];
             if ($totalOnly) {
-                $total = $query->count();
-                if ($hasConfluxStatements) {
-                    [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
-                    $total += $statementTotal;
-                }
+                $total = $reportCache->remember($totalScope, [$filters['card_channel'] ?? $channel], function () use ($query, $hasConfluxStatements, $filters): int {
+                    $total = $query->count();
+                    if ($hasConfluxStatements) {
+                        [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
+                        $total += $statementTotal;
+                    }
+                    return $total;
+                });
                 return $this->settlementTotalResponse($total, $perPage, $paginationOptions, $requestedPage);
             }
             $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
@@ -2205,10 +2215,11 @@ class FinanceController extends Controller
                 $firstRows = $service->rows($channel, $filters, $records);
                 if ($firstRows->count() > $perPage) {
                     $rows = $firstRows->take($perPage);
+                    $cachedTotal = $reportCache->get($totalScope, [$filters['card_channel'] ?? $channel]);
                     $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
-                        $rows, $requestedPage * $perPage + 1, $perPage, $requestedPage, $paginationOptions,
+                        $rows, $cachedTotal ?? ($requestedPage * $perPage + 1), $perPage, $requestedPage, $paginationOptions,
                     );
-                    $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+                    if ($cachedTotal === null) $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
                 }
             }
         }
@@ -2251,8 +2262,11 @@ class FinanceController extends Controller
                     $paginationOptions);
             }
         } elseif ($canPaginate) {
-            $paginator = $service->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')
-                ->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
+            $query = $service->query($channel, $filters);
+            $total = app(FinanceReportCache::class)->remember($this->settlementTotalScope($query, $filters).':orders',
+                [$filters['card_channel'] ?? $channel], fn () => (clone $query)->count());
+            $paginator = $query->orderByDesc('occurred_at')->orderByDesc('id')
+                ->paginate((int) ($filters['per_page'] ?? 10), total: $total)->withQueryString();
             $rows = $service->rows($channel, $filters, $paginator->getCollection());
             $paginator->setCollection($rows);
             if (($filters['card_channel'] ?? null) === 'ye') {
@@ -2402,6 +2416,14 @@ class FinanceController extends Controller
             'teams' => ($orderView ? $service->operationDepartments()->pluck('name') : $this->workbooks->domainGroups()->pluck('team'))
                 ->filter()->unique()->sort()->values(),
         ]);
+    }
+
+    private function settlementTotalScope(Builder $query, array $filters): string
+    {
+        unset($filters['per_page'], $filters['format']);
+        $filters = array_filter($filters, fn ($value) => filled($value));
+        ksort($filters);
+        return 'settlement-total:v1:'.hash('sha256', json_encode([$query->toSql(), $query->getBindings(), $filters], JSON_THROW_ON_ERROR));
     }
 
     private function settlementTotalResponse(int $total, int $perPage, array $paginationOptions, int $page): JsonResponse
@@ -3436,14 +3458,19 @@ class FinanceController extends Controller
             $monthQuery = \Illuminate\Support\Arr::except($query, ['download', 'selected_rows', 'page']);
             if ($this->calculationMonthReady($report, $month, $query)) continue;
             for ($day = $period; $day <= $period->endOfMonth(); $day = $day->addDays(7)) {
+                $span = [$day->toDateString(), min($day->addDays(6)->toDateString(), $period->endOfMonth()->toDateString())];
+                // A partially completed month must resume at its missing parts,
+                // including after navigation, a refresh or a failed request.
+                if ($this->calculationMonthReady($report, $month, $query, $span)) continue;
                 $months[] = ['month' => $month.' '.$day->format('d').'—'.substr(min($day->addDays(6)->toDateString(), $period->endOfMonth()->toDateString()), 8, 2),
                     'url' => $request->url().'?'.http_build_query([
                         ...$monthQuery, 'month' => $month, 'month_from' => $month, 'month_to' => $month, '_source_prepare' => 1,
-                        '_source_from' => $day->toDateString(), '_source_to' => min($day->addDays(6)->toDateString(), $period->endOfMonth()->toDateString()),
+                        '_source_from' => $span[0], '_source_to' => $span[1],
                     ])];
             }
         }
         $plan = ['months' => $months,
+            'concurrency' => max(1, min(2, (int) config('finance.summaries.source_request_concurrency', 2))),
             'resume_url' => $request->url().'?'.http_build_query([...$query, '_source_ready' => $token])];
         if ($planOnly) return response()->json($plan)->header('Cache-Control', 'private, no-store');
         if ($months === []) return null;
@@ -3451,10 +3478,10 @@ class FinanceController extends Controller
             ->header('Cache-Control', 'private, no-store');
     }
 
-    private function calculationMonthReady(string $report, string $month, array $query): bool
+    private function calculationMonthReady(string $report, string $month, array $query, ?array $span = null): bool
     {
         $start = CarbonImmutable::parse($month.'-01');
-        $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai'];
+        $filters = ['from' => $span[0] ?? $start->toDateString(), 'to' => $span[1] ?? $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai'];
         $projection = app(\App\Portals\Finance\FinanceSummaryProjection::class);
         $sources = app(\App\Portals\Finance\FinanceSummarySourceCache::class);
         if ($report === 'losses') {
@@ -3464,9 +3491,9 @@ class FinanceController extends Controller
                 'Shopify', '徐总信用卡' => ['xuzong1', 'xuzong2'], 'PayPal' => [],
                 '叶总支付' => ['ye'], 'Worldpay' => ['worldpay'], default => null,
             };
-            $sourceFilters = [...$filters, 'logistics_costs' => true, 'include_unmatched_fees' => true];
-            return (! $paypal || $projection->lossStream('paypal', $filters) !== null || $sources->ready('paypal', $sourceFilters))
-                && ($platforms === [] || $projection->lossStream('credit_card', $filters, $platforms ?? []) !== null
+            $sourceFilters = [...$filters, 'logistics_costs' => true, 'include_unmatched_fees' => true, 'summary_shared_source' => true];
+            return (! $paypal || $projection->lossStream('paypal', $sourceFilters) !== null || $sources->ready('paypal', $sourceFilters))
+                && ($platforms === [] || $projection->lossStream('credit_card', $sourceFilters, $platforms ?? []) !== null
                     || $sources->ready('credit_card', $platforms === null ? $sourceFilters : [...$sourceFilters, 'summary_payment_channels' => $platforms]));
         }
         $transactions = ($query['view'] ?? '') === 'transactions';
@@ -3483,7 +3510,7 @@ class FinanceController extends Controller
             'paypal' => ['paypal'], 'xuzong', 'credit_card' => ['xuzong1', 'xuzong2'],
             'xuzong1', 'xuzong2', 'ye', 'worldpay' => [$selected], default => ['paypal', 'xuzong1', 'xuzong2', 'ye', 'worldpay'],
         };
-        $sourceFilters = [...$filters, 'logistics_costs' => $transactions, 'include_unmatched_fees' => true];
+        $sourceFilters = [...$filters, 'logistics_costs' => true, 'include_unmatched_fees' => true, 'summary_shared_source' => true];
         $sourceAccount = null;
         if ($transactions) {
             $sourceFilters['summary_native_settlement'] = true;
@@ -3505,7 +3532,8 @@ class FinanceController extends Controller
             if ($platforms === []) continue;
             $scopeFilters = [...$sourceFilters, 'timezone' => $zone];
             if ($channel === 'credit_card') $scopeFilters['summary_payment_channels'] = $platforms;
-            if ($projection->stream($channel, $scopeFilters, $transactions, paymentChannels: $platforms) === null && ! $sources->ready($channel, $scopeFilters)) return false;
+            $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($scopeFilters);
+            if ($projection->stream($channel, $canonical, false, paymentChannels: $platforms) === null && ! $sources->ready($channel, $scopeFilters)) return false;
         }
         return true;
     }
@@ -3520,15 +3548,19 @@ class FinanceController extends Controller
             if ($selected === []) {
                 continue;
             }
-            $sourceFilters = [...$filters, 'timezone' => $zone];
+            $sourceFilters = [...$filters, 'timezone' => $zone, 'summary_shared_source' => true];
             if ($channel === 'credit_card') {
                 $sourceFilters['summary_payment_channels'] = array_values($selected);
             }
+            $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($sourceFilters);
             $projection = app(\App\Portals\Finance\FinanceSummaryProjection::class)
-                ->stream($channel, $sourceFilters, $transactions, paymentChannels: $selected, aggregateTransactions: $aggregateTransactions);
+                ->stream($channel, $canonical, false, paymentChannels: $selected);
             $source = $projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, $transactions,
                 fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters, $transactions), $options);
             foreach ($source as $row) {
+                if ($projection !== null && ! empty($sourceFilters['summary_native_settlement'])) {
+                    $row = \App\Portals\Finance\FinanceSummarySourceCache::nativeRow($row);
+                }
                 if (in_array($row['payment_channel'], $selected, true)) {
                     yield $row;
                 }
@@ -3541,7 +3573,7 @@ class FinanceController extends Controller
         $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai',
-            'logistics_costs' => $report === 'losses', 'include_unmatched_fees' => true];
+            'logistics_costs' => true, 'include_unmatched_fees' => true, 'summary_shared_source' => true];
         if ($span = request()->attributes->get('finance.source_span')) [$filters['from'], $filters['to']] = $span;
         if ($report === 'summary') $filters['summary_settlement_only'] = true;
         $filterOptions = [];

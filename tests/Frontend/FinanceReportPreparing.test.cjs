@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+
 const source = fs.readFileSync('public/assets/erp/finance-report-preparing.js', 'utf8');
 
 function harness(fail = false) {
@@ -40,4 +41,72 @@ test('does not add requests to other financial pages', async () => {
     const url = 'http://caiwu.kky.com/finance/reports/paypal-settlement';
     assert.equal(await prepare(url), url);
     assert.equal(calls.length, 0);
+});
+
+test('retry resumes at the failed part without repeating successful requests', async () => {
+    const handlers = {};
+    const calls = [];
+    const navigations = [];
+    const status = {};
+    const retry = { addEventListener: (name, handler) => { handlers[name] = handler; } };
+    let failSecond = true;
+    let finishFirst;
+    const first = new Promise(resolve => { finishFirst = resolve; });
+    const plan = { concurrency: 2, months: [{ month: '09 01—07', url: '/part/1' }, { month: '09 08—14', url: '/part/2' },
+        { month: '09 15—21', url: '/part/3' }], resume_url: '/report/complete' };
+    const document = { querySelector(selector) {
+        if (selector === '[data-finance-source-plan]') return { textContent: JSON.stringify(plan) };
+        if (selector === '[data-finance-source-progress]') return status;
+        if (selector === '[data-finance-source-retry]') return retry;
+    } };
+    const window = { location: { replace: url => navigations.push(url) } };
+    const fetch = async url => {
+        calls.push(url);
+        if (url === '/part/1') await first;
+        const failed = url === '/part/2' && failSecond;
+        return { ok: !failed, headers: { get: () => 'application/json' },
+            json: async () => failed ? { message: '暂时失败' } : { state: 'ready' } };
+    };
+    vm.runInNewContext(source, { document, window, fetch, URL });
+    // A failure cannot enable retry while the other request is still running.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(retry.hidden, true);
+    assert.deepEqual(navigations, []);
+    finishFirst();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(status.textContent, '暂时失败');
+    assert.equal(retry.hidden, false);
+    assert.deepEqual(calls, ['/part/1', '/part/2']);
+    assert.deepEqual(navigations, []);
+    failSecond = false;
+    await handlers.click();
+    assert.deepEqual(calls, ['/part/1', '/part/2', '/part/2', '/part/3']);
+    assert.deepEqual(navigations, ['/report/complete']);
+});
+
+test('parallel preparation is bounded and does not finish before every part succeeds', async () => {
+    const pending = [];
+    const calls = [];
+    const plan = { concurrency: 99, months: [1, 2, 3].map(id => ({ month: String(id), url: '/part/' + id })),
+        resume_url: '/complete' };
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    vm.runInNewContext(source, { document: { querySelector: () => null }, window, URL, fetch: async url => {
+        if (url.includes('_finance_plan')) return { ok: true, headers: { get: () => 'application/json' }, json: async () => plan };
+        calls.push(url);
+        return await new Promise(resolve => pending.push(() => resolve({ ok: true, headers: { get: () => 'application/json' },
+            json: async () => ({ state: 'ready' }) })));
+    } });
+    let finished = false;
+    const report = window.financePrepareReport(window.location.href).then(url => { finished = true; return url; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['/part/1', '/part/2']);
+    pending.shift()();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['/part/1', '/part/2', '/part/3']);
+    assert.equal(finished, false);
+    pending.shift()();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(finished, false);
+    pending.shift()();
+    assert.equal(await report, '/complete');
 });

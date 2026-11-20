@@ -71,6 +71,6 @@ class FinanceLiveSourceChanges
 
     private static function changed(array $columns): string
     {
-        return 'NOT ('.implode(' AND ', array_map(fn ($column) => "OLD.`{$column}` <=> NEW.`{$column}`", $columns)).')';
+        return 'NOT ('.implode(' AND ', array_map(fn ($column) => "BINARY OLD.`{$column}` <=> BINARY NEW.`{$column}`", $columns)).')';
     }
 }
