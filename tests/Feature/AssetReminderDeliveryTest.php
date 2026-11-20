@@ -30,7 +30,7 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame('2026-11-18', $run->data_date);
         $this->assertCount(2, json_decode($run->department_ids, true));
         Http::assertSentCount(3); // one token, one group listing, one message
-        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['msgtype'] === 'markdown' && str_contains($r['markdown']['text'], '广告费提交提醒'));
+        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['msgtype'] === 'markdown' && str_contains($r['markdown']['text'], '广告费业绩提报提醒'));
         $this->assertNull($run->process_key); // Webhook has no delivery tracking key.
     }
 

@@ -164,7 +164,7 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(2, $summary['count']);
         $this->get($this->remindersUrl.'?department_id='.$this->teamB->id)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
         $preview = $this->getJson($this->remindersUrl.'/rules/'.$id.'/preview')->assertOk();
-        $this->assertStringContainsString('广告费提交提醒', $preview->json('message'));
+        $this->assertStringContainsString('广告费业绩提报提醒', $preview->json('message'));
         $this->postJson($this->remindersUrl.'/rules/'.$id.'/test', ['confirmed' => true])->assertOk();
         $this->assertCount(2, json_decode(DB::table('asset_reminder_runs')->first()->department_ids, true));
         $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group, ['department_id' => $this->teamB->id]))->assertUnprocessable();
