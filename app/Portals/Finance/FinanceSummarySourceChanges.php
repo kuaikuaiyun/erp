@@ -48,6 +48,7 @@ class FinanceSummarySourceChanges
     public static function install(Connection $db): void
     {
         if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) return;
+        FinanceSummaryTriggers::assertCanInstall($db);
         app('request')->attributes->remove('finance.scoped-tracking:'.$db->getName().':'.$db->getDatabaseName());
         $attribution = [
             (new \App\Models\AdminUser)->getTable() => 'attribution_user',

@@ -122,6 +122,31 @@ class FinanceScopedSourceMySqlTest extends TestCase
         $this->assertSame($detailVersion, app(FinanceSummaryDataVersion::class)->forCache(['credit_card']));
     }
 
+    public function test_trigger_repair_restores_an_interrupted_deployment_and_invalidates_the_gap(): void
+    {
+        $id = $this->record('2026-11-03', 'TRIGGER-REPAIR');
+        $before = $this->version('credit_card', '2026-11-01', '2026-11-07');
+        $this->db->unprepared('DROP TRIGGER finance_scope_record_update');
+        $this->db->unprepared('DROP TRIGGER finance_summary_dependency_item_update');
+        app('request')->attributes->remove('finance.scoped-tracking:'.$this->db->getName().':'.$this->db->getDatabaseName());
+        $this->db->table('finance_records')->where('id', $id)->update(['payload' => '{"amount":"20"}']);
+        $this->artisan('finance:summaries:repair-triggers')->assertSuccessful();
+        $this->assertTrue(FinanceSummarySourceChanges::available($this->db));
+        $this->assertNotSame($before, $this->version('credit_card', '2026-11-01', '2026-11-07'));
+        $this->assertSame(1, $this->db->table('finance_records')->count());
+        $this->assertSame(['amount' => '20'], json_decode($this->db->table('finance_records')->where('id', $id)->value('payload'), true, 512, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, $this->db->table('information_schema.TRIGGERS')->whereRaw('TRIGGER_SCHEMA = DATABASE()')
+            ->where('TRIGGER_NAME', 'like', 'finance_install_probe_%')->count());
+    }
+
+    public function test_trigger_repair_is_a_noop_when_tracking_is_complete(): void
+    {
+        $this->record('2026-11-03', 'ALREADY-COMPLETE');
+        $before = $this->version('credit_card', '2026-11-01', '2026-11-07');
+        $this->artisan('finance:summaries:repair-triggers')->assertSuccessful();
+        $this->assertSame($before, $this->version('credit_card', '2026-11-01', '2026-11-07'));
+    }
+
     public function test_detail_counts_refresh_on_real_edits_but_keep_other_channels_and_old_query_results(): void
     {
         $id = $this->record('2026-11-03', 'DETAIL-COUNT');

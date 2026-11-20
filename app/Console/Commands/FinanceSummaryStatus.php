@@ -29,6 +29,9 @@ class FinanceSummaryStatus extends Command
             ['后台最后记录', json_encode(Cache::get('finance:summaries:worker-status'), JSON_UNESCAPED_UNICODE)],
         ]);
         $this->line('多台 Web 服务器须将 FINANCE_SUMMARY_SOURCE_CACHE_PATH 指向同一持久目录；发布时保留该目录。');
+        if (! $tracking || ! $scoped) {
+            $this->warn('若迁移遇到 MySQL 1419，请先由数据库管理员修复触发器创建权限，再执行 migrate --force 和 finance:summaries:repair-triggers。');
+        }
         return $tracking && $scoped && $writable ? self::SUCCESS : self::FAILURE;
     }
 }

@@ -10,6 +10,7 @@ return new class extends Migration
     public function up(): void
     {
         $db = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        \App\Portals\Finance\FinanceSummaryTriggers::assertCanInstall($db);
         $schema = $db->getSchemaBuilder();
         if (! $schema->hasTable(FinanceSummarySourceChanges::TABLE)) $schema->create(FinanceSummarySourceChanges::TABLE, function (Blueprint $table): void {
             $table->engine = 'InnoDB';
