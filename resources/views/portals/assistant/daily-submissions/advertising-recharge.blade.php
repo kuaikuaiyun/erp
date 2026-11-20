@@ -3,6 +3,69 @@
 @push('styles')
 <style>.review-filter,.review-list,.recharge-statistics{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.review-toolbar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}.review-toolbar .form-group{margin:0}.review-toolbar label{display:block;font-size:12px;color:#687f92;margin-bottom:5px}.review-toolbar .form-control,.review-toolbar .btn{height:36px;border-radius:6px}.review-table{min-width:1650px;margin:0}.review-table th{background:#e8f2f8;color:#31536b;text-align:center}.review-table td{vertical-align:middle!important}.review-table tbody tr.pending>td{background:#fffaf0}.entry-detail{min-width:1200px;margin:0;background:#fff}.entry-detail th{padding:5px 8px!important;font-size:12px;white-space:nowrap;background:#f1f6f9!important}.entry-detail td{padding:7px 8px!important;background:#fff!important;white-space:nowrap}.entry-detail .amount{font-weight:700;color:#d9534f;text-align:right}.status-pill{display:inline-block;padding:5px 11px;border-radius:15px;font-size:12px}.status-pill.pending{background:#fff0c2;color:#986700}.status-pill.processed{background:#dff5e9;color:#18784c}.status-pill.rejected{background:#fde2e2;color:#b42318}.entry-actions{display:flex;gap:5px;align-items:flex-start}.entry-reject{display:flex;gap:5px}.entry-reject .form-control{width:150px;height:26px;padding:3px 6px}.recharge-statistics .box-header{padding:16px 19px}.recharge-statistics .box-title small{margin-left:8px;color:#8193a2}.recharge-stat-summary{float:right;color:#25805f;font-size:12px}.recharge-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:4px 28px;padding:12px 20px 20px}.recharge-stat-item{display:block;width:100%;border:0;background:#fff;padding:9px 0 8px;text-align:left;color:#31324d}.recharge-stat-item:hover,.recharge-stat-item:focus{color:#16825f;outline:0}.recharge-stat-line{display:flex;align-items:center;justify-content:space-between;gap:12px}.recharge-stat-name{font-weight:700}.recharge-stat-value{color:#62677f;font-size:12px;white-space:nowrap}.recharge-stat-arrow{margin-left:8px;color:#1dad7a}.recharge-stat-track{height:7px;margin-top:7px;border-radius:5px;background:#ece8f4;overflow:hidden}.recharge-stat-bar{height:100%;min-width:0;border-radius:5px;background:#25b981}.recharge-stat-item.is-empty .recharge-stat-arrow{color:#a7b2bc}.recharge-detail-modal .modal-content{border:0;border-radius:13px;overflow:hidden}.recharge-detail-modal .modal-header{padding:20px 24px;border-bottom:1px solid #e6edf1}.recharge-detail-modal .modal-title small{display:block;margin-bottom:8px;color:#19835f;font-weight:700}.recharge-detail-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 24px;background:#f5faf8}.recharge-detail-summary>div{padding:11px;border:1px solid #d8e9e2;border-radius:8px;background:#fff}.recharge-detail-summary span{display:block;color:#7a8b87;font-size:12px}.recharge-detail-summary strong{display:block;margin-top:5px;font-size:20px;color:#17263d}.recharge-detail-list{max-height:55vh;overflow:auto;padding:18px 24px}.recharge-detail-item{padding:13px 0;border-bottom:1px solid #edf1f3}.recharge-detail-head{display:flex;justify-content:space-between;gap:15px}.recharge-detail-person{font-weight:700;color:#25354a}.recharge-detail-amount{font-size:18px;font-weight:700;color:#07945f}.recharge-detail-meta{margin-top:3px;color:#8493a1;font-size:12px}.recharge-detail-account{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px}.recharge-detail-account>div{padding:8px 10px;border:1px solid #dce5ed;border-radius:7px;background:#f8fafc}.recharge-detail-account span{display:block;color:#8090a0;font-size:11px}.recharge-detail-empty{padding:35px;text-align:center;color:#8999a7}@media(max-width:900px){.recharge-stat-grid{grid-template-columns:1fr}.recharge-stat-summary{float:none;display:block;margin-top:8px}.recharge-detail-account{grid-template-columns:1fr}}</style>
 @endpush
+@push('scripts')
+<script>
+(function ($) {
+    var activeForm = null;
+    var activeButton = null;
+    var activeButtonHtml = '';
+    var activeButtonDisabled = false;
+    var modal = $('#rechargeRejectModal');
+    var reason = $('#rechargeRejectReason');
+
+    $('.entry-reject').each(function () {
+        this.removeAttribute('onsubmit');
+        var response = this.querySelector('[name="response_text"]');
+        if (response) response.required = false;
+    });
+
+    document.addEventListener('submit', function (event) {
+        if (! event.target.matches('.entry-reject')) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        activeForm = event.target;
+        activeButton = activeForm.querySelector('button[type="submit"], button:not([type])');
+        activeButtonHtml = activeButton ? activeButton.innerHTML : '';
+        activeButtonDisabled = activeButton ? activeButton.disabled : false;
+        reason.val(activeForm.querySelector('[name="response_text"]').value || '');
+        modal.modal('show');
+        window.setTimeout(function () { reason.trigger('focus'); }, 180);
+    }, true);
+
+    $('#rechargeRejectConfirm').on('click', function () {
+        var value = $.trim(reason.val());
+        if (! value) {
+            reason.focus();
+            return;
+        }
+        if (! activeForm) return;
+        var form = activeForm;
+        form.querySelector('[name="response_text"]').value = value;
+        this.disabled = true;
+        modal.modal('hide');
+        form.submit();
+    });
+
+    modal.on('hidden.bs.modal', function () {
+        if (activeButton) {
+            activeButton.disabled = activeButtonDisabled;
+            activeButton.innerHTML = activeButtonHtml;
+        }
+        activeForm = null;
+        activeButton = null;
+        activeButtonHtml = '';
+        reason.val('');
+        $('#rechargeRejectConfirm').prop('disabled', false);
+    });
+})(jQuery);
+</script>
+@endpush
+@push('styles')
+<style>
+.entry-reject .form-control{display:none}
+.recharge-reject-modal .modal-content{border:0;border-radius:12px;overflow:hidden}.recharge-reject-modal .modal-header{padding:16px 20px;background:#fff5f5;border-bottom:1px solid #f3d6d6}.recharge-reject-modal .modal-title{color:#b93838;font-weight:600}.recharge-reject-modal .modal-body{padding:20px}.recharge-reject-reason{min-height:120px;padding:10px 12px;line-height:1.6;resize:vertical;border-color:#d9a7a7}.recharge-reject-reason:focus{border-color:#d9534f;box-shadow:0 0 0 2px rgba(217,83,79,.15)}.recharge-reject-hint{margin:8px 0 0;color:#8b6b6b;font-size:12px}
+</style>
+@endpush
 @section('content')
 <section class="content-header"><h1>广告充值处理 <small>查看并处理运营提交的广告充值信息</small></h1></section><section class="content">@if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
 <div class="box review-filter"><div class="box-body"><form class="review-toolbar" method="get"><div class="form-group"><label>运营部门</label><select class="form-control" name="operation_department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{ $department->id }}" @selected((string)($filters['operation_department_id']??'')===(string)$department->id)>{{ $department->name }}</option>@endforeach</select></div><div class="form-group"><label>状态</label><select class="form-control" name="status"><option value="">全部</option><option value="pending" @selected(($filters['status']??'')==='pending')>未处理</option><option value="processed" @selected(($filters['status']??'')==='processed')>已处理</option><option value="rejected" @selected(($filters['status']??'')==='rejected')>已驳回</option></select></div><div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from']??'' }}"></div><div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to']??'' }}"></div><div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $filters['operator']??'' }}" placeholder="输入姓名"></div><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.daily-submissions.advertising-recharges.index') }}">重置</a></form></div></div>
@@ -25,7 +88,7 @@
                         <td>{{ $entry['processed_by_name']??($entryStatus!=='pending'?$item->processed_by_name:null)?:'—' }}@if(!empty($entry['processed_at']))<br><small>{{ $entry['processed_at'] }}</small>@elseif($entryStatus!=='pending'&&$item->processed_at)<br><small>{{ $item->processed_at->format('Y-m-d H:i') }}</small>@endif</td>
                         <td>@if($entryStatus==='pending')<div class="entry-actions">
                             <form method="post" action="{{ route('assistant.daily-submissions.advertising-recharges.process',$item) }}" onsubmit="return confirm('确认处理当前这条广告充值明细？')">@csrf @method('PATCH')<input type="hidden" name="entry_index" value="{{ $entryIndex }}"><input type="hidden" name="decision" value="processed"><button class="btn btn-xs btn-success"><i class="fa fa-check"></i> 处理</button></form>
-                            <form class="entry-reject" method="post" action="{{ route('assistant.daily-submissions.advertising-recharges.process',$item) }}" onsubmit="return confirm('确认驳回当前这条明细？驳回后不计入充值统计。')">@csrf @method('PATCH')<input type="hidden" name="entry_index" value="{{ $entryIndex }}"><input type="hidden" name="decision" value="rejected"><input class="form-control input-sm" name="response_text" maxlength="5000" required placeholder="驳回原因"><button class="btn btn-xs btn-danger"><i class="fa fa-times"></i> 驳回</button></form>
+                            <form class="entry-reject" method="post" action="{{ route('assistant.daily-submissions.advertising-recharges.process',$item) }}" data-loading="off" onsubmit="return confirm('确认驳回当前这条明细？驳回后不计入充值统计。')">@csrf @method('PATCH')<input type="hidden" name="entry_index" value="{{ $entryIndex }}"><input type="hidden" name="decision" value="rejected"><input class="form-control input-sm" name="response_text" maxlength="5000" required placeholder="驳回原因"><button class="btn btn-xs btn-danger"><i class="fa fa-times"></i> 驳回</button></form>
                         </div>@else — @endif</td>
                     </tr>
                 @endforeach</tbody></table>
@@ -33,6 +96,7 @@
         @empty<tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>@endforelse</tbody>
     </table></div>@if($submissions->hasPages())<div class="box-footer">{{ $submissions->links() }}</div>@endif
 </div></section>
+<div class="modal fade recharge-reject-modal" id="rechargeRejectModal" tabindex="-1" role="dialog" aria-labelledby="rechargeRejectTitle"><div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" id="rechargeRejectTitle"><i class="fa fa-times-circle"></i> 驳回充值明细</h4></div><div class="modal-body"><label for="rechargeRejectReason">驳回原因 <span class="text-danger">*</span></label><textarea id="rechargeRejectReason" class="form-control recharge-reject-reason" maxlength="5000" placeholder="请填写驳回原因"></textarea><p class="recharge-reject-hint">驳回后，该条明细不会计入充值统计。</p></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="button" class="btn btn-danger" id="rechargeRejectConfirm"><i class="fa fa-times"></i> 确认驳回</button></div></div></div></div>
 <style>.recharge-select{width:42px;display:flex;align-items:flex-start;padding-top:4px}.recharge-select input{width:18px;height:18px;cursor:pointer}.recharge-detail-item.is-processed{opacity:.67;background:#f8faf9}.recharge-detail-toolbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-top:1px solid #e5edf1;background:#fbfcfd}.recharge-confirm-list{max-height:240px;overflow:auto;padding:10px 15px;border:1px solid #e2e9ee;border-radius:7px;background:#f8fafc}.recharge-confirm-list div{padding:6px 0;border-bottom:1px dashed #dce5eb}.recharge-confirm-list div:last-child{border:0}</style>
 <div class="modal fade recharge-detail-modal" id="rechargeDetailModal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" id="rechargeDetailTitle"></h4></div><div id="rechargeDetailBody"></div><div class="recharge-detail-toolbar"><label style="margin:0"><input type="checkbox" id="rechargeSelectAll"> 全选未处理记录</label><button type="button" class="btn btn-success" id="rechargeProcessSelected" disabled><i class="fa fa-check-square-o"></i> 处理选中并发送消息</button></div></div></div></div>
 <div class="modal fade" id="rechargeSendConfirmModal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-envelope"></i> 确认处理并发送消息</h4></div><div class="modal-body"><p>以下 <strong id="rechargeConfirmCount">0</strong> 条记录将标记为已处理，并向对应的日常提报运营人员发送站内消息：</p><div class="recharge-confirm-list" id="rechargeConfirmList"></div><p class="text-warning" style="margin:12px 0 0"><i class="fa fa-info-circle"></i> 提交后不能撤销，请核对后再确认。</p></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">返回检查</button><button type="button" class="btn btn-success" id="rechargeConfirmSend"><i class="fa fa-send"></i> 确认处理并发送</button></div></div></div></div>
