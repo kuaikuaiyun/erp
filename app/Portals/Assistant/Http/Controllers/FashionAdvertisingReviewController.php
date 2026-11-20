@@ -165,7 +165,7 @@ class FashionAdvertisingReviewController extends Controller
             ->orderByDesc('report_date')->orderByDesc('id')->paginate($filters['per_page'])->withQueryString();
 
         $performanceCache = [];
-        $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache): FashionAdvertisingReport {
+        $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache, $project): FashionAdvertisingReport {
             if ($report->project_code !== 'fuzhuang') {
                 $spend = (float) $report->total_ad_spend_usd;
                 $report->setAttribute('fashion_order_count', (int) $report->total_order_count);
@@ -191,13 +191,17 @@ class FashionAdvertisingReviewController extends Controller
                         }
                     })
                     ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+                    ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
                     ->pluck('id');
-                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')->utc();
-                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')->utc();
+                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')
+                    ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')
+                    ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
                 $metrics = FashionLogisticsOrder::query()
                     ->whereIn('assistant_domain_store_id', $storeIds)
                     ->whereIn('source_platform', ['xshoppy', 'shopline'])
-                    ->whereBetween('order_created_at', [$from, $to])
+                    ->whereNotNull('paid_at_utc')
+                    ->whereBetween('paid_at_utc', [$from, $to])
                     ->selectRaw('source_platform, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
                     ->groupBy('source_platform')->get();
                 $platformRows = $metrics->map(fn ($metric): array => [
@@ -268,7 +272,7 @@ class FashionAdvertisingReviewController extends Controller
         }
         $this->assertReportVisible($report, $context['user']);
         $report->load(['adSpendEntries', 'submitter.departments']);
-        $this->loadPerformanceMetrics($report);
+        $this->loadPerformanceMetrics($report, OperationProjectCatalog::get((string) $report->project_code));
         $context['portal']->loadMissing('menus');
 
         return view('portals.assistant.fashion-advertising-reviews.show', [...$context, 'report' => $report]);
@@ -492,7 +496,8 @@ class FashionAdvertisingReviewController extends Controller
             ->exists(), 403);
     }
 
-    private function loadPerformanceMetrics(FashionAdvertisingReport $report): void
+    /** @param array{code:string,name:string,route:string,path:string,departments:list<string>,store_projects:list<string>} $project */
+    private function loadPerformanceMetrics(FashionAdvertisingReport $report, array $project): void
     {
         $submitterNames = collect([$report->submitter?->name, $report->submitter?->username])
             ->filter()->map(fn ($name) => mb_strtolower(trim((string) $name)))->unique()->values();
@@ -502,11 +507,15 @@ class FashionAdvertisingReviewController extends Controller
                 if ($submitterNames->isNotEmpty()) {
                     $owner->orWhereIn(DB::raw('LOWER(TRIM(user_name))'), $submitterNames->all());
                 }
-            })->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")->pluck('id');
-        $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')->utc();
-        $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')->utc();
+            })->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
+            ->pluck('id');
+        $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $platformRows = FashionLogisticsOrder::query()->whereIn('assistant_domain_store_id', $storeIds)
-            ->whereIn('source_platform', ['xshoppy', 'shopline'])->whereBetween('order_created_at', [$from, $to])
+            ->whereIn('source_platform', ['xshoppy', 'shopline'])->whereNotNull('paid_at_utc')->whereBetween('paid_at_utc', [$from, $to])
             ->selectRaw('source_platform, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')->groupBy('source_platform')->get()
             ->map(fn ($metric): array => ['platform' => mb_strtolower((string) $metric->source_platform) === 'shopline' ? 'Shopline' : 'XShoppy', 'orders' => (int) $metric->order_count, 'revenue' => round((float) $metric->revenue, 2)])->values();
         $orders = (int) $platformRows->sum('orders');
