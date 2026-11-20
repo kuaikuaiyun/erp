@@ -339,6 +339,8 @@ class AppLovinAccountStatisticsController extends Controller
             }
             $start = \Carbon\CarbonImmutable::parse($account['date'], 'Asia/Shanghai');
             $reachDays = $reachDate ? $start->diffInDays(\Carbon\CarbonImmutable::parse($reachDate, 'Asia/Shanghai')) + 1 : null;
+            $reach5000Days = $reach5000Date ? $start->diffInDays(\Carbon\CarbonImmutable::parse($reach5000Date, 'Asia/Shanghai')) + 1 : null;
+            $over5000Days = $over5000Date ? $start->diffInDays(\Carbon\CarbonImmutable::parse($over5000Date, 'Asia/Shanghai')) + 1 : null;
             $ratio = static fn (array $band): ?float => $band['spend'] > 0 ? $band['revenue'] / $band['spend'] : null;
             $storeDomains = collect($account['store_domains'] ?? [])->values()->filter()->unique(fn ($domain) => mb_strtolower((string) $domain))->implode('、');
             $storePerformance = (float) $entries->sum('revenue');
@@ -352,12 +354,17 @@ class AppLovinAccountStatisticsController extends Controller
                 ? (float) ($bands['to_2500']['revenue'] + $bands['2500_to_5000']['revenue'])
                 : null;
             $over5000Performance = $over5000Date ? (float) $bands['over_5000']['revenue'] : null;
+            $reach2500Spend = $reachDate ? (float) $bands['to_2500']['spend'] : null;
+            $reach5000Spend = $reach5000Date
+                ? (float) ($bands['to_2500']['spend'] + $bands['2500_to_5000']['spend'])
+                : null;
+            $over5000Spend = $over5000Date ? (float) $bands['over_5000']['spend'] : null;
             $isBelowTarget = ($reach2500Roi !== null && $reach2500Roi > 0 && $reach2500Roi < 1.2)
                 || ($midRoi !== null && $midRoi > 0 && $midRoi < 1.3)
                 || ($overRoi !== null && $overRoi > 0 && $overRoi < 1.4);
             // array_merge is intentional: the activation payload holds domains as an
             // array while the table needs a displayable string.
-            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'over_5000_date' => $over5000Date, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
+            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
         })->values();
     }
 
