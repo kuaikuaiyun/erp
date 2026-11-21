@@ -10,6 +10,12 @@ use Tests\TestCase;
 
 class AssistantDomainStoreCreateRulesTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        app()->setLocale('zh-CN');
+    }
+
     private function rules(string $method): array
     {
         $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
@@ -55,9 +61,11 @@ class AssistantDomainStoreCreateRulesTest extends TestCase
         self::assertFalse(Validator::make($data, $this->rules('importRules'))->fails());
     }
 
-    private function form(string $mode, mixed $emailBound = null): \DOMXPath
+    private function form(string $mode, mixed $emailBound = null, array $errors = []): \DOMXPath
     {
-        app('view')->share('errors', new ViewErrorBag());
+        $bag = new ViewErrorBag();
+        $bag->put('default', new \Illuminate\Support\MessageBag($errors));
+        app('view')->share('errors', $bag);
         $store = new AssistantDomainStore([
             'email_bound' => $emailBound,
             'domain_check_status' => AssistantDomainStore::DOMAIN_CHECK_NOT_CHECKED,
@@ -108,5 +116,37 @@ class AssistantDomainStoreCreateRulesTest extends TestCase
         $xpath = $this->form('create');
         self::assertSame('0', $xpath->evaluate('string(//input[@name="email_bound"]/@value)'));
         self::assertSame(1, $xpath->query('//input[@name="email_bound"]/../button[@data-option-value="0"][contains(@class,"is-selected")]')->length);
+    }
+
+    public function test_form_renders_all_backend_errors_and_translated_request_messages(): void
+    {
+        $xpath = $this->form('create', null, [
+            'shop_name' => ['请填写店铺名称。'],
+            'email' => ['邮箱格式不正确。', '<script>unsafe()</script>'],
+        ]);
+        self::assertSame(3, $xpath->query('//*[@data-store-validation-summary]//li')->length);
+        self::assertSame(1, $xpath->query('//form[@novalidate]')->length);
+        $settings = json_decode($xpath->evaluate('string(//script[@data-store-validation-config])'), true);
+        self::assertSame('请修正以下填写内容后再保存：', $settings['title']);
+        foreach (['network', 'session', 'permission', 'server', 'timeout', 'unexpected'] as $key) {
+            self::assertNotEmpty($settings[$key]);
+            self::assertStringNotContainsString('assistant.domain_stores.', $settings[$key]);
+        }
+        self::assertSame(0, $xpath->query('//*[@data-store-validation-summary]//script')->length);
+    }
+
+    public function test_backend_errors_use_readable_field_labels(): void
+    {
+        $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
+        try {
+            (new \ReflectionMethod($controller, 'validatedData'))->invoke(
+                $controller, \Illuminate\Http\Request::create('/', 'POST', []), null,
+            );
+            self::fail('An empty create request must fail validation.');
+        } catch (\Illuminate\Validation\ValidationException $error) {
+            self::assertStringContainsString('域名到期时间', $error->errors()['domain_expires_at'][0]);
+            self::assertStringContainsString('建站系统', $error->errors()['site_builder'][0]);
+            self::assertStringNotContainsString('domain_expires_at', $error->errors()['domain_expires_at'][0]);
+        }
     }
 }

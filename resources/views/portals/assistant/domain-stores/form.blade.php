@@ -52,6 +52,21 @@
         'loading' => $t('email_purchase_status.checking'),
         'failed' => $t('email_purchase_status.lookup_failed'),
     ];
+    $storeValidationConfig = [
+        'title' => $t('validation.summary_title'),
+        'required' => $t('validation.required_field', ['field' => ':field']),
+        'invalid' => $t('validation.invalid_field', ['field' => ':field']),
+        'session' => $t('validation.session_expired'),
+        'permission' => $t('validation.permission_denied'),
+        'network' => $t('validation.network_failed'),
+        'timeout' => $t('validation.request_timeout'),
+        'server' => $t('validation.server_failed'),
+        'missing' => $t('validation.record_missing'),
+        'conflict' => $t('validation.request_conflict'),
+        'tooLarge' => $t('validation.request_too_large'),
+        'tooMany' => $t('validation.too_many_requests'),
+        'unexpected' => $t('validation.unexpected_response'),
+    ];
     $ownerAssignmentJavascriptConfig = [
         'candidates' => $ownerCandidatesByDepartment ?? [],
         'selectedDepartmentId' => ($ownerIsReserve ?? false) ? 'reserve' : ($ownerOperationDepartmentId ?? null),
@@ -77,7 +92,14 @@
     @endunless
 
     <section class="{{ $isModalForm ? 'assistant-modal-form-content' : 'content' }} assistant-domain-stores-page">
-        <form method="post" action="{{ $formAction }}" class="assistant-domain-store-form" @if ($isModalForm) data-modal-form novalidate @endif>
+        <form method="post" action="{{ $formAction }}" class="assistant-domain-store-form" novalidate @if ($isModalForm) data-modal-form @endif>
+            <script type="application/json" data-store-validation-config>@json($storeValidationConfig)</script>
+            @if($errors->any())
+                <div class="alert alert-danger" role="alert" data-store-validation-summary>
+                    <strong>{{ $t('validation.summary_title') }}</strong>
+                    <ul>@foreach(array_unique($errors->all()) as $errorMessage)<li>{{ $errorMessage }}</li>@endforeach</ul>
+                </div>
+            @endif
             @csrf
             @if ($canAssignStoreOwner)
                 <script type="application/json" data-owner-form-config>@json($ownerAssignmentJavascriptConfig)</script>
@@ -652,7 +674,7 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261118-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-1"></script>
     <script>
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);

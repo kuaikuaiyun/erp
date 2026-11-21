@@ -368,6 +368,8 @@
     }
 
     function clearValidationErrors(form) {
+        if (window.ErpAssistantStoreValidation) window.ErpAssistantStoreValidation.clear(form[0]);
+        form.find('.assistant-modal-form-alert').remove();
         form.find('.assistant-modal-validation-error').remove();
         form.find('.form-group').removeClass('has-error assistant-modal-has-error');
     }
@@ -477,8 +479,12 @@
             refreshList().always(function () {
                 notify('success', response && response.message ? response.message : text('successTitle'));
             });
-        }).fail(function (xhr) {
-            showValidationErrors(form, xhr.responseJSON || null);
+        }).fail(function (xhr, status) {
+            if (window.ErpAssistantStoreValidation) {
+                window.ErpAssistantStoreValidation.failure(form[0], xhr, status);
+            } else {
+                showValidationErrors(form, xhr.responseJSON || null);
+            }
         }).always(function () {
             setSaving(form, false);
         });

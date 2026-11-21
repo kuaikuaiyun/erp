@@ -1361,6 +1361,9 @@ class DomainStoreController extends Controller
         $validated = $request->validate([
             'operation_department_id' => ['required', 'integer', 'min:1'],
             'owner_user_id' => ['required', 'integer', 'min:1'],
+        ], [], [
+            'operation_department_id' => __('assistant.domain_stores.fields.owner_operation_department'),
+            'owner_user_id' => __('assistant.domain_stores.fields.owner_user'),
         ]);
         $operationDepartmentId = isset($validated['operation_department_id'])
             ? (int) $validated['operation_department_id']
@@ -1747,7 +1750,12 @@ class DomainStoreController extends Controller
             }
         }
 
-        $data = $this->normalizeValidatedData($request->validate($ignoreStore === null ? $this->createRules() : $this->storeRules()));
+        $rules = $ignoreStore === null ? $this->createRules() : $this->storeRules();
+        $attributes = [];
+        foreach (array_keys($rules) as $field) {
+            $attributes[$field] = AssistantDomainStore::fieldLabel(explode('.', $field)[0]);
+        }
+        $data = $this->normalizeValidatedData($request->validate($rules, [], $attributes));
 
         if ($user !== null) {
             $this->ensureQuickOptionValuesAreAllowed($data, $user, $ignoreStore);
