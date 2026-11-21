@@ -200,8 +200,16 @@ class AdvertisingSpendAnalysisController extends Controller
             mb_strtolower($this->normalizeDimension((string) $agency->name, '')) === $agencyKey
             && mb_strtolower($this->normalizeDimension((string) $agency->advertisingMedia?->name, '')) === $mediaKey
         );
+        if ($matches->count() === 1) return $matches->first();
 
-        return $matches->count() === 1 ? $matches->first() : null;
+        // Historical JSON only stored names. If its media name was entered incorrectly
+        // but the agency has one unambiguous current configuration, use that agency's
+        // configured media ID/name for reporting without rewriting the historical row.
+        $agencyMatches = $agencies->filter(fn (AssistantAdvertisingAgency $agency): bool =>
+            mb_strtolower($this->normalizeDimension((string) $agency->name, '')) === $agencyKey
+        );
+
+        return $agencyMatches->count() === 1 ? $agencyMatches->first() : null;
     }
 
     private function resolveSelectedKey(string $selected, $options): string
