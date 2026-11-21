@@ -4,20 +4,20 @@ namespace App\Portals\Finance;
 
 class FinanceSummaryDependencies
 {
-    public function resolve(\Illuminate\Database\Connection $db): void
+    public function resolve(\Illuminate\Database\Connection $db): bool
     {
         if ($db->getSchemaBuilder()->hasTable(FinanceSummarySourceChanges::TABLE)
             && $db->getSchemaBuilder()->hasColumn('finance_summary_changes', 'scopes_resolved')) {
             $limit = max(1, min(1000, (int) config('finance.summaries.dependency_changes_per_run', 100)));
-            app(FinanceSummarySourceChanges::class)->publish($db, $limit);
+            $ready = app(FinanceSummarySourceChanges::class)->publish($db, $limit);
             // Acknowledging a change does not invalidate an already updated source range.
             $ids = $db->table('finance_summary_changes')->where('scopes_resolved', true)->orderBy('id')->limit($limit)->pluck('id');
             $db->table('finance_summary_changes')->whereIntegerInRaw('id', $ids->all())->delete();
-            return;
+            return $ready;
         }
         $pending = $db->table('finance_summary_changes');
         $sample = (clone $pending)->orderBy('id')->limit(1001)->pluck('id');
-        if ($sample->isEmpty()) return;
+        if ($sample->isEmpty()) return true;
         if ($sample->count() > 1000) {
             $lastId = $pending->max('id');
             // A large import can produce thousands of expensive dependency lookups.
@@ -28,7 +28,7 @@ class FinanceSummaryDependencies
                 $db->table('finance_summary_periods')->when($creditOnly, fn ($query) => $query->where('channel', 'credit_card'))->increment('revision');
                 $db->table('finance_summary_changes')->where('id', '<=', $lastId)->delete();
             });
-            return;
+            return ! $pending->exists();
         }
 
         // Bound the expensive matching work and leave concurrently arriving
@@ -55,6 +55,7 @@ class FinanceSummaryDependencies
                 $db->table('finance_summary_changes')->whereIntegerInRaw('id', $changes->pluck('id')->all())->delete();
             });
         });
+        return ! $pending->exists();
     }
 
     public function match(string $source, array $values, \Illuminate\Database\Connection $db): string

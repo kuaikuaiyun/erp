@@ -49,6 +49,21 @@ class FinanceRecord extends Model
         return $this;
     }
 
+    /** Report IDs may be negative aliases of persisted finance record IDs. */
+    public static function preloadSourceFields(\Illuminate\Support\Collection $records): void
+    {
+        $missing = $records->filter(fn ($record) => $record instanceof self && $record->exists
+            && ($record->attributes['payload'] ?? null) === null && $record->sourceFields === null);
+        if ($missing->isEmpty()) return;
+        $storage = app(\App\Portals\Finance\FinanceSourceStorage::class);
+        if (! $storage->active('record')) return;
+        foreach ($missing->chunk(500) as $batch) {
+            $fields = $storage->load('record', $batch->map(fn ($record) => abs($record->id))->unique()->values()->all());
+            foreach ($batch as $record) $record->withSourceFields($fields[abs($record->id)]
+                ?? throw new \RuntimeException('交易来源明细缺失。'));
+        }
+    }
+
     protected static function booted(): void
     {
         static::saved(fn (self $record) => app(\App\Portals\Finance\FinanceTransactions::class)->sync(collect([$record])));

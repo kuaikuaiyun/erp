@@ -6,8 +6,11 @@ return [
     ],
     'summaries' => [
         'paypal_rebuild_cooldown_seconds' => 300,
-        'dependency_changes_per_run' => 100,
+        'dependency_changes_per_run' => 1000,
         'notification_batch_size' => 50,
+        'notification_scan_limit' => 2000,
+        'notification_read_scan_limit' => 32,
+        'notification_seconds_per_run' => 5,
         // Used only by bounded source-row scans; smaller workers retain 500.
         'source_batch_size' => 2000,
         'source_request_concurrency' => 2,

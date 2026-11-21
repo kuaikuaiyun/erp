@@ -45,6 +45,28 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $cachePath = null;
     private Connection $db;
 
+    public function test_worker_reports_pending_and_skips_projection_when_notification_delivery_fails(): void
+    {
+        $notifications = new class extends \App\Portals\Finance\FinanceExternalChanges {
+            protected function openNotification(string $path, string $mode, ?string &$error)
+            {
+                if (str_starts_with(basename($path), 'change-')) { $error = 'Permission denied'; return false; }
+                return parent::openNotification($path, $mode, $error);
+            }
+        };
+        $this->app->instance(\App\Portals\Finance\FinanceExternalChanges::class, $notifications);
+        $ticket = $notifications->begin($this->db);
+        $notifications->commit($this->db, $ticket, [['source' => 'scope_user', 'values' => []]]);
+        $paypal = \Mockery::mock(\App\Portals\Finance\FinancePayPalSettlementProjection::class);
+        $paypal->shouldNotReceive('refresh');
+        $this->app->instance(\App\Portals\Finance\FinancePayPalSettlementProjection::class, $paypal);
+        $this->artisan('finance:summaries:refresh')->assertExitCode(1);
+        $status = \Illuminate\Support\Facades\Cache::get('finance:summaries:worker-status');
+        $this->assertStringContainsString('等待下轮重试', $status['stage']);
+        $this->assertFileExists($ticket['path']);
+        $this->assertSame('committed', json_decode(file_get_contents($ticket['path']), true)['state']);
+    }
+
     public function test_relational_sources_round_trip_events_nulls_types_and_unrecognized_fields(): void
     {
         (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();

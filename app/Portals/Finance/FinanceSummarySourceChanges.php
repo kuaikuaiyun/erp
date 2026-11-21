@@ -33,11 +33,12 @@ class FinanceSummarySourceChanges
     /** Resolve a bounded batch before certifying cached inputs. Queue deletion cannot change its revision. */
     public function publish(Connection $db, int $limit = 1000): bool
     {
-        if (! app(FinanceExternalChanges::class)->drain($db, $limit)) return false;
-        if (app('request')->attributes->get('finance.report_read_only')) {
-            return ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
+        if (FinanceExternalChanges::readOnly()) {
+            return $this->reportReady($db);
         }
-        if (! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists()) return true;
+        $filesReady = app(FinanceExternalChanges::class)->drain($db);
+        // Publish accepted batches even while more files remain, so every worker pass makes progress.
+        if (! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists()) return $filesReady;
         $ids = $db->table('finance_summary_changes')->where('scopes_resolved', false)->orderBy('id')->limit($limit)->pluck('id')->all();
         $db->transaction(function () use ($db, $ids): void {
             // Lock existing IDs only; a range lock would block new outbox inserts
@@ -84,7 +85,7 @@ class FinanceSummarySourceChanges
             }
             $db->table('finance_summary_changes')->whereIntegerInRaw('id', $changes->pluck('id')->all())->update(['scopes_resolved' => true]);
         }, 3);
-        return ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
+        return $filesReady && ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
     }
 
     private function scopes(Connection $db, string $source, array $values): array
