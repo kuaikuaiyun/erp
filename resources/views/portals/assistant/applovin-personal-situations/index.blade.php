@@ -22,9 +22,11 @@
     <div class="box aps-card aps-filter-box">
         <div class="box-body">
             <form method="get" class="aps-filter" id="aps-filter-form">
+                <input type="hidden" name="performance_sort" value="{{ $filters['performance_sort'] }}">
                 @include('portals.assistant.partials.operation-department-multi-filter', ['departments' => $departmentOptions, 'selectedIds' => $filters['department_ids'], 'inputName' => 'department_ids', 'label' => '运营部门'])
                 <div class="form-group"><label>人员 / 账户</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="搜索人员、账户名称或编号"></div>
                 <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button>
+                <a class="btn btn-info" href="{{ route('operation-dashboard.applovin-personal-situations.index', array_merge(request()->except(['page', 'performance_sort']), ['performance_sort' => $filters['performance_sort'] === 'desc' ? 'asc' : 'desc'])) }}"><i class="fa {{ $filters['performance_sort'] === 'desc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i> 店铺业绩{{ $filters['performance_sort'] === 'desc' ? '从高到低' : '从低到高' }}</a>
                 <a class="btn btn-default" href="{{ route('operation-dashboard.applovin-personal-situations.index') }}">重置</a>
             </form>
         </div>
