@@ -81,6 +81,7 @@ class AssetReminderCalendarsTest extends TestCase
 
     public function test_temporary_change_is_immediate_without_repeating_processed_round_or_catching_up(): void
     {
+        $this->hrMember($this->teamA);
         $this->reminderRule($this->reminderGroup()); $service = app(ReminderService::class);
         $this->assertSame(0, $service->process(now('Asia/Shanghai'))); // Work round one at 10:00.
         app(ReminderCalendarService::class)->save($this->hrActor, $this->values('2026-11', 'rest'));

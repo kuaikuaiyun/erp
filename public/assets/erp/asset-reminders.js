@@ -156,6 +156,7 @@
                 var selectedType = row.type || (notification ? 'submission' : 'advertising');
                 var typeSelect = field(grid, 'type', selectedType, choices(t.types).filter(function (choice) { return choice.id === selectedType; }));
                 typeSelect.disabled = !!id || !!notification;
+                if (selectedType === 'advertising') grid.appendChild(node('p', t.advertising_scope_hint, 'ar-hint ar-wide'));
                 if (row.type === 'recap') { status.value = '0'; grid.appendChild(node('p', t.recap_disabled, 'ar-hint ar-wide')); }
                 var group = field(grid, 'group_id', row.group_id, options.groups.map(function (g) { return {id: g.id, name: g.name}; }));
                 var attendance = field(grid, 'calendar_company_id', '', []);

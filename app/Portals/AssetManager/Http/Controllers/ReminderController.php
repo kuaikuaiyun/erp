@@ -156,7 +156,7 @@ class ReminderController extends Controller
         $rule = $this->service->record($c['user'], 'rules', $id, true);
         if ($rule->type === 'submission') return $this->notificationPreview($request, $id);
         try {
-            $data = $this->service->build([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), 1, false, true);
+            $data = $this->service->build([$rule], now('Asia/Shanghai')->startOfDay(), 1, false, true);
             return response()->json(['message' => $data['text']])->header('Cache-Control', 'no-store');
         } catch (\Throwable $e) {
             return response()->json(['message' => ReminderCheckException::from($e, ['stage' => 'preview', 'rule_id' => $id])->getMessage()], 422)->header('Cache-Control', 'no-store');
@@ -170,7 +170,7 @@ class ReminderController extends Controller
         if ($rule->type === 'submission') return response()->json(['message' => __('asset_reminders.notification_no_test')], 422);
         $request->validate(['confirmed' => ['required', 'accepted']], __('asset_reminders.validation'), __('asset_reminders.fields'));
         try {
-            $data = $this->service->deliver([$rule], now('Asia/Shanghai')->subDay()->startOfDay(), now('Asia/Shanghai')->format('H:i'), 1, true, $c['user']);
+            $data = $this->service->deliver([$rule], now('Asia/Shanghai')->startOfDay(), now('Asia/Shanghai')->format('H:i'), 1, true, $c['user']);
             return response()->json($data + ['message' => __('asset_reminders.test_sent')]);
         } catch (\Throwable $e) {
             return response()->json(['message' => ReminderCheckException::from($e, ['stage' => 'test', 'rule_id' => $id])->getMessage()], 422)->header('Cache-Control', 'no-store');

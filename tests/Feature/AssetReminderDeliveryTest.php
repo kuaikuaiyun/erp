@@ -18,6 +18,7 @@ class AssetReminderDeliveryTest extends TestCase
 
     public function test_scheduled_runs_merge_departments_and_are_idempotent(): void
     {
+        $this->hrMember($this->teamA);
         $group = $this->reminderGroup();
         $this->reminderRule($group, ['type' => 'advertising']);
         $this->reminderRule($group, ['type' => 'advertising', 'department_id' => $this->teamB->id]);
@@ -27,21 +28,21 @@ class AssetReminderDeliveryTest extends TestCase
         $this->assertSame(1, DB::table('asset_reminder_runs')->count());
         $run = DB::table('asset_reminder_runs')->first();
         $this->assertSame('accepted', $run->status);
-        $this->assertSame('2026-11-18', $run->data_date);
+        $this->assertSame('2026-11-19', $run->data_date);
         $this->assertCount(2, json_decode($run->department_ids, true));
         Http::assertSentCount(1); // Local calendar: only the Webhook message.
-        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['msgtype'] === 'markdown' && str_contains($r['markdown']['text'], '广告费业绩提报提醒'));
+        Http::assertSent(fn ($r) => $r->url() === $this->groupValues()['webhook'] && $r['msgtype'] === 'markdown' && str_contains($r['markdown']['text'], '广告费未提交提醒'));
         $this->assertNull($run->process_key); // Webhook has no delivery tracking key.
     }
 
-    public function test_advertising_never_queries_people_or_submission_tables(): void
+    public function test_advertising_counts_members_without_querying_dingtalk_attendance(): void
     {
         $this->reminderRule($this->reminderGroup(), ['type' => 'advertising']);
         $this->hrMember($this->teamA); // deliberately not bound to DingTalk
         $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));
         Http::assertNotSent(fn ($r) => str_contains($r->url(), '/schedule/listbyusers'));
         $run = DB::table('asset_reminder_runs')->first();
-        $this->assertStringNotContainsString('未填写人数', $run->message);
+        $this->assertStringContainsString('本次未提交人数：1人', $run->message);
         $this->assertSame(0, DB::table('asset_reminder_days')->count());
     }
 
@@ -73,6 +74,7 @@ class AssetReminderDeliveryTest extends TestCase
 
     public function test_send_timeout_is_recorded_as_uncertain_and_never_auto_retried(): void
     {
+        $this->hrMember($this->teamA);
         $this->reminderRule($this->reminderGroup(), ['type' => 'advertising']);
         $this->sendTimeout = true;
         $service = app(ReminderService::class);
@@ -134,6 +136,7 @@ class AssetReminderDeliveryTest extends TestCase
 
     public function test_rejected_or_malformed_webhook_results_never_count_as_accepted_or_leak_secrets(): void
     {
+        $this->hrMember($this->teamA);
         $rule = $this->reminderRule($this->reminderGroup(), ['type' => 'advertising']);
         $this->webhookResponse = ['errcode' => 310000, 'errmsg' => 'webhook-test-token SECtestSigningKey'];
         $service = app(ReminderService::class);

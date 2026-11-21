@@ -44,6 +44,15 @@ trait AssetRemindersEnvironment
         (require database_path('migrations/2026_11_20_000100_extend_asset_reminder_notifications.php'))->up();
         (require database_path('migrations/2026_11_20_000200_add_asset_reminder_group_owners.php'))->up();
         (require database_path('migrations/2026_11_20_000300_add_asset_reminder_calendars.php'))->up();
+        (require database_path('migrations/2026_11_21_000100_add_asset_advertising_reminder_days.php'))->up();
+        foreach (['operation_reports' => 'operator_user_id', 'fashion_advertising_reports' => 'submitter_id'] as $table => $owner) {
+            Schema::create($table, function (Blueprint $t) use ($owner, $table) {
+                $t->id(); $t->unsignedBigInteger($owner); $t->date('report_date'); $t->string('status')->default('pending');
+                if ($table === 'operation_reports') $t->unsignedBigInteger('submitted_by')->nullable();
+                else $t->string('project_code')->default('fuzhuang');
+                $t->softDeletes(); $t->timestamps();
+            });
+        }
         Schema::create('operation_task_recaps', function (Blueprint $t) {
             $t->id(); $t->unsignedBigInteger('user_id'); $t->date('data_date');
             $t->string('workflow_status')->default('pending_leader'); $t->timestamp('submitted_at')->nullable();
@@ -225,7 +234,7 @@ class AssetRemindersTest extends TestCase
         $this->assertSame(2, $summary['count']);
         $this->get($this->remindersUrl.'?department_id='.$this->teamB->id)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
         $preview = $this->getJson($this->remindersUrl.'/rules/'.$id.'/preview')->assertOk();
-        $this->assertStringContainsString('广告费业绩提报提醒', $preview->json('message'));
+        $this->assertStringContainsString('广告费未提交提醒', $preview->json('message'));
         $this->postJson($this->remindersUrl.'/rules/'.$id.'/test', ['confirmed' => true])->assertOk();
         $this->assertCount(2, json_decode(DB::table('asset_reminder_runs')->first()->department_ids, true));
         $this->postJson($this->remindersUrl.'/rules', $this->ruleValues($group, ['department_id' => $this->teamB->id]))->assertUnprocessable();
@@ -489,6 +498,7 @@ class AssetRemindersTest extends TestCase
 
     public function test_incremental_migration_stops_legacy_destinations_and_preserves_rules_and_history(): void
     {
+        $this->hrMember($this->teamA);
         $id = $this->reminderGroup();
         $rule = $this->reminderRule($id, ['type' => 'advertising']);
         $this->assertSame(0, app(ReminderService::class)->process(now('Asia/Shanghai')));

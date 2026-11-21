@@ -325,16 +325,21 @@ class ReminderService
         }
         $title = __('asset_reminders.message.'.$rules[0]->type.'_title', ['round' => __('asset_reminders.rounds.'.$round, [], 'zh-CN')], 'zh-CN');
         $summary = null;
-        if ($rules[0]->type === 'recap') {
-            $summary = $this->recaps->summary($rules, $company, $date, $persist);
+        if (in_array($rules[0]->type, ['recap', 'advertising'], true)) {
+            $summary = $rules[0]->type === 'advertising'
+                ? app(ReminderAdvertisingService::class)->summary($rules, $date, $persist)
+                : $this->recaps->summary($rules, $company, $date, $persist);
             $stats = array_diff_key($summary, ['departments' => true]);
             foreach (['from', 'date'] as $key) { $stats[$key] = Carbon::parse($stats[$key])->format(__('asset_reminders.date_format', [], 'zh-CN')); }
-            $lines = [__('asset_reminders.message.stats', $stats, 'zh-CN'), __('asset_reminders.message.people', [], 'zh-CN')];
+            $prefix = $rules[0]->type === 'advertising' ? 'advertising_' : '';
+            $lines = [__('asset_reminders.message.'.$prefix.'stats', $stats, 'zh-CN'), __('asset_reminders.message.'.$prefix.'people', [], 'zh-CN')];
             $names = Department::whereIn('id', array_keys($summary['departments']))->pluck('name', 'id');
             foreach ($summary['departments'] as $id => $users) {
                 $lines[] = __('asset_reminders.message.department', ['department' => $this->safe($names[$id] ?? '#'.$id), 'count' => count($users), 'names' => implode('、', array_map(fn ($u) => $this->safe($u['name']), $users))], 'zh-CN');
             }
-            $lines[] = __('asset_reminders.message.recap_footer', [], 'zh-CN');
+            $lines[] = $summary['count'] === 0
+                ? __('asset_reminders.advertising_all_submitted', [], 'zh-CN')
+                : __('asset_reminders.message.'.$rules[0]->type.'_footer', [], 'zh-CN');
         } else {
             $lines = [__('asset_reminders.message.advertising_body', [], 'zh-CN')];
         }
@@ -381,7 +386,7 @@ class ReminderService
             if (! $test) {
                 foreach ($rules as $rule) {
                     [, $company] = $this->runtime($rule);
-                    $today = $date->copy()->addDay()->setTimezone('Asia/Shanghai');
+                    $today = $date->copy()->setTimezone('Asia/Shanghai');
                     $dayType = app(ReminderCalendarService::class)->dayType($rule, (int) $company->id, $today);
                     $times = json_decode($rule->{$dayType.'_times'}, true);
                     if (($times[$round - 1] ?? null) !== $slot) throw new ReminderCheckException('conflict');
@@ -389,7 +394,12 @@ class ReminderService
             }
             if ($this->db()->table('asset_reminder_runs')->where('delivery_key', $key)->exists()
                 || (! $test && $this->db()->table('asset_reminder_runs')->where('group_id', $first->group_id)->where('type', $first->type)
-                    ->where('data_date', $date->toDateString())->where('round', $round)->where('is_test', false)->exists())) {
+                    ->where(function ($q) use ($date) {
+                        $q->where('data_date', $date->toDateString())->orWhereBetween('created_at', [
+                            $date->copy()->setTimezone('Asia/Shanghai')->startOfDay()->utc(),
+                            $date->copy()->setTimezone('Asia/Shanghai')->endOfDay()->utc(),
+                        ]);
+                    })->where('round', $round)->where('is_test', false)->exists())) {
                 return ['status' => 'duplicate'];
             }
             $runId = $this->db()->table('asset_reminder_runs')->insertGetId([
@@ -407,7 +417,7 @@ class ReminderService
                 'message' => implode("\n\n", $payload['parts']), 'snapshot' => json_encode($payload['summary'], JSON_UNESCAPED_UNICODE),
                 'status' => 'sending', 'updated_at' => now('UTC'),
             ]);
-            if ($first->type === 'recap' && $payload['summary']['count'] === 0 && ! $test) {
+            if (in_array($first->type, ['recap', 'advertising'], true) && $payload['summary']['count'] === 0 && ! $test) {
                 $status = 'skipped';
             } else {
                 foreach ($payload['parts'] as $part) {
@@ -447,14 +457,14 @@ class ReminderService
             ->update(['status' => 'uncertain', 'error' => __('asset_reminders.interrupted'), 'updated_at' => now('UTC')]);
         $batches = []; $errors = 0;
         foreach ($this->db()->table('asset_reminder_rules')->whereNull('deleted_at')->where('type', 'advertising')->where('enabled', true)->orderBy('department_id')->cursor() as $rule) {
-            if ($rule->starts_on > $now->copy()->subDay()->toDateString()) { continue; }
+            if ($rule->starts_on > $now->toDateString()) { continue; }
             try {
                 [, $company] = $this->runtime($rule);
                 $dayType = app(ReminderCalendarService::class)->dayType($rule, (int) $company->id, $now);
-                // Snapshot the report date even when today has no configured sending slot.
-                // Otherwise a day-off sending policy could lose yesterday's historical roster.
-                if ($rule->type === 'recap') {
-                    $this->recaps->day($rule, $company, $now->copy()->subDay()->startOfDay());
+                // Observe only configured sending days, even before today's first slot.
+                // Past rosters are never synthesized after deployment or downtime.
+                if (json_decode($rule->{$dayType.'_times'}, true) !== []) {
+                    app(ReminderAdvertisingService::class)->capture($rule, $now);
                 }
                 $times = json_decode($rule->{$dayType.'_times'}, true, 512, JSON_THROW_ON_ERROR);
                 $index = array_search($now->format('H:i'), $times, true);
@@ -473,8 +483,15 @@ class ReminderService
                 [, $company] = $this->runtime($rules[0]);
                 $dayType = app(ReminderCalendarService::class)->dayType($rules[0], (int) $company->id, $now);
                 $round = array_search($now->format('H:i'), json_decode($rules[0]->{$dayType.'_times'}, true), true) + 1;
-                $this->deliver($rules, $now->copy()->subDay()->startOfDay(), $now->format('H:i'), $round);
-            } catch (\Throwable) { $errors++; }
+                $this->deliver($rules, $now->copy()->startOfDay(), $now->format('H:i'), $round);
+            } catch (\Throwable $e) {
+                $errors++;
+                $diagnostic = ReminderCheckException::from($e, ['stage' => 'scheduled_delivery', 'rule_ids' => array_column($rules, 'id')]);
+                foreach ($rules as $rule) {
+                    $this->db()->table('asset_reminder_rules')->where('id', $rule->id)->where('version', $rule->version)
+                        ->update(['last_error' => mb_substr($diagnostic->getMessage(), 0, 1000), 'last_checked_at' => now('UTC')]);
+                }
+            }
         }
         return $errors;
     }
