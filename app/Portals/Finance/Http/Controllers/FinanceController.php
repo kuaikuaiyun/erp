@@ -1597,10 +1597,8 @@ class FinanceController extends Controller
         if (in_array($report, ['paypal-settlement', 'credit-settlement', ...array_keys(FinanceCreditSettlementLayout::REPORT_CHANNELS)], true)) {
             return $this->settlement($request, $report);
         }
-        if (in_array($report, ['summary', 'losses'], true) && \App\Portals\Finance\FinanceReadModelBuilds::reader()) {
-            if ($preparation = $this->prepareBackgroundRange($request, $report)) return $preparation;
-        }
-        if (in_array($report, ['summary', 'losses'], true) && ! \App\Portals\Finance\FinanceReadModelBuilds::reader()) {
+        if (in_array($report, ['summary', 'losses'], true)
+            && ! (config('finance.overviews.background', true) && ($report === 'losses' || $request->query('view') !== 'transactions'))) {
             if ($waiting = $this->waitForReportInputs($request, $report)) return $waiting;
             if ($run = $request->query('_source_run')) {
                 $context = $this->context($request);
@@ -2367,8 +2365,6 @@ class FinanceController extends Controller
         if ($request->boolean('download')) {
             $format = $filters['format'] ?? 'xlsx';
             if ($orderView) {
-                app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->prepareExport($filters);
-                if (\App\Portals\Finance\FinanceReadModelBuilds::reader() && $request->boolean('_finance_plan')) return response()->json(['state' => 'ready']);
                 $exportRows = \Illuminate\Support\LazyCollection::make(
                     fn () => app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->exportRows($filters),
                 );
@@ -3375,12 +3371,25 @@ class FinanceController extends Controller
         }
         $context['loadedLossScope'] = $loadedLossScope;
         ksort($scope);
+        $overviewResult = null;
+        if (config('finance.overviews.background', true)) {
+            $prepared = app(\App\Portals\Finance\FinanceOverviewJobs::class)->prepare($request, $report, (int) $context['user']->getKey(), $comparisonMonths, $scope);
+            $plan = $prepared['plan'];
+            if ($request->boolean('_finance_plan') || $request->boolean('_source_prepare') || $request->boolean('snapshot_status')
+                || ($plan['waiting'] && $request->expectsJson())) {
+                return response()->json($plan, ($plan['state'] ?? '') === 'unavailable' ? 503 : 200)->header('Cache-Control', 'private, no-store');
+            }
+            if ($plan['waiting']) return response()->view('portals.finance.report-preparing', [...$context,
+                'title' => __('finance.menus.'.$report), 'preparationPlan' => $plan])->header('Cache-Control', 'private, no-store');
+            $overviewResult = $prepared['result'];
+            $context['overviewCalculatedAt'] = $overviewResult['calculated_at'];
+        }
         $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
         if ($statusOnly) return response()->json(['state' => 'ready'])->header('Cache-Control', 'no-store');
         $monthlyRates = $filterOptions = $summaryAccountChannels = [];
         foreach ($comparisonMonths as $comparisonMonth) {
             $includeOptions = true;
-            $result = FinanceQueryDiagnostics::measure('report.month',
+            $result = $overviewResult['months'][$comparisonMonth] ?? FinanceQueryDiagnostics::measure('report.month',
                 fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true),
                 ['report' => $report, 'month' => $comparisonMonth]);
             [$groups, $options, $rate] = $result;
@@ -3540,54 +3549,12 @@ class FinanceController extends Controller
             ->header('Cache-Control', 'private, no-store');
     }
 
-    private function prepareBackgroundRange(Request $request, string $report): ?Response
-    {
-        $context = $this->context($request);
-        if ($context instanceof Response) return $context;
-        $dates = $request->validate(['month' => 'nullable|date_format:Y-m', 'month_from' => 'nullable|date_format:Y-m',
-            'month_to' => 'nullable|date_format:Y-m|after_or_equal:month_from']);
-        $to = $dates['month_to'] ?? $dates['month'] ?? now('Asia/Shanghai')->format('Y-m');
-        $from = $dates['month_from'] ?? ($report === 'losses' ? CarbonImmutable::parse($to.'-01')->subMonths(2)->format('Y-m') : $to);
-        if ($from > $to || CarbonImmutable::parse($from.'-01')->diffInMonths(CarbonImmutable::parse($to.'-01')) >= 24) {
-            throw ValidationException::withMessages(['month_from' => '请选择不超过24个月的有效日期范围。']);
-        }
-        $query = $request->query();
-        if ($report === 'losses' && empty($query['loss_scope'])) $query['loss_scope'] = match ($query['channel'] ?? '') {
-            'ye' => '叶总支付', 'worldpay' => 'Worldpay', default => 'Shopify',
-        };
-        $ready = true;
-        for ($period = CarbonImmutable::parse($from.'-01'); $period->format('Y-m') <= $to; $period = $period->addMonth()) {
-            if (! $this->calculationMonthReady($report, $period->format('Y-m'), $query)) $ready = false;
-        }
-        if (! $ready) {
-            $state = $request->attributes->get('finance.read-model-pending-state', 'queued');
-            throw new \App\Portals\Finance\FinanceReadModelPending($state);
-        }
-        if ($request->boolean('_source_prepare')) return response()->json(['state' => 'ready'])->header('Cache-Control', 'private, no-store');
-        if ($request->boolean('_finance_plan')) {
-            $query = $request->except(['_finance_plan', '_source_ready', '_source_run', '_source_prepare', '_source_from', '_source_to']);
-            return response()->json(['waiting' => false, 'months' => [], 'resume_url' => $request->url().($query ? '?'.http_build_query($query) : '')])
-                ->header('Cache-Control', 'private, no-store');
-        }
-        return null;
-    }
-
-    private function requestBackgroundSource(string $channel, array $filters, bool $transactions): bool
-    {
-        if (! \App\Portals\Finance\FinanceReadModelBuilds::reader()) return false;
-        $state = app(\App\Portals\Finance\FinanceSummarySourceCache::class)->requestBuild($channel, $filters, $transactions);
-        $previous = request()->attributes->get('finance.read-model-pending-state');
-        if (! in_array($previous, ['failed', 'unavailable'], true)) request()->attributes->set('finance.read-model-pending-state', $state);
-        return true;
-    }
-
     private function calculationMonthReady(string $report, string $month, array $query, ?array $span = null): bool
     {
         $start = CarbonImmutable::parse($month.'-01');
         $filters = ['from' => $span[0] ?? $start->toDateString(), 'to' => $span[1] ?? $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai'];
         $projection = app(\App\Portals\Finance\FinanceSummaryProjection::class);
         $sources = app(\App\Portals\Finance\FinanceSummarySourceCache::class);
-        $ready = true;
         if ($report === 'losses') {
             $scope = $query['loss_scope'] ?? 'Shopify';
             $paypal = in_array($scope, ['Shopify', 'PayPal', '合计'], true);
@@ -3601,13 +3568,10 @@ class FinanceController extends Controller
                 foreach (\App\Portals\Finance\FinanceReportTimezones::groups($channel, $channel === 'paypal' ? [] : ($platforms ?? [])) as $zone => $selected) {
                     $scopeFilters = [...$sourceFilters, 'timezone' => $zone];
                     if ($channel === 'credit_card') $scopeFilters['summary_payment_channels'] = $selected;
-                    if ($projection->lossStream($channel, $scopeFilters, $selected) === null && ! $sources->ready($channel, $scopeFilters)) {
-                        if (! $this->requestBackgroundSource($channel, $scopeFilters, false)) return false;
-                        $ready = false;
-                    }
+                    if ($projection->lossStream($channel, $scopeFilters, $selected) === null && ! $sources->ready($channel, $scopeFilters)) return false;
                 }
             }
-            return $ready;
+            return true;
         }
         $transactions = ($query['view'] ?? '') === 'transactions';
         $selected = $query['channel'] ?? ($transactions ? 'paypal' : '');
@@ -3646,12 +3610,9 @@ class FinanceController extends Controller
             $scopeFilters = [...$sourceFilters, 'timezone' => $zone];
             if ($channel === 'credit_card') $scopeFilters['summary_payment_channels'] = $platforms;
             $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($scopeFilters);
-            if ($projection->stream($channel, $canonical, false, paymentChannels: $platforms) === null && ! $sources->ready($channel, $scopeFilters)) {
-                if (! $this->requestBackgroundSource($channel, $scopeFilters, $transactions)) return false;
-                $ready = false;
-            }
+            if ($projection->stream($channel, $canonical, false, paymentChannels: $platforms) === null && ! $sources->ready($channel, $scopeFilters)) return false;
         }
-        return $ready;
+        return true;
     }
 
     private function settlementMonthRows(FinanceSettlementService $service, string $channel, array $filters, array $paymentChannels, bool $transactions = false, ?callable $options = null, bool $aggregateTransactions = false, bool $losses = false, bool $sourceFields = false): iterable
@@ -3662,6 +3623,12 @@ class FinanceController extends Controller
                 $sourceFilters['summary_payment_channels'] = array_values($selected);
             }
             $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($sourceFilters);
+            if (request()->attributes->get('finance.overview_worker')) {
+                // This task owns its database snapshot. Read live source rows;
+                // neither notification readiness nor shared cache publication is required.
+                yield from $service->summaryRowStream($channel, $sourceFilters, $transactions);
+                continue;
+            }
             $projections = app(\App\Portals\Finance\FinanceSummaryProjection::class);
             $projection = $sourceFields ? null : ($losses ? $projections->lossStream($channel, $canonical, $selected)
                 : $projections->stream($channel, $canonical, false, paymentChannels: $selected));
@@ -4090,12 +4057,6 @@ class FinanceController extends Controller
         return $options;
     }
 
-    public function warmConditionChoices(string $dataset, bool $xuzongReport): array
-    {
-        FinanceCatalog::dataset($dataset);
-        return $this->conditionChoices($dataset, $xuzongReport);
-    }
-
     private function conditionChoices(string $dataset, bool $xuzongReport, ?\Illuminate\Support\Collection $accountingCategories = null): array
     {
         if ($xuzongReport) {
@@ -4110,17 +4071,14 @@ class FinanceController extends Controller
                     'currency' => $choices($options->pluck('currency')),
                     'status' => collect(['成功', '失败', '待确认', '退款'])->map(fn ($status) => ['value' => $status, 'label' => $status])->all(),
                 ];
-            }, ['kind' => 'record-options', 'payload' => ['dataset' => $dataset, 'xuzong' => true,
-                'scope' => 'xuzong-credit:imported-choices:v2', 'channels' => ['xuzong1', 'xuzong2']]]);
+            });
         }
         $definition = FinanceCatalog::dataset($dataset);
         $choices = [];
         $creditOptions = $dataset === 'xuzong2-orders'
             ? app(FinanceReportCache::class)->remember($dataset.':order-options:v2', ['credit_card'], fn () =>
                 app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, withPayments: false)
-                    ->distinct()->toBase()->get(['account', 'currency', 'status']),
-                ['kind' => 'record-options', 'payload' => ['dataset' => $dataset, 'xuzong' => false,
-                    'scope' => $dataset.':order-options:v2', 'channels' => ['credit_card']]])
+                    ->distinct()->toBase()->get(['account', 'currency', 'status']))
             : null;
         $choices['account'] = FinancePaymentAccount::query()
             ->where('account_type', $definition['channel'] === 'paypal' ? 'paypal' : 'credit_card')->orderBy('id')
@@ -4150,8 +4108,7 @@ class FinanceController extends Controller
                     $field => $options->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')
                         ->uniqueStrict()->sort(SORT_STRING)->values()->all(),
                 ])->all();
-            }, ['kind' => 'record-options', 'payload' => ['dataset' => $dataset, 'xuzong' => false,
-                'scope' => $dataset.':record-options:v3', 'channels' => [$definition['channel'] === 'paypal' ? 'paypal' : 'credit_card']]])
+            })
             : [];
         foreach ($fields as $field) {
             $values = $creditOptions !== null

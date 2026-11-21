@@ -3,8 +3,6 @@
 namespace App\Http\Middleware;
 
 use App\Portals\Finance\FinanceQueryDiagnostics;
-use App\Portals\Finance\FinanceReadModelBuilds;
-use App\Portals\Finance\FinanceReadModelPending;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -45,14 +43,6 @@ class MonitorFinancePerformance
         $started = hrtime(true);
         try {
             $response = $next($request);
-            if (FinanceReadModelBuilds::reader() && $request->boolean('_finance_plan') && $response->isSuccessful()
-                && ! $response->headers->has('X-Finance-Preparing')) {
-                $response = response()->json(['waiting' => false, 'months' => [], 'resume_url' => $this->resumeUrl($request)])
-                    ->header('Cache-Control', 'private, no-store');
-            }
-        } catch (FinanceReadModelPending $pending) {
-            $diagnostic?->event('read_model.pending', ['state' => $pending->state]);
-            $response = $this->preparing($request, $pending);
         } catch (\Throwable $error) {
             $diagnostic?->finish('request.failed', ['exception' => $error::class]);
             throw $error;
@@ -86,27 +76,5 @@ class MonitorFinancePerformance
             'database_duration_ms' => $databaseDuration]);
 
         return $response;
-    }
-
-    private function resumeUrl(Request $request): string
-    {
-        $query = $request->except(['_finance_plan', '_source_ready', '_source_run', '_source_prepare', '_source_from', '_source_to']);
-        return $request->url().($query ? '?'.http_build_query($query) : '');
-    }
-
-    public function preparing(Request $request, FinanceReadModelPending $pending): Response
-    {
-        $resume = $this->resumeUrl($request);
-        $plan = ['waiting' => true, 'background' => true, 'state' => $pending->state, 'message' => $pending->getMessage(),
-            'job' => $request->attributes->get('finance.read-model-job'),
-            'months' => [], 'poll_url' => $resume.(str_contains($resume, '?') ? '&' : '?').'_finance_plan=1', 'resume_url' => $resume];
-        if ($request->expectsJson() || $request->boolean('_finance_plan') || $request->boolean('download') || $request->boolean('_source_prepare')) {
-            return response()->json($plan, $pending->state === 'unavailable' ? 503 : 200)
-                ->header('X-Finance-Preparing', '1')->header('Cache-Control', 'private, no-store');
-        }
-        $context = app(\App\Portal\Http\Controllers\PortalEntryController::class)->portalContext($request);
-        if ($context instanceof Response) return $context;
-        return response()->view('portals.finance.report-preparing', [...$context, 'title' => '财务报表', 'preparationPlan' => $plan])
-            ->header('X-Finance-Preparing', '1')->header('Cache-Control', 'private, no-store');
     }
 }

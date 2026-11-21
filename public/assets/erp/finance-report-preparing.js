@@ -3,10 +3,9 @@
     async function run(plan, progress) {
         var waitingSince = Date.now();
         while (plan.waiting) {
-            if (plan.state === 'failed' || plan.state === 'unavailable') throw new Error(plan.message || '后台计算失败，请联系管理员。');
-            progress(plan.message || '正在同步最新数据，完成后自动显示报表…');
-            if (Date.now() - waitingSince > (plan.background ? 1800000 : 180000)) throw new Error(plan.background
-                ? '后台任务仍未完成，请联系管理员查看计算进度。' : '数据更新仍在进行，请稍后重试。');
+            if (plan.background === 'overview' && (plan.state === 'failed' || plan.state === 'unavailable')) throw new Error(plan.message);
+            progress(plan.background === 'overview' ? plan.message : '正在同步最新数据，完成后自动显示报表…');
+            if (Date.now() - waitingSince > (plan.background === 'overview' ? 1800000 : 180000)) throw new Error('后台仍在处理，请稍后重新查询。');
             await new Promise(function (resolve) { setTimeout(resolve, 2000); });
             var poll = await fetch(plan.poll_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
             if (!poll.ok || !(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
@@ -41,7 +40,7 @@
     }
     window.financePrepareReport = async function (url, progress) {
         var target = new URL(url, window.location.href);
-        if (!/\/finance\/(reports|records)\//.test(target.pathname)) return url;
+        if (!/\/finance\/reports\/(summary|losses)$/.test(target.pathname)) return url;
         if (target.searchParams.get('download_missing') === '1') return url;
         target.searchParams.set('_finance_plan', '1');
         var response = await fetch(target.href, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
@@ -67,6 +66,15 @@
             retry.hidden = false;
         }
     }
-    retry.addEventListener('click', start);
+    retry.addEventListener('click', function () {
+        if (plan.background === 'overview') {
+            var fresh = new URL(plan.resume_url, window.location.href);
+            fresh.searchParams.delete('_overview_run');
+            fresh.searchParams.delete('_finance_plan');
+            window.location.replace(fresh.href);
+            return;
+        }
+        return start();
+    });
     start();
 }());

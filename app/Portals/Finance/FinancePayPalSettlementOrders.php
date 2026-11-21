@@ -183,25 +183,14 @@ class FinancePayPalSettlementOrders
         return $amount === null ? '' : trim((is_string($currency) ? $currency : '').' '.FinanceCatalog::reportAmount($amount));
     }
 
-    public function warmGraph(): ?array
-    {
-        return app(FinanceReportCache::class)->remember('paypal-order-graph:v3', ['paypal'], fn () => $this->orderGraph(null),
-            ['kind' => 'paypal-graph', 'payload' => []]);
-    }
-
     public function page(array $filters, int $offset, int $limit, bool $stopAtLimit = false): array
     {
-        if (! FinanceReadModelVersions::installed($this->workbooks->database())) return $this->buildPage($filters, $offset, $limit, $stopAtLimit);
-        $scope = 'paypal-page:v1:'.hash('sha256', json_encode([$filters, $offset, $limit, $stopAtLimit], JSON_THROW_ON_ERROR));
-        return app(FinanceReportCache::class)->remember($scope, ['paypal'], fn () => $this->buildPage($filters, $offset, $limit, $stopAtLimit),
-            ['kind' => 'paypal-page', 'payload' => compact('filters', 'offset', 'limit', 'stopAtLimit', 'scope')]);
-    }
-
-    private function buildPage(array $filters, int $offset, int $limit, bool $stopAtLimit): array
-    {
         $db = $this->workbooks->database();
-        $graph = (in_array($db->getDriverName(), ['mysql', 'mariadb'], true) || FinanceReadModelVersions::installed($db))
-            ? $this->warmGraph()
+        $graph = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+            ? app(FinanceReportCache::class)->remember(
+                'paypal-order-graph:v3', ['paypal'],
+                fn () => $this->orderGraph(null),
+            )
             : $this->orderGraph(null);
         if ($graph === null) {
             return [collect(), 0, collect(), true];
@@ -295,12 +284,6 @@ class FinancePayPalSettlementOrders
         if ($recordIds === []) {
             return;
         }
-        if (FinanceReadModelBuilds::reader()) {
-            $sourceFilters = $this->exportSourceFilters($filters, $matchCandidateDomains, $recordIds);
-            yield from app(FinanceSummarySourceCache::class)->stream('paypal', $sourceFilters, false,
-                fn () => throw new \LogicException('HTTP cannot rebuild PayPal exports.'));
-            return;
-        }
         // Summary generation requests many small ID batches. Keep one graph for
         // that generator instead of rebuilding it for every page.
         $graph = $recordIds === null
@@ -329,19 +312,6 @@ class FinancePayPalSettlementOrders
     public function releaseExportGraph(): void
     {
         $this->recordExportGraph = null;
-    }
-
-    private function exportSourceFilters(array $filters, bool $matchCandidateDomains, ?array $recordIds): array
-    {
-        return ['_paypal_export' => ['filters' => $filters, 'match_candidates' => $matchCandidateDomains, 'record_ids' => $recordIds]];
-    }
-
-    public function prepareExport(array $filters, bool $matchCandidateDomains = true, ?array $recordIds = null): void
-    {
-        if (! FinanceReadModelBuilds::reader()) return;
-        $source = app(FinanceSummarySourceCache::class);
-        $sourceFilters = $this->exportSourceFilters($filters, $matchCandidateDomains, $recordIds);
-        if (! $source->ready('paypal', $sourceFilters)) throw new FinanceReadModelPending($source->requestBuild('paypal', $sourceFilters));
     }
 
     /** Stream the fully calculated list rows for the background page projection. */

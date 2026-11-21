@@ -16,6 +16,36 @@ use Tests\TestCase;
 /** Creates only an isolated disposable database on a loopback MySQL server. */
 class FinanceScopedSourceMySqlTest extends TestCase
 {
+    public function test_scoped_overview_reads_one_snapshot_while_source_updates_continue(): void
+    {
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        config(['cache.default' => 'array', 'finance.overviews.background' => true]);
+        $id = $this->record('2026-11-03', 'BEFORE-CONCURRENT-WRITE', 'paypal-orders');
+        config(['database.connections.scope_overview_writer' => $this->db->getConfig()]);
+        $other = DB::connection('scope_overview_writer');
+        $controller = \Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $calls = 0;
+        $controller->shouldReceive('buildSettlementOverviewMonth')->twice()->andReturnUsing(function ($month, $report, $scope, $options, $reuse) use ($id, $other, &$calls) {
+            $this->assertSame('losses', $report);
+            $this->assertFalse($reuse);
+            $reference = $this->db->table('finance_records')->where('id', $id)->value('reference');
+            if (++$calls === 1) $other->getPdo()->exec("UPDATE finance_records SET reference = 'AFTER-CONCURRENT-WRITE' WHERE id = ".(int) $id);
+            return [[$reference], [], null];
+        });
+        $this->app->instance(\App\Portals\Finance\Http\Controllers\FinanceController::class, $controller);
+        $jobs = app(\App\Portals\Finance\FinanceOverviewJobs::class);
+        $request = \Illuminate\Http\Request::create('http://caiwu.example/finance/reports/losses');
+        try {
+            $first = $jobs->prepare($request, 'losses', 1, ['2026-10', '2026-11'], []);
+            $this->artisan('finance:overviews:build')->assertSuccessful();
+            $complete = $jobs->prepare(\Illuminate\Http\Request::create($first['plan']['resume_url']), 'losses', 1, ['2026-10', '2026-11'], []);
+            $this->assertFalse($complete['plan']['waiting']);
+            foreach ($complete['result']['months'] as $result) $this->assertSame(['BEFORE-CONCURRENT-WRITE'], $result[0]);
+            $this->assertSame('AFTER-CONCURRENT-WRITE', $this->db->table('finance_records')->where('id', $id)->value('reference'));
+        } finally {
+            DB::purge('scope_overview_writer');
+        }
+    }
     public function test_retiring_summary_caches_requires_structured_storage_and_preserves_transactions(): void
     {
         $id = $this->record('2026-11-03', 'KEEP-SOURCE');
@@ -44,51 +74,6 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $databaseName = null;
     private ?string $cachePath = null;
     private Connection $db;
-
-    public function test_separate_query_versions_follow_commits_without_waiting_for_notification_consumption(): void
-    {
-        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
-        $versions = app(\App\Portals\Finance\FinanceSummaryDataVersion::class);
-        $baseline = $versions->forCache(['paypal']);
-        $files = app(\App\Portals\Finance\FinanceExternalChanges::class);
-        $ticket = $files->begin($this->db);
-        $files->commit($this->db, $ticket, [['source' => 'scope_user', 'values' => []]]);
-        $this->assertSame($baseline, $versions->forCache(['paypal']));
-        $this->db->beginTransaction();
-        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'NEW-TRANSACTIONAL-ORDER']);
-        $this->assertNotSame($baseline, $versions->forCache(['paypal']));
-        $this->db->rollBack();
-        $this->assertSame($baseline, $versions->forCache(['paypal']));
-        $this->assertFalse($this->db->table('logistics_orders')->where('id', $id)->exists());
-        $this->db->table('logistics_orders')->insert(['transaction_id' => 'COMMITTED-TRANSACTIONAL-ORDER']);
-        $this->assertNotSame($baseline, $versions->forCache(['paypal']));
-        $this->assertFileExists($ticket['path']);
-        $current = $versions->forCache(['paypal']);
-        $this->artisan('finance:read-models:build')->assertSuccessful();
-        $this->assertFileExists($ticket['path']);
-        $this->artisan('finance:changes:consume')->assertSuccessful();
-        $this->assertFileDoesNotExist($ticket['path']);
-        $this->assertSame($current, $versions->forCache(['paypal']));
-        $this->assertSame(0, count(glob($files->directory($this->db).'/change-*.json')));
-    }
-
-    public function test_query_revision_fingerprint_detects_transactions_committing_out_of_id_order(): void
-    {
-        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
-        config(['database.connections.scope_concurrent' => $this->db->getConfig()]);
-        $other = DB::connection('scope_concurrent');
-        try {
-            $this->db->beginTransaction();
-            \App\Portals\Finance\FinanceReadModelVersions::touch($this->db, 'finance', ['id' => 1001, 'dataset' => 'paypal-orders']);
-            $other->transaction(fn () => \App\Portals\Finance\FinanceReadModelVersions::touch($other, 'finance', ['id' => 2002, 'dataset' => 'paypal-orders']));
-            $before = \App\Portals\Finance\FinanceReadModelVersions::version($other, ['paypal']);
-            $this->db->commit();
-            $this->assertNotSame($before, \App\Portals\Finance\FinanceReadModelVersions::version($other, ['paypal']));
-        } finally {
-            if ($this->db->transactionLevel()) $this->db->rollBack();
-            DB::purge('scope_concurrent');
-        }
-    }
 
     public function test_indexed_dependency_lookup_preserves_legacy_matching_and_uses_reference_indexes(): void
     {

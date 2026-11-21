@@ -358,7 +358,7 @@ class FinanceSettlementService
                 foreach ($this->rows('credit_card', $filters, $records, $context, businessMatchesOnly: true) as $row) $ids[] = $row['id'];
             }
             return $ids;
-        }, ['kind' => 'conflux-business', 'payload' => ['scope' => $scope, 'filters' => $filters]]);
+        });
         return $query->where(fn ($scope) => $scope->where(fn ($knownRows) => $knownRows->whereIn($domain, $matching)
             ->whereNotIn('finance_records.id', $supplements))->orWhereIntegerInRaw('finance_records.id', $ids));
     }
@@ -1079,9 +1079,6 @@ class FinanceSettlementService
 
     public function regionOptions(string $report = 'paypal-settlement'): Collection
     {
-        if (! in_array($report, ['paypal-settlement', 'credit-settlement', 'xuzong-credit', ...array_keys(FinanceCreditSettlementLayout::REPORT_CHANNELS)], true)) {
-            throw new \InvalidArgumentException('Unknown finance report.');
-        }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $cacheChannels = $report === 'xuzong-credit' ? ['xuzong1', 'xuzong2'] : [FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? $channel];
         return collect(app(FinanceReportCache::class)->remember('active-region-options:v3:'.$report, $cacheChannels, function () use ($report, $channel): array {
@@ -1120,7 +1117,7 @@ class FinanceSettlementService
             $values = array_keys($regions);
             sort($values, SORT_STRING);
             return $values;
-        }, ['kind' => 'region-options', 'payload' => ['report' => $report, 'channels' => $cacheChannels]]))->map(fn ($region) => self::normaliseRegionLabel((string) $region))
+        }))->map(fn ($region) => self::normaliseRegionLabel((string) $region))
             ->filter(fn ($region) => $region !== '')->unique()->sort()->values();
     }
 

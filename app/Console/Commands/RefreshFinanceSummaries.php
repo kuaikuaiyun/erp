@@ -19,9 +19,6 @@ class RefreshFinanceSummaries extends Command
     public function handle(FinanceWorkbookService $workbooks, FinanceSummaryProjection $projection, FinanceSummaryDependencies $dependencies, FinancePayPalSettlementProjection $paypalSettlement): int
     {
         $db = $workbooks->database();
-        if (\App\Portals\Finance\FinanceReadModelVersions::installed($db)) {
-            return $this->call('finance:read-models:build');
-        }
         if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
             return self::SUCCESS;
         }

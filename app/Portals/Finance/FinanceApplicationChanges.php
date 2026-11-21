@@ -257,6 +257,5 @@ class FinanceApplicationChanges
     private function enqueue(Connection $db, string $source, array $values): void
     {
         $db->table('finance_summary_changes')->insert(['source' => $source, 'payload' => json_encode($values, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), 'scopes_resolved' => false]);
-        FinanceReadModelVersions::touch($db, $source, $values);
     }
 }
