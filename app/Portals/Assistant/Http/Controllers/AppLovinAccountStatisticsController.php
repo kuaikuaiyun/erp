@@ -14,6 +14,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -226,7 +227,12 @@ class AppLovinAccountStatisticsController extends Controller
         if ($context instanceof Response) return $context;
         abort_unless($this->project($request) === 'dashboard', 404);
 
-        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user'], 'dashboard');
+        $subscriptionDepartmentIds = $this->storeOwners->operationDepartments()
+            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $visibleDepartmentIds = array_values(array_intersect(
+            $this->visibleDepartmentIds($context['user'], 'dashboard'),
+            $subscriptionDepartmentIds,
+        ));
         $filters = $request->validate([
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($visibleDepartmentIds)],
@@ -403,21 +409,31 @@ class AppLovinAccountStatisticsController extends Controller
                 'date' => $report->report_date->format('Y-m-d'), 'source' => '订阅运营',
             ]));
 
-        $fashion = $project === 'operation' ? collect() : FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+        $operationProjects = OperationProjectCatalog::all();
+        $projectDepartmentIds = collect(array_keys($operationProjects))->mapWithKeys(
+            fn (string $code): array => [$code => OperationProjectCatalog::departmentIds($code)->all()]
+        );
+        $fashion = $project === 'operation' ? collect() : FashionAdvertisingReport::query()
+            ->whereIn('project_code', array_keys($operationProjects))
+            ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments'])->get()
-            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds, $unrestricted, $project): Collection {
+            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds, $unrestricted, $project, $projectDepartmentIds): Collection {
                 $departments = $report->submitter?->departments ?? collect();
                 $isOwnReport = (int) $report->submitter_id === (int) $viewer->getKey();
-                $managedDepartment = $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true));
+                $reportProjectDepartmentIds = $projectDepartmentIds->get((string) $report->project_code, []);
+                $managedDepartment = $departments->first(fn ($item) => in_array((int) $item->id, $reportProjectDepartmentIds, true)
+                    && in_array((int) $item->id, $visibleIds, true));
                 $strictDepartmentScope = $project === 'dashboard' || $project === 'assistant';
                 $department = $unrestricted || (! $strictDepartmentScope && $isOwnReport)
-                    ? ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first())
+                    ? ($departments->first(fn ($item) => in_array((int) $item->id, $reportProjectDepartmentIds, true)
+                        && (bool) ($item->pivot->is_primary ?? false))
+                        ?: $departments->first(fn ($item) => in_array((int) $item->id, $reportProjectDepartmentIds, true)))
                     : $managedDepartment;
                 if (! $unrestricted && ($strictDepartmentScope ? ! $managedDepartment : (! $isOwnReport && ! $managedDepartment))) return collect();
                 return $report->adSpendEntries->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
                     ->map(fn ($entry): array => [
                         'operator_user_id' => (int) $report->submitter_id, 'operator_name' => (string) $report->submitter_name,
-                        'department_id' => (int) ($department?->id ?: 0), 'department' => (string) ($department?->name ?: '服装运营部门'),
+                        'department_id' => (int) ($department?->id ?: 0), 'department' => (string) ($department?->name ?: '未设置项目团队'),
                         'agency' => trim((string) $entry->agency), 'account_name' => trim((string) $entry->account_name),
                         'account_number' => trim((string) $entry->account_number), 'spend' => (float) $entry->actual_spend_usd,
                         'date' => $report->report_date->format('Y-m-d'), 'source' => '服装运营',

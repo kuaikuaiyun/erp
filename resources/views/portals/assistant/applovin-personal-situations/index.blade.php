@@ -1,6 +1,6 @@
 @extends('portal.layout')
 
-@section('page_title', 'AppLovin个人情况')
+@section('page_title', '订阅AppLovin个人情况')
 
 @push('styles')
 <style>
@@ -9,12 +9,14 @@
 .aps-page-tools,.aps-pages{display:flex;align-items:center;gap:7px}.aps-page-size{display:flex;align-items:center;gap:6px;margin:0;color:#6c8292;font-size:12px;font-weight:400}.aps-page-size select{width:70px;height:34px;border:1px solid #d4e1e9;border-radius:7px;background:#fff;padding:4px 7px}.aps-page{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:34px;padding:0 11px;border:1px solid #d4e1e9;border-radius:7px;background:#fff;color:#397d9f;font-weight:600;box-shadow:0 2px 5px rgba(40,88,116,.05);transition:.15s}.aps-page:hover{border-color:#3994c3;background:#edf7fc;color:#1d719d}.aps-page.active{border-color:#318ac0;background:linear-gradient(135deg,#3b9bc9,#247dab);color:#fff;box-shadow:0 4px 10px rgba(47,137,185,.25)}.aps-page.disabled{pointer-events:none;background:#f1f5f7;color:#a7b5be;box-shadow:none}.aps-gap{color:#90a3af}@media(max-width:800px){.aps-page-tools{width:100%;justify-content:space-between}}
 .aps-stage-spend{display:block;margin-top:3px;color:#8095a4;font-size:12px;white-space:nowrap}
 .aps-filter .assistant-department-menu{width:520px}.aps-filter .assistant-department-columns{grid-template-columns:190px minmax(0,1fr);height:310px;min-height:310px}.aps-filter .assistant-department-roots{height:310px;overflow-y:auto}.aps-filter .assistant-department-children{height:310px;overflow:hidden}.aps-filter .assistant-department-panel{height:310px;max-height:none;padding:7px;overflow-y:auto}.aps-filter .assistant-department-panel label{width:100%;margin:0;padding:8px 10px;border-radius:4px}.aps-filter .assistant-department-panel label:hover{background:#f1f8fc}@media(max-width:767px){.aps-filter .assistant-department-menu{width:min(520px,90vw)}.aps-filter .assistant-department-columns{grid-template-columns:150px minmax(0,1fr)}}
+.aps-operator-cell{min-width:125px;background:#f8fbfd;font-weight:400;vertical-align:middle!important}.aps-operator-cell b{display:block;margin-top:3px;color:#173f5e}
+.aps-table tbody tr.aps-group-blue>td{background:#eef7fc}.aps-table tbody tr.aps-group-white>td{background:#fff}.aps-table tbody tr.aps-group-blue:hover>td{background:#e4f3fb}.aps-table tbody tr.aps-group-white:hover>td{background:#f8fbfd}
 </style>
 @endpush
 
 @section('content')
 <section class="content-header">
-    <h1>AppLovin个人情况 <small>按个人广告账户统计启用与分阶段 ROI</small></h1>
+    <h1>订阅AppLovin个人情况 <small>按订阅项目个人广告账户统计启用与分阶段 ROI</small></h1>
 </section>
 <section class="content">
     <div class="box aps-card aps-filter-box">
@@ -41,11 +43,14 @@
                     <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>达到 $5,000 ROI</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th><th>累计广告费($)</th>
                 </tr></thead>
                 <tbody>
+                    @php($operatorRowspans = collect($rows->items())->countBy(fn ($item) => (int) $item['operator_user_id']))
                     @php($previousOperator = null)
+                    @php($operatorGroupIndex = -1)
                     @forelse ($rows as $row)
                         @php($sameOperator = $previousOperator === $row['operator_user_id'])
-                        <tr>
-                            <td class="{{ $sameOperator ? 'aps-muted' : '' }}">@if ($sameOperator)〃@else{{ $row['department'] ?: '—' }}<br><b>{{ $row['operator_name'] }}</b>@endif</td>
+                        @if(!$sameOperator) @php($operatorGroupIndex++) @endif
+                        <tr class="{{ $operatorGroupIndex % 2 === 0 ? 'aps-group-blue' : 'aps-group-white' }}">
+                            @unless($sameOperator)<td class="aps-operator-cell" rowspan="{{ $operatorRowspans->get((int) $row['operator_user_id'], 1) }}">{{ $row['department'] ?: '—' }}<b>{{ $row['operator_name'] }}</b></td>@endunless
                             <td class="aps-number">{{ $row['account_number'] ?: '—' }}</td>
                             <td><span class="aps-domain">{{ $row['store_domains'] ?: '未绑定' }}</span></td>
                             <td class="aps-performance">${{ number_format($row['store_performance'], 2) }}</td>
