@@ -16,6 +16,8 @@ final class LogisticsCreditCardRefundReason
         '地址无法发货',
         '描述不符',
         '商品无法发货',
+        '部分补偿',
+        '取消部分商品',
     ];
 
     /** @var list<string> */
