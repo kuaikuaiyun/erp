@@ -104,11 +104,14 @@ class FashionOperationReportController extends Controller
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
         if ($isPersonalMode) {
-            // Personal mode always uses completed natural days. Excluding today
-            // avoids mixing an in-progress day with already settled daily data.
-            $personalDateTo = $reportNow->copy()->subDay();
-            $dateFrom = $personalDateTo->copy()->subDays($personalRange - 1)->toDateString();
-            $dateTo = $personalDateTo->toDateString();
+            if ($request->filled('date_from') && $request->filled('date_to')) {
+                $dateFrom = (string) $validated['date_from'];
+                $dateTo = (string) $validated['date_to'];
+            } else {
+                $personalDateTo = $reportNow->copy()->subDays(2);
+                $dateFrom = $personalDateTo->copy()->subDays($personalRange - 1)->toDateString();
+                $dateTo = $personalDateTo->toDateString();
+            }
         }
         // Keep the assistant report on the exact same time basis as the fashion
         // performance report. The legacy paid_at_utc column stores a
@@ -219,7 +222,8 @@ class FashionOperationReportController extends Controller
             ]);
         });
         $personalDates = $isPersonalMode
-            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => CarbonImmutable::parse($dateTo, $timezone)->subDays($offset)->toDateString())->reverse()->values()
+            ? collect(range(0, (int) CarbonImmutable::parse($dateFrom, $timezone)->diffInDays(CarbonImmutable::parse($dateTo, $timezone))))
+                ->map(fn (int $offset): string => CarbonImmutable::parse($dateFrom, $timezone)->addDays($offset)->toDateString())
             : collect();
 
         $selectedDepartmentIds = $request->has('department_ids')
@@ -333,7 +337,7 @@ class FashionOperationReportController extends Controller
             })->sortByDesc(fn (array $row): string => $row['date'].'|'.$row['operator'])->values()
             : collect();
         $personalSummaryRows = $isPersonalMode
-            ? $rows->map(function (array $row) use ($profitCoefficient, $personalRange): array {
+            ? $rows->map(function (array $row) use ($profitCoefficient): array {
                 $days = collect($row['personal_days'] ?? []);
                 $revenue = round((float) $days->sum('revenue'), 2);
                 $adSpend = round((float) $days->sum('ad_spend'), 2);
@@ -348,9 +352,9 @@ class FashionOperationReportController extends Controller
                     'roi' => $adSpend > 0 ? $revenue / $adSpend : null,
                     'roi_class' => $this->roiClass($adSpend > 0 ? $revenue / $adSpend : null),
                     'profit' => $profit,
-                    // The red flag follows the selected personal range: all 7
-                    // days when 7 is selected, or all 14 days when 14 is selected.
-                    'continuous_loss' => $this->hasLossesForSelectedRange($days, $personalRange),
+                    'continuous_loss_7' => $this->hasConsecutiveLosses($days, 7),
+                    'continuous_loss_14' => $this->hasConsecutiveLosses($days, 14),
+                    'continuous_loss' => $this->hasConsecutiveLosses($days, 7),
                     'days' => $days->values(),
                 ];
             })->sortByDesc('profit')->values()
@@ -377,7 +381,9 @@ class FashionOperationReportController extends Controller
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'personalRows' => $personalRows, 'personalSummaryRows' => $personalSummaryRows, 'isPersonalMode' => $isPersonalMode,
             'personalSummary' => ['profit' => (float) $personalSummaryRows->sum('profit'),
-                'continuous_loss_people' => $personalSummaryRows->where('continuous_loss', true)->count()],
+                'continuous_loss_people' => $personalSummaryRows->where('continuous_loss', true)->count(),
+                'continuous_loss_7_people' => $personalSummaryRows->where('continuous_loss_7', true)->count(),
+                'continuous_loss_14_people' => $personalSummaryRows->where('continuous_loss_14', true)->count()],
             'isDashboard' => $isDashboard, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
             'fashionReportIndexRoute' => $isDashboard
                 ? 'operation-dashboard.fashion-operation-reports.index'
@@ -424,9 +430,14 @@ class FashionOperationReportController extends Controller
     }
 
     /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
-    private function hasLossesForSelectedRange(\Illuminate\Support\Collection $days, int $rangeDays): bool
+    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $requiredDays): bool
     {
-        return $days->count() === $rangeDays
-            && $days->every(fn (array $day): bool => ($day['profit_status'] ?? null) === 'loss');
+        $streak = 0;
+        foreach ($days as $day) {
+            $streak = ($day['profit_status'] ?? null) === 'loss' ? $streak + 1 : 0;
+            if ($streak >= $requiredDays) return true;
+        }
+
+        return false;
     }
 }

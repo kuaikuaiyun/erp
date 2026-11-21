@@ -66,9 +66,17 @@ class OperationReportDashboardController extends Controller
         $dateRange = $isPersonalMode ? 'personal' : (string) ($validated['date_range'] ?? (
             $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
         ));
-        [$dateFrom, $dateTo] = $isPersonalMode
-            ? [$reportNow->copy()->subDays($personalRange)->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')]
-            : match ($dateRange) {
+        if ($isPersonalMode) {
+            if ($request->filled('date_from') && $request->filled('date_to')) {
+                $dateFrom = (string) $validated['date_from'];
+                $dateTo = (string) $validated['date_to'];
+            } else {
+                $personalDateTo = $reportNow->copy()->subDays(2);
+                $dateFrom = $personalDateTo->copy()->subDays($personalRange - 1)->format('Y-m-d');
+                $dateTo = $personalDateTo->format('Y-m-d');
+            }
+        } else {
+            [$dateFrom, $dateTo] = match ($dateRange) {
             'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
             'yesterday' => [$reportNow->copy()->subDay()->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')],
             'last_7_days' => [$reportNow->copy()->subDays(6)->format('Y-m-d'), $reportNow->format('Y-m-d')],
@@ -87,6 +95,7 @@ class OperationReportDashboardController extends Controller
                 $reportNow->copy()->endOfMonth()->format('Y-m-d'),
             ],
             };
+        }
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->visibleDepartmentIds($context);
@@ -380,10 +389,11 @@ class OperationReportDashboardController extends Controller
         $totals = $this->totals($rows, $approvedAdSpend);
         $totals['first_roi_class'] = $this->roiClass($totals['first_roi'] ?? null);
         $personalDates = $isPersonalMode
-            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => $reportNow->copy()->subDays($personalRange - $offset)->format('Y-m-d'))
+            ? collect(range(0, (int) Carbon::parse($dateFrom)->diffInDays(Carbon::parse($dateTo))))
+                ->map(fn (int $offset): string => Carbon::parse($dateFrom)->addDays($offset)->format('Y-m-d'))
             : collect();
         $personalRows = $isPersonalMode
-            ? collect($rows)->unique('_report_id')->map(function (array $row) use ($dailySourceRows, $personalDates, $profitCoefficient, $personalRange): array {
+            ? collect($rows)->unique('_report_id')->map(function (array $row) use ($dailySourceRows, $personalDates, $profitCoefficient): array {
                 $operatorDailyRows = $dailySourceRows->where('operator_user_id', $row['operator_user_id']);
                 $days = $personalDates->map(function (string $date) use ($operatorDailyRows, $profitCoefficient): array {
                     $source = $operatorDailyRows->firstWhere('date', $date);
@@ -416,7 +426,9 @@ class OperationReportDashboardController extends Controller
                     'media_rois' => $row['daily_media_rois'], 'media_roi_classes' => $row['daily_media_roi_classes'],
                     'first_roi' => $row['daily_first_roi'], 'first_roi_class' => $row['daily_first_roi_class'],
                     'profit' => $periodProfit,
-                    'continuous_loss' => $days->count() === $personalRange && $days->every(fn (array $day): bool => $day['profit'] < 0),
+                    'continuous_loss_7' => $this->hasConsecutiveLosses($days, 7),
+                    'continuous_loss_14' => $this->hasConsecutiveLosses($days, 14),
+                    'continuous_loss' => $this->hasConsecutiveLosses($days, 7),
                     'days' => $days,
                 ];
             })->values()
@@ -804,6 +816,18 @@ class OperationReportDashboardController extends Controller
         if ($roi >= 1.3) return 'roi-good';
         if ($roi >= 1.1) return 'roi-warning';
         return 'roi-danger';
+    }
+
+    /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
+    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $requiredDays): bool
+    {
+        $streak = 0;
+        foreach ($days as $day) {
+            $streak = (float) ($day['profit'] ?? 0) < 0 ? $streak + 1 : 0;
+            if ($streak >= $requiredDays) return true;
+        }
+
+        return false;
     }
 
     private function identityRowspans(array $rows): array
