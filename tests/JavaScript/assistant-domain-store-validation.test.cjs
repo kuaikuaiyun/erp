@@ -64,6 +64,8 @@ function fixture() {
     const labels = {
         title: '请修正以下填写内容后再保存：', required: '请填写:field', invalid: '请检查:field',
         session: 'session', permission: 'permission', network: 'network', timeout: 'timeout',
+        diagnostic: 'Reference: :id', diagnosticLogUnavailable: 'log unavailable',
+        diagnosticSaved: 'already saved', diagnosticNotSaved: 'not saved', diagnosticUnconfirmed: 'unconfirmed',
         server: 'server', missing: 'missing', conflict: 'conflict', tooLarge: 'tooLarge', tooMany: 'tooMany', unexpected: 'unexpected',
     };
     node.textContent = JSON.stringify(labels);
@@ -165,4 +167,23 @@ test('hidden sections containing server errors are revealed for correction', () 
     f.api.failure(f.form, {status: 422, responseJSON: {errors: {nbc_app_token: ['Invalid token']}}});
     assert.equal(a.group.hidden, false);
     assert.equal(a.input.focused, true);
+});
+
+test('diagnostic reference and verified outcome are shown without exposing raw exceptions', () => {
+    for (const [outcome, expected] of [['saved', 'already saved'], ['not_saved', 'not saved'], ['unconfirmed', 'unconfirmed']]) {
+        const f = fixture();
+        f.api.failure(f.form, {status: 500, responseJSON: {message: 'raw SQL and secret', diagnostic_id: '1234567890abcdef', save_outcome: outcome, diagnostic_log_written: true}});
+        const summary = f.form.querySelector('[data-store-validation-summary]').textContent;
+        assert.equal(summary, expected + ' Reference: 1234567890abcdef');
+        assert.doesNotMatch(summary, /raw SQL/);
+    }
+    const f = fixture();
+    f.api.failure(f.form, {status: 500, responseJSON: {diagnostic_id: '1234567890abcdef', save_outcome: 'not_saved', diagnostic_log_written: false}});
+    assert.match(f.form.textContent, /log unavailable/);
+});
+
+test('diagnostic response header works even when the error response body is not JSON', () => {
+    const f = fixture();
+    f.api.failure(f.form, {status: 500, responseText: 'Server Error', getResponseHeader: () => '1234567890abcdef'});
+    assert.match(f.form.textContent, /server Reference: 1234567890abcdef/);
 });

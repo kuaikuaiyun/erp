@@ -436,6 +436,11 @@ return [
         ],
 
         'validation' => [
+            'save_diagnostic_saved' => '店铺资料已保存，但后续处理失败。请勿重复提交，先核对列表，并将诊断编号提供给管理员。',
+            'save_diagnostic_not_saved' => '本次店铺资料未提交保存。弹窗内填写内容仍保留，请将诊断编号提供给管理员。',
+            'save_diagnostic_unconfirmed' => '暂时无法确认保存结果。请先核对列表再重试，并将诊断编号提供给管理员。',
+            'diagnostic_reference' => '诊断编号：:id',
+            'diagnostic_log_unavailable' => '独立诊断日志写入失败，请管理员检查日志目录权限及 PHP 错误日志。',
             'summary_title' => '请修正以下填写内容后再保存：',
             'invalid_field' => '请检查:field的格式或填写内容。',
             'session_expired' => '登录或页面会话已失效。请先复制填写内容，在新标签页重新登录后再试。',

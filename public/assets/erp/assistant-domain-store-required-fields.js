@@ -144,6 +144,16 @@
             : code === 429 ? settings.tooMany
             : code >= 500 ? settings.server
             : settings.unexpected;
+        var diagnosticId = response && response.diagnostic_id
+            || (typeof xhr.getResponseHeader === 'function' ? xhr.getResponseHeader('X-Domain-Store-Diagnostic-Id') : '');
+        if (typeof diagnosticId === 'string' && /^[a-f0-9]{16}$/.test(diagnosticId)) {
+            if (code >= 500 && response) {
+                var outcomes = { saved: settings.diagnosticSaved, not_saved: settings.diagnosticNotSaved, unconfirmed: settings.diagnosticUnconfirmed };
+                message = outcomes[response.save_outcome] || message;
+            }
+            message += ' ' + (settings.diagnostic || ':id').replace(':id', diagnosticId);
+            if (response && response.diagnostic_log_written === false) message += ' ' + settings.diagnosticLogUnavailable;
+        }
         showErrors(form, {}, message);
     }
 

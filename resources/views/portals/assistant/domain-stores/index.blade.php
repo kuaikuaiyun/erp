@@ -743,7 +743,7 @@
         window.ErpAssistantDomainStoreBatchUpdateFieldGroups = @json($batchUpdateFieldGroups);
         window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js?v=20261102-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261020-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261021-2"></script>

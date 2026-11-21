@@ -194,7 +194,7 @@ Route::post('/domain-stores/email-purchases/sync', [DomainStoreController::class
 Route::get('/domain-stores/email-purchases/status', [DomainStoreController::class, 'emailPurchaseStatus'])->name('assistant.domain-stores.email-purchases.status');
 Route::get('/domain-stores/batch-edit', [DomainStoreController::class, 'batchEdit'])->name('assistant.domain-stores.batch-edit');
 Route::get('/domain-stores/create', [DomainStoreController::class, 'create'])->name('assistant.domain-stores.create');
-Route::post('/domain-stores', [DomainStoreController::class, 'store'])->name('assistant.domain-stores.store');
+Route::post('/domain-stores', [DomainStoreController::class, 'store'])->middleware(\App\Portals\Assistant\Http\Middleware\DiagnoseDomainStoreSave::class)->name('assistant.domain-stores.store');
 Route::post('/domain-stores/export', [DomainStoreController::class, 'export'])->name('assistant.domain-stores.export');
 Route::get('/domain-stores/import-template', [DomainStoreController::class, 'importTemplate'])->name('assistant.domain-stores.import-template');
 Route::post('/domain-stores/import', [DomainStoreController::class, 'import'])->name('assistant.domain-stores.import');
@@ -210,7 +210,7 @@ Route::post('/domain-stores/owners/assign', [DomainStoreController::class, 'assi
 Route::delete('/domain-stores/owners/clear', [DomainStoreController::class, 'clearOwnerBatch'])->name('assistant.domain-stores.owners.clear');
 Route::put('/domain-stores/owner-scopes', [DomainStoreController::class, 'updateOwnerDepartmentScopes'])->name('assistant.domain-stores.owner-scopes.update');
 Route::get('/domain-stores/{domainStore}/edit', [DomainStoreController::class, 'edit'])->name('assistant.domain-stores.edit');
-Route::put('/domain-stores/{domainStore}', [DomainStoreController::class, 'update'])->name('assistant.domain-stores.update');
+Route::put('/domain-stores/{domainStore}', [DomainStoreController::class, 'update'])->middleware(\App\Portals\Assistant\Http\Middleware\DiagnoseDomainStoreSave::class)->name('assistant.domain-stores.update');
 Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'destroy'])->name('assistant.domain-stores.destroy');
 Route::get('/domain-stores/{domainStore}/history', [DomainStoreController::class, 'history'])->name('assistant.domain-stores.history');
 Route::patch('/domain-stores/{domainStore}/owner-histories/{ownerHistory}/effective-time', [DomainStoreController::class, 'updateOwnerHistoryEffectiveTime'])->name('assistant.domain-stores.owner-histories.effective-time');

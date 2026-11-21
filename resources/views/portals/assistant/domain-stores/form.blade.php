@@ -53,6 +53,11 @@
         'failed' => $t('email_purchase_status.lookup_failed'),
     ];
     $storeValidationConfig = [
+        'diagnostic' => $t('validation.diagnostic_reference', ['id' => ':id']),
+        'diagnosticLogUnavailable' => $t('validation.diagnostic_log_unavailable'),
+        'diagnosticSaved' => $t('validation.save_diagnostic_saved'),
+        'diagnosticNotSaved' => $t('validation.save_diagnostic_not_saved'),
+        'diagnosticUnconfirmed' => $t('validation.save_diagnostic_unconfirmed'),
         'title' => $t('validation.summary_title'),
         'required' => $t('validation.required_field', ['field' => ':field']),
         'invalid' => $t('validation.invalid_field', ['field' => ':field']),
@@ -674,7 +679,7 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-2"></script>
     <script>
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);

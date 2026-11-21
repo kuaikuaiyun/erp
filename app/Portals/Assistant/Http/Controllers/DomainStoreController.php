@@ -12,6 +12,7 @@ use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantDomainCheckService;
 use App\Portals\Assistant\AssistantDomainStoreHistoryService;
+use App\Portals\Assistant\DomainStoreSaveDiagnostic;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
@@ -404,38 +405,51 @@ class DomainStoreController extends Controller
 
     public function store(Request $request): Response|RedirectResponse
     {
+        DomainStoreSaveDiagnostic::mark($request, 'portal_context');
         $context = $this->portalContext($request);
 
         if ($context instanceof Response) {
             return $context;
         }
 
+        DomainStoreSaveDiagnostic::mark($request, 'authorization');
         $this->authorization->ensureCanManageDomainStores($context['user']);
+        DomainStoreSaveDiagnostic::mark($request, 'form_validation');
         $data = $this->validatedData($request, null, $context['user']);
+        DomainStoreSaveDiagnostic::mark($request, 'department_access_validation');
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user']);
+        DomainStoreSaveDiagnostic::mark($request, 'owner_validation');
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user']);
         $ownerOperationDepartmentId = $this->ownerOperationDepartmentIdForRequest($request, null, $ownerUserId);
+        DomainStoreSaveDiagnostic::mark($request, 'owner_effective_time_validation');
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
 
-        $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt): AssistantDomainStore {
+        $store = DomainStoreSaveDiagnostic::transaction($request,
+            DB::connection(config('admin.database.connection') ?: config('database.default')),
+            function () use ($request, $data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt): AssistantDomainStore {
                 $store = new AssistantDomainStore($data);
                 $store->owner_department_id = $departmentAccess['owner_department_id'];
                 $store->owner_user_id = $ownerUserId;
                 $store->owner_operation_department_id = $ownerOperationDepartmentId;
                 $this->setLastOperator($store, $context['user']);
+                DomainStoreSaveDiagnostic::mark($request, 'store_write');
                 $store->save();
+                DomainStoreSaveDiagnostic::mark($request, 'owner_history_baseline', (int) $store->getKey());
                 // New records do not have an existing ownership range. Use the
                 // submitted effective time for their initial range, not save time.
                 $this->ownerTimeline->ensureBaseline($store, $context['user'], $ownerEffectiveAt);
+                DomainStoreSaveDiagnostic::mark($request, 'department_access_write');
                 $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
+                DomainStoreSaveDiagnostic::mark($request, 'audit_history_write');
                 $this->history->recordCreated($store, $context['user']);
 
                 return $store;
             });
 
+        DomainStoreSaveDiagnostic::mark($request, 'webhook_registration');
         $webhook = $this->autoRegisterWebhook($store, $context['user']);
 
+        DomainStoreSaveDiagnostic::mark($request, 'response_build');
         if ($this->isModalFormRequest($request)) {
             return response()->json([
                 'message' => __('assistant.domain_stores.messages.created', ['name' => $store->shop_name]),
@@ -480,22 +494,30 @@ class DomainStoreController extends Controller
 
     public function update(Request $request, AssistantDomainStore $domainStore): Response|RedirectResponse
     {
+        DomainStoreSaveDiagnostic::mark($request, 'portal_context');
         $context = $this->portalContext($request);
 
         if ($context instanceof Response) {
             return $context;
         }
 
+        DomainStoreSaveDiagnostic::mark($request, 'authorization');
         $this->authorization->ensureCanManageDomainStores($context['user']);
+        DomainStoreSaveDiagnostic::mark($request, 'store_lookup');
         $domainStore = $this->findAccessibleStoreOrFail($context['user'], $domainStore->getKey());
+        DomainStoreSaveDiagnostic::mark($request, 'form_validation');
         $data = $this->validatedData($request, $domainStore, $context['user']);
+        DomainStoreSaveDiagnostic::mark($request, 'department_access_validation');
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
+        DomainStoreSaveDiagnostic::mark($request, 'owner_validation');
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
         $ownerOperationDepartmentId = $this->ownerOperationDepartmentIdForRequest($request, $domainStore, $ownerUserId);
+        DomainStoreSaveDiagnostic::mark($request, 'owner_effective_time_validation');
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
         $ownerEffectiveAtSubmitted = $this->hasOwnerEffectiveAt($request);
 
-        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt, $ownerEffectiveAtSubmitted): void {
+        DomainStoreSaveDiagnostic::transaction($request, DB::connection($domainStore->getConnectionName()), function () use ($request, $domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt, $ownerEffectiveAtSubmitted): void {
+            DomainStoreSaveDiagnostic::mark($request, 'audit_snapshot');
             $before = $domainStore->historySnapshot();
             $previousOwnerId = $domainStore->owner_user_id === null ? null : (int) $domainStore->owner_user_id;
             $previousOperationDepartmentId = $domainStore->owner_operation_department_id === null ? null : (int) $domainStore->owner_operation_department_id;
@@ -503,6 +525,7 @@ class DomainStoreController extends Controller
                 || $previousOperationDepartmentId !== $ownerOperationDepartmentId
                 || $ownerEffectiveAtSubmitted;
             if ($ownerTimelineChangeRequested) {
+                DomainStoreSaveDiagnostic::mark($request, 'owner_history_baseline');
                 $this->ownerTimeline->ensureBaseline($domainStore, $context['user']);
             }
             $domainStore->fill($data);
@@ -512,18 +535,24 @@ class DomainStoreController extends Controller
             $domainStore->unsetRelation('ownerUser');
             $domainStore->unsetRelation('ownerOperationDepartment');
             $this->setLastOperator($domainStore, $context['user']);
+            DomainStoreSaveDiagnostic::mark($request, 'store_write');
             $domainStore->save();
+            DomainStoreSaveDiagnostic::mark($request, 'department_access_write');
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
+            DomainStoreSaveDiagnostic::mark($request, 'audit_history_write');
             $this->history->recordUpdated($domainStore, $before, $domainStore->historySnapshot(), $context['user']);
             if ($ownerTimelineChangeRequested) {
                 $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
                 $operationDepartment = $ownerOperationDepartmentId === null ? null : Department::query()->findOrFail($ownerOperationDepartmentId);
+                DomainStoreSaveDiagnostic::mark($request, 'owner_history_assignment_and_order_refresh');
                 $this->ownerTimeline->assign($domainStore, $newOwner, $operationDepartment, $ownerEffectiveAt, $context['user']);
             }
         });
 
+        DomainStoreSaveDiagnostic::mark($request, 'webhook_registration');
         $webhook = $this->autoRegisterWebhook($domainStore, $context['user']);
 
+        DomainStoreSaveDiagnostic::mark($request, 'response_build');
         if ($this->isModalFormRequest($request)) {
             return response()->json([
                 'message' => __('assistant.domain_stores.messages.updated', ['name' => $domainStore->shop_name]),

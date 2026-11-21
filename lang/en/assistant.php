@@ -362,6 +362,11 @@ return [
         ],
 
         'validation' => [
+            'save_diagnostic_saved' => 'The store details were saved, but a later step failed. Do not submit again; verify the list and provide the diagnostic reference to an administrator.',
+            'save_diagnostic_not_saved' => 'The store details were not committed. Your entries are retained in this dialog. Provide the diagnostic reference to an administrator.',
+            'save_diagnostic_unconfirmed' => 'Unable to confirm the save result. Verify the list before retrying and provide the diagnostic reference to an administrator.',
+            'diagnostic_reference' => 'Diagnostic reference: :id',
+            'diagnostic_log_unavailable' => 'The dedicated diagnostic log could not be written. Ask an administrator to check log directory permissions and the PHP error log.',
             'summary_title' => 'Please correct the following fields before saving.',
             'invalid_field' => 'Check the format or value of :field.',
             'required_field' => 'Please fill in or select :field.',
