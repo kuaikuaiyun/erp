@@ -271,7 +271,7 @@ class AppLovinAccountStatisticsController extends Controller
     /** @return Collection<int, OperationReport> */
     private function appLovinPersonalReports(AdminUser $viewer, array $visibleDepartmentIds, array $selectedDepartmentIds): Collection
     {
-        $query = OperationReport::query();
+        $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $this->canSeeAll($viewer)) {
             $visibleDepartmentIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $visibleDepartmentIds);
         }
@@ -311,7 +311,10 @@ class AppLovinAccountStatisticsController extends Controller
                     'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name,
                     'account_name' => $ad['account_name'], 'account_number' => $ad['account_number'], 'store_domains' => []];
                 if ($ad['domain'] !== '') {
-                    $activation[$ad['identity']]['store_domains'][mb_strtolower($ad['domain'])] = $ad['domain'];
+                    // Personal situation follows the subscription report's current
+                    // account binding instead of listing every historical domain.
+                    // Reports are ordered by date/id, so the latest approved binding wins.
+                    $activation[$ad['identity']]['store_domains'] = [mb_strtolower($ad['domain']) => $ad['domain']];
                 }
             }
             if ($report->status !== OperationReport::STATUS_APPROVED) continue;
@@ -376,7 +379,7 @@ class AppLovinAccountStatisticsController extends Controller
                 || ($overRoi !== null && $overRoi > 0 && $overRoi < 1.4);
             // array_merge is intentional: the activation payload holds domains as an
             // array while the table needs a displayable string.
-            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
+            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'total_roi' => $cumulative > 0 ? $storePerformance / $cumulative : null, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
         })->values();
     }
 
