@@ -43,12 +43,16 @@ trait AssetRemindersEnvironment
         (require database_path('migrations/2026_11_19_000300_add_departments_to_asset_reminder_rules.php'))->up();
         (require database_path('migrations/2026_11_20_000100_extend_asset_reminder_notifications.php'))->up();
         (require database_path('migrations/2026_11_20_000200_add_asset_reminder_group_owners.php'))->up();
+        (require database_path('migrations/2026_11_20_000300_add_asset_reminder_calendars.php'))->up();
         Schema::create('operation_task_recaps', function (Blueprint $t) {
             $t->id(); $t->unsignedBigInteger('user_id'); $t->date('data_date');
             $t->string('workflow_status')->default('pending_leader'); $t->timestamp('submitted_at')->nullable();
             $t->softDeletes(); $t->timestamps();
         });
         DingTalkCompanyGrant::create(['company_id' => $this->company->id, 'user_id' => $this->hrActor->id, 'created_by' => 1]);
+        $days = [];
+        for ($day = 1; $day <= 30; $day++) { $date = Carbon::parse('2026-11-'.sprintf('%02d', $day)); $days[$date->toDateString()] = $date->isWeekend() ? 'rest' : 'work'; }
+        app(\App\Portals\AssetManager\ReminderCalendarService::class)->save($this->hrActor, ['company_id' => $this->company->id, 'month' => '2026-11', 'version' => 0, 'days' => $days]);
         Http::swap(new Factory);
         Http::preventStrayRequests();
         Http::fake(function ($request) {
@@ -92,7 +96,7 @@ trait AssetRemindersEnvironment
     protected function ruleValues(int $group, array $overrides = []): array
     {
         return array_replace(['department_id' => $this->teamA->id, 'group_id' => $group, 'type' => 'advertising', 'enabled' => true,
-            'attendance_group_id' => 12, 'operator_userid' => 'attendance-admin', 'work_times' => ['10:00', '14:00'],
+            'calendar_company_id' => $this->company->id, 'attendance_group_id' => 12, 'operator_userid' => 'attendance-admin', 'work_times' => ['10:00', '14:00'],
             'rest_times' => ['11:00'], 'starts_on' => '2026-11-18', 'entry_url' => 'https://tasks.example.com/recaps'], $overrides);
     }
 

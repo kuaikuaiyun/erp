@@ -150,13 +150,13 @@ class ReminderService
             'remark' => ['nullable', 'string', 'max:500'],
         ] : [
             'group_id' => ['required', 'integer'], 'type' => ['required', Rule::in(['recap', 'advertising', 'submission'])],
-            'attendance_group_id' => ['required', 'integer', 'min:1'],
+            'calendar_company_id' => ['required', 'integer', 'min:1'],
             'work_times' => ['present', 'array', 'max:3'], 'work_times.*' => ['required', 'date_format:H:i', 'distinct'],
             'rest_times' => ['present', 'array', 'max:3'], 'rest_times.*' => ['required', 'date_format:H:i', 'distinct'],
             'starts_on' => ['required', 'date_format:Y-m-d'], 'entry_url' => ['required', 'url:http,https', 'max:1000'],
         ];
         if ($kind === 'rules' && ($input['type'] ?? '') === 'submission') {
-            unset($rules['attendance_group_id'], $rules['work_times'], $rules['work_times.*'], $rules['rest_times'], $rules['rest_times.*'], $rules['starts_on']);
+            unset($rules['calendar_company_id'], $rules['work_times'], $rules['work_times.*'], $rules['rest_times'], $rules['rest_times.*'], $rules['starts_on']);
             $rules['submission_types'] = ['required', 'array', 'min:1', 'max:3'];
             $rules['submission_types.*'] = ['required', 'distinct', Rule::in(SubmissionNotificationService::TYPES)];
         }
@@ -214,10 +214,11 @@ class ReminderService
             $group = $this->record($actor, 'groups', (int) $data['group_id'], true);
             $company = $this->company($actor, (int) $group->company_id);
             if ($data['type'] !== 'submission') {
-            $attendance = $this->attendance->group($company, (int) $data['attendance_group_id']);
-            $this->attendance->dayType($attendance, now('Asia/Shanghai'));
-            $data['attendance_group_name'] = $attendance['group_name'];
+            abort_unless((int) $data['calendar_company_id'] === (int) $company->id, 422, __('asset_reminders.calendar.company_mismatch'));
+            $data['attendance_group_id'] = 0; $data['attendance_group_name'] = '';
+            // A missing month is reported at runtime; calendars can be configured after the rule.
             } else {
+                $data['calendar_company_id'] = null;
                 $data['attendance_group_id'] = 0; $data['attendance_group_name'] = '';
                 $data['work_times'] = []; $data['rest_times'] = []; $data['starts_on'] = $old?->starts_on ?? now('Asia/Shanghai')->toDateString();
                 $data['submission_types'] = json_encode($data['submission_types']);
@@ -377,7 +378,18 @@ class ReminderService
         }
         $runId = null;
         try {
-            if ($this->db()->table('asset_reminder_runs')->where('delivery_key', $key)->exists()) {
+            if (! $test) {
+                foreach ($rules as $rule) {
+                    [, $company] = $this->runtime($rule);
+                    $today = $date->copy()->addDay()->setTimezone('Asia/Shanghai');
+                    $dayType = app(ReminderCalendarService::class)->dayType($rule, (int) $company->id, $today);
+                    $times = json_decode($rule->{$dayType.'_times'}, true);
+                    if (($times[$round - 1] ?? null) !== $slot) throw new ReminderCheckException('conflict');
+                }
+            }
+            if ($this->db()->table('asset_reminder_runs')->where('delivery_key', $key)->exists()
+                || (! $test && $this->db()->table('asset_reminder_runs')->where('group_id', $first->group_id)->where('type', $first->type)
+                    ->where('data_date', $date->toDateString())->where('round', $round)->where('is_test', false)->exists())) {
                 return ['status' => 'duplicate'];
             }
             $runId = $this->db()->table('asset_reminder_runs')->insertGetId([
@@ -430,6 +442,7 @@ class ReminderService
 
     public function process(Carbon $now): int
     {
+        $now = $now->copy()->setTimezone('Asia/Shanghai');
         $this->db()->table('asset_reminder_runs')->whereIn('status', ['preparing', 'sending'])->where('updated_at', '<', now('UTC')->subMinutes(30))
             ->update(['status' => 'uncertain', 'error' => __('asset_reminders.interrupted'), 'updated_at' => now('UTC')]);
         $batches = []; $errors = 0;
@@ -437,8 +450,7 @@ class ReminderService
             if ($rule->starts_on > $now->copy()->subDay()->toDateString()) { continue; }
             try {
                 [, $company] = $this->runtime($rule);
-                $group = $this->attendance->group($company, (int) $rule->attendance_group_id);
-                $dayType = $this->attendance->dayType($group, $now);
+                $dayType = app(ReminderCalendarService::class)->dayType($rule, (int) $company->id, $now);
                 // Snapshot the report date even when today has no configured sending slot.
                 // Otherwise a day-off sending policy could lose yesterday's historical roster.
                 if ($rule->type === 'recap') {
@@ -459,7 +471,7 @@ class ReminderService
         foreach ($batches as $rules) {
             try {
                 [, $company] = $this->runtime($rules[0]);
-                $dayType = $this->attendance->dayType($this->attendance->group($company, (int) $rules[0]->attendance_group_id), $now);
+                $dayType = app(ReminderCalendarService::class)->dayType($rules[0], (int) $company->id, $now);
                 $round = array_search($now->format('H:i'), json_decode($rules[0]->{$dayType.'_times'}, true), true) + 1;
                 $this->deliver($rules, $now->copy()->subDay()->startOfDay(), $now->format('H:i'), $round);
             } catch (\Throwable) { $errors++; }

@@ -65,7 +65,22 @@ class AssistantPortalAuthorizationService
      */
     public function canManageAllDomainStores(AdminUser $user): bool
     {
-        return $this->canManageQuickOptions($user);
+        if ($user->isAdministrator()) {
+            return true;
+        }
+
+        $departmentId = $this->editorDepartmentId();
+
+        // Quick-option management also allows child managers. Full data access
+        // requires a direct manager/deputy membership in the Assistant root.
+        return $departmentId !== null
+            && $user->departments()
+                ->whereKey($departmentId)
+                ->wherePivotIn('position', [
+                    Department::POSITION_MANAGER,
+                    Department::POSITION_DEPUTY,
+                ])
+                ->exists();
     }
 
     /**

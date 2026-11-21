@@ -58,6 +58,8 @@
             if (key === 'department_id' && (row.department_ids || row.owner_source_ids != null)) return;
             if (key === 'department_ids') value = JSON.parse(value).map(function (id) { return c.departments[id] || id; }).join(' / ');
             if (key === 'department_id') value = c.departments[value] || value;
+            if (key === 'attendance_group_id' || key === 'attendance_group_name') return;
+            if (key === 'calendar_company_id') value = c.calendarCompanies[value] || value;
             if (key === 'company_id') value = c.companies[value] || value;
             if (key === 'group_id') value = c.groups[value] || value;
             if (key === 'type') value = t.types[value];
@@ -156,24 +158,16 @@
                 typeSelect.disabled = !!id || !!notification;
                 if (row.type === 'recap') { status.value = '0'; grid.appendChild(node('p', t.recap_disabled, 'ar-hint ar-wide')); }
                 var group = field(grid, 'group_id', row.group_id, options.groups.map(function (g) { return {id: g.id, name: g.name}; }));
-                var attendance = field(grid, 'attendance_group_id', '', []), refresh = node('button', t.refresh, 'btn btn-default btn-sm'), info = node('p', '', 'ar-week');
-                refresh.type = 'button'; attendance.parentElement.append(refresh, info);
-                var attendanceSeq = 0;
-                async function loadAttendance(force) {
-                    var n = ++attendanceSeq, selectedGroup = options.groups.find(function (g) { return String(g.id) === group.value; });
-                    attendance.replaceChildren(new Option(t.choose, '')); info.textContent = ''; attendance.disabled = true;
-                    if (!selectedGroup || typeSelect.value === 'submission') return;
-                    refresh.disabled = true; info.textContent = t.loading;
-                    try {
-                        var result = await api('/attendance?company_id=' + encodeURIComponent(selectedGroup.company_id) + (force ? '&refresh=1' : ''));
-                        if (n !== attendanceSeq || seq !== requestSeq) return;
-                        result.groups.forEach(function (g) { attendance.add(new Option(g.group_name, g.group_id)); });
-                        if (String(row.group_id) === group.value) attendance.value = String(row.attendance_group_id || '');
-                        attendance.disabled = false; info.textContent = t.calendar_hint; fail('');
-                    } catch (e) { if (seq === requestSeq) { info.textContent = e.message; fail(e.message); } }
-                    finally { if (n === attendanceSeq && seq === requestSeq) refresh.disabled = false; }
+                var attendance = field(grid, 'calendar_company_id', '', []);
+                function loadAttendance() {
+                    var selectedGroup = options.groups.find(function (g) { return String(g.id) === group.value; });
+                    attendance.replaceChildren(new Option(t.choose, ''));
+                    var company = selectedGroup && options.companies.find(function (item) { return String(item.id) === String(selectedGroup.company_id); });
+                    if (company) attendance.add(new Option(company.name, company.id));
+                    if (String(row.group_id) === group.value && row.calendar_company_id) attendance.value = String(row.calendar_company_id);
                 }
-                group.onchange = function () { loadAttendance(false); }; refresh.onclick = function () { loadAttendance(true); };
+                attendance.parentElement.appendChild(node('p', t.calendar_hint, 'ar-hint'));
+                group.onchange = loadAttendance;
                 var start = field(grid, 'starts_on', row.starts_on || options.yesterday, null, 'date', t.start_hint); start.disabled = !!id; start.min = options.yesterday;
                 field(grid, 'entry_url', id ? row.entry_url : c.defaultEntryUrl, null, 'url', t.url_hint);
                 times(grid, 'work_times', row.work_times ? JSON.parse(row.work_times) : []);
@@ -237,7 +231,7 @@
         confirm.onclick = async function () { if (busy) return; busy = true; confirm.disabled = true; try { await api('/' + type + '/' + id + (permanent ? '?permanent=1' : ''), 'DELETE'); window.location.reload(); } catch (e) { fail(e.message); confirm.disabled = false; busy = false; } };
     }
     form.addEventListener('submit', async function (event) {
-        event.preventDefault(); if (busy || mode !== 'edit' || save.disabled || !form.reportValidity()) return;
+        event.preventDefault(); if (mode === 'calendar') { if (!busy) dialog.calendarSave(); return; } if (busy || mode !== 'edit' || save.disabled || !form.reportValidity()) return;
         var data = {version: version}; fields.querySelectorAll('[name]').forEach(function (e) { data[e.name] = e.value; }); data.enabled = data.enabled === '1';
         if (kind === 'rules') data.department_ids = Array.from(fields.querySelectorAll('[data-department]:checked')).map(function (input) { return Number(input.dataset.department); });
         if (data.type === 'submission') data.submission_types = Array.from(fields.querySelectorAll('[data-submission-type]:checked')).map(function (input) { return input.dataset.submissionType; });
@@ -248,6 +242,75 @@
         try { await api('/' + kind + (recordId ? '/' + recordId : ''), recordId ? 'PUT' : 'POST', data); window.location.reload(); }
         catch (e) { busy = false; form.removeAttribute('aria-busy'); states.forEach(function (s) { s[0].disabled = s[1]; }); save.textContent = t.save; fail(e.message); }
     });
+    var calendarState = null;
+    async function openCalendar() {
+        if (busy) return;
+        var requestSeq = show(t.calendar.title, 'calendar'), monthValue = new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Shanghai'}).slice(0, 7);
+        var grid = node('div', null, 'ar-form-grid'); fields.appendChild(grid);
+        var company = field(grid, 'company_id', '', []), month = field(grid, 'month', monthValue, null, 'month');
+        company.parentElement.firstChild.nodeValue = t.calendar.company;
+        var nav = node('div', null, 'ar-tools ar-wide'), body = node('div', null, 'ar-wide'); grid.append(nav, body);
+        var dirty = false, loadedCompany = '', loadedMonth = monthValue, loadSeq = 0;
+        function discard() { return !dirty || window.confirm(t.calendar.unsaved); }
+        function draw() {
+            body.replaceChildren(); if (!calendarState) return;
+            var state = calendarState, writable = state.can_write;
+            save.hidden = !writable; save.disabled = !writable;
+            body.appendChild(node('p', state.version ? t.calendar.configured : t.calendar.unconfigured, 'ar-hint'));
+            body.appendChild(node('p', t.calendar.shared_hint, 'ar-hint'));
+            if (state.updated_at) body.appendChild(node('p', t.calendar.updated + ' ' + state.updated_by + ' · ' + new Date(state.updated_at.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'}), 'ar-hint'));
+            var tools = node('div', null, 'ar-tools'); body.appendChild(tools);
+            [['weekdays', 'week'], ['all_work', 'work'], ['all_rest', 'rest']].forEach(function (item) {
+                var button = node('button', t.calendar[item[0]], 'btn btn-default btn-sm'); button.type = 'button'; button.disabled = !writable;
+                button.onclick = function () {
+                    if (dirty && !window.confirm(t.calendar.replace)) return;
+                    Object.keys(state.days).forEach(function (date) { var day = new Date(date + 'T12:00:00Z').getUTCDay(); state.days[date] = item[1] === 'week' ? (day === 0 || day === 6 ? 'rest' : 'work') : item[1]; }); dirty = true; draw();
+                }; tools.appendChild(button);
+            });
+            var calendar = node('div', null, 'ar-calendar-grid'); body.appendChild(calendar);
+            t.calendar.week.forEach(function (day) { calendar.appendChild(node('div', day, 'ar-calendar-week')); });
+            var first = new Date(loadedMonth + '-01T12:00:00Z'), offset = (first.getUTCDay() + 6) % 7;
+            for (var i = 0; i < offset; i++) calendar.appendChild(node('div'));
+            Object.entries(state.days).forEach(function (entry) {
+                var date = entry[0], value = entry[1], button = node('button', null, 'ar-calendar-day ' + (value || 'unset'));
+                button.type = 'button'; button.disabled = !writable; button.setAttribute('aria-label', date + ' ' + (t.calendar[value] || t.calendar.unconfigured));
+                button.append(node('strong', Number(date.slice(-2))), node('span', t.calendar[value] || t.calendar.unconfigured));
+                button.onclick = function () { state.days[date] = value === 'work' ? 'rest' : 'work'; dirty = true; draw(); }; calendar.appendChild(button);
+            });
+        }
+        async function load() {
+            var current = ++loadSeq; calendarState = null; save.hidden = true; body.replaceChildren(node('p', t.loading)); fail('');
+            if (!company.value || !/^\d{4}-\d{2}$/.test(month.value)) { body.replaceChildren(); return; }
+            try {
+                var result = await api('/calendar?company_id=' + encodeURIComponent(company.value) + '&month=' + encodeURIComponent(month.value));
+                if (requestSeq !== seq || current !== loadSeq) return;
+                loadedCompany = company.value; loadedMonth = month.value; dirty = false; calendarState = result;
+                if (!result.days) { result.days = {}; var count = new Date(Number(loadedMonth.slice(0, 4)), Number(loadedMonth.slice(5)), 0).getDate(); for (var d = 1; d <= count; d++) result.days[loadedMonth + '-' + String(d).padStart(2, '0')] = null; }
+                draw();
+            } catch (e) { if (requestSeq === seq && current === loadSeq) { body.replaceChildren(); fail(e.message); } }
+        }
+        company.onchange = function () { if (!discard()) { company.value = loadedCompany; return; } dirty = false; load(); };
+        month.onchange = function () { if (!discard()) { month.value = loadedMonth; return; } dirty = false; load(); };
+        [-1, 1].forEach(function (delta) { var button = node('button', delta < 0 ? t.calendar.previous : t.calendar.next, 'btn btn-default btn-sm'); button.type = 'button'; button.onclick = function () { if (!discard()) return; var date = new Date(month.value + '-01T12:00:00Z'); date.setUTCMonth(date.getUTCMonth() + delta); month.value = date.toISOString().slice(0, 7); dirty = false; load(); }; nav.appendChild(button); });
+        calendarState = null;
+        dialog.calendarDirty = function () { return dirty; };
+        dialog.calendarSave = async function () {
+            if (!calendarState || !calendarState.can_write) return;
+            if (Object.values(calendarState.days).some(function (value) { return value !== 'work' && value !== 'rest'; })) { fail(t.calendar.incomplete); return; }
+            if (!window.confirm(t.calendar.impact)) return;
+            busy = true; save.disabled = true; save.textContent = t.saving;
+            var controls = Array.from(fields.querySelectorAll('input,select,button')); var states = controls.map(function (e) { return e.disabled; }); controls.forEach(function (e) { e.disabled = true; });
+            try { await api('/calendar', 'PUT', {company_id: loadedCompany, month: loadedMonth, version: calendarState.version, days: calendarState.days}); dirty = false; await load(); }
+            catch (e) { fail(e.message); }
+            finally { busy = false; save.disabled = !calendarState || !calendarState.can_write; save.textContent = t.save; controls.forEach(function (e, i) { e.disabled = states[i]; }); }
+        };
+        try {
+            var options = await api('/calendar?month=' + monthValue); if (seq !== requestSeq) return;
+            options.companies.forEach(function (item) { company.add(new Option(item.name, item.id)); });
+            if (options.companies.length) { company.value = options.companies[0].id; await load(); } else body.appendChild(node('p', t.no_company, 'ar-hint'));
+        } catch (e) { if (seq === requestSeq) fail(e.message); }
+    }
+    document.querySelectorAll('[data-ar-calendar]').forEach(function (button) { button.onclick = openCalendar; });
     document.querySelectorAll('[data-ar-guide]').forEach(function (button) {
         button.onclick = function () {
             if (busy) return;
@@ -264,7 +327,7 @@
     document.querySelectorAll('[data-ar-remove]').forEach(function (b) { b.onclick = function () { remove(b.dataset.arRemove, b.dataset.id); }; });
     document.querySelectorAll('[data-ar-delete]').forEach(function (b) { b.onclick = function () { remove('rules', b.dataset.arDelete, true); }; });
     document.querySelectorAll('[data-ar-runs]').forEach(function (b) { b.onclick = function () { runs(b.dataset.arRuns, 1); }; });
-    dialog.querySelectorAll('[data-ar-close]').forEach(function (b) { b.onclick = function () { if (!busy) dialog.close(); }; });
-    dialog.addEventListener('cancel', function (event) { if (busy) event.preventDefault(); });
+    dialog.querySelectorAll('[data-ar-close]').forEach(function (b) { b.onclick = function () { if (!busy && (mode !== 'calendar' || !dialog.calendarDirty() || window.confirm(t.calendar.unsaved))) dialog.close(); }; });
+    dialog.addEventListener('cancel', function (event) { if (busy || (mode === 'calendar' && dialog.calendarDirty() && !window.confirm(t.calendar.unsaved))) event.preventDefault(); });
     dialog.addEventListener('close', function () { ++seq; fields.replaceChildren(); form.removeAttribute('aria-busy'); });
 })(window.jQuery);

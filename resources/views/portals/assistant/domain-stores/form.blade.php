@@ -11,6 +11,10 @@
     $value = static fn (string $field, mixed $fallback = null): mixed => old($field, $store->getAttribute($field) ?? $fallback);
     $dateValue = static fn (mixed $date): string => $date instanceof \DateTimeInterface ? $date->format('Y-m-d') : (string) ($date ?? '');
     $tagValues = static fn (string $field): array => \App\Models\AssistantDomainStore::normalizeMultiValue($value($field, []));
+    $emailBoundValue = $value('email_bound');
+    $emailBoundChoice = $isCreate && ($emailBoundValue === null || $emailBoundValue === '')
+        ? ''
+        : ((bool) $emailBoundValue ? '1' : '0');
     $teamValues = $tagValues('team');
     $erpValues = $tagValues('erp');
     $domainCheckStoredStatus = (string) $value('domain_check_status', \App\Models\AssistantDomainStore::DOMAIN_CHECK_NOT_CHECKED);
@@ -108,9 +112,9 @@
                         <input id="email" type="email" name="email" class="form-control" value="{{ $value('email') }}" maxlength="191">
                         @error('email')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('domain_expires_at') has-error @enderror">
-                        <label for="domain_expires_at">{{ $t('fields.domain_expires_at') }}</label>
-                        <input id="domain_expires_at" type="date" name="domain_expires_at" class="form-control" value="{{ $dateValue($value('domain_expires_at')) }}">
+                    <div class="form-group col-md-4 @error('domain_expires_at') has-error @enderror" @if($isCreate) data-store-required-field="domain_expires_at" data-store-required-message="{{ $t('validation.required_field', ['field' => $t('fields.domain_expires_at')]) }}" @endif>
+                        <label for="domain_expires_at">{{ $t('fields.domain_expires_at') }} @if($isCreate)<span class="text-red">*</span>@endif</label>
+                        <input id="domain_expires_at" type="date" name="domain_expires_at" class="form-control" value="{{ $dateValue($value('domain_expires_at')) }}" @required($isCreate)>
                         @error('domain_expires_at')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
                     <div class="form-group col-md-4 @error('domain_check_status') has-error @enderror">
@@ -123,12 +127,12 @@
                         </div>
                         @error('domain_check_status')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('email_bound') has-error @enderror">
+                    <div class="form-group col-md-4 @error('email_bound') has-error @enderror" @if($isCreate) data-store-required-field="email_bound" data-store-required-message="{{ $t('validation.required_field', ['field' => $t('fields.email_bound')]) }}" @endif>
                         <label for="email_bound">{{ $t('fields.email_bound') }} <span class="text-red">*</span></label>
                         <div class="assistant-option-group" data-option-group data-required="true">
-                            <input type="hidden" name="email_bound" value="{{ (bool) $value('email_bound') ? '1' : '0' }}">
-                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if ((bool) $value('email_bound')) is-selected @endif" data-option-value="1">{{ $t('common.yes') }}</button>
-                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if (!(bool) $value('email_bound')) is-selected @endif" data-option-value="0">{{ $t('common.no') }}</button>
+                            <input type="hidden" name="email_bound" value="{{ $emailBoundChoice }}">
+                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if ($emailBoundChoice === '1') is-selected @endif" data-option-value="1">{{ $t('common.yes') }}</button>
+                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if ($emailBoundChoice === '0') is-selected @endif" data-option-value="0">{{ $t('common.no') }}</button>
                         </div>
                         @error('email_bound')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
@@ -216,11 +220,11 @@
             <div class="box box-solid assistant-form-section assistant-form-system-section">
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.system_payment') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
-                    <div class="form-group col-md-4 assistant-system-builder @error('site_builder') has-error @enderror">
-                        <label for="site_builder">{{ $t('fields.site_builder') }}</label>
+                    <div class="form-group col-md-4 assistant-system-builder @error('site_builder') has-error @enderror" @if($isCreate) data-store-required-field="site_builder" data-store-required-message="{{ $t('validation.required_field', ['field' => $t('fields.site_builder')]) }}" @endif>
+                        <label for="site_builder">{{ $t('fields.site_builder') }} @if($isCreate)<span class="text-red">*</span>@endif</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="site_builder">
                             <div class="assistant-quick-option-input-row">
-                                <input id="site_builder" name="site_builder" class="form-control" value="{{ $value('site_builder') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
+                                <input id="site_builder" name="site_builder" class="form-control" value="{{ $value('site_builder') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions) @required($isCreate)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif

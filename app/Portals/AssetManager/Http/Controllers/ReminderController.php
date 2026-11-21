@@ -54,6 +54,7 @@ class ReminderController extends Controller
             'canManageGroups' => $actor->isAdministrator() || $this->service->sourceIds($actor, true) !== [],
             'canManage' => $this->service->ids($actor, true) !== [],
             'writeIds' => $this->service->ids($actor, true), 'groupNames' => $groupNames,
+            'calendarNames' => \App\Models\DingTalkCompany::whereIn('id', $rows->pluck('calendar_company_id'))->pluck('name', 'id'),
             'companyNames' => \App\Models\DingTalkCompany::whereIn('id', $groups->pluck('company_id'))->pluck('name', 'id'),
         ]);
     }
@@ -68,6 +69,29 @@ class ReminderController extends Controller
             'groups' => $this->service->query($actor, 'groups', true)->whereIn('company_id', $this->service->companies($actor)->pluck('id'))->get()->map(fn ($group) => $this->service->publicGroup($group, $actor)),
             'today' => now('Asia/Shanghai')->toDateString(), 'yesterday' => now('Asia/Shanghai')->subDay()->toDateString(),
         ])->header('Cache-Control', 'no-store');
+    }
+
+    public function calendar(Request $request)
+    {
+        $c = $this->context($request);
+        $service = app(\App\Portals\AssetManager\ReminderCalendarService::class);
+        $data = $request->validate(['company_id' => ['nullable', 'integer'], 'month' => ['required', 'date_format:Y-m']], __('asset_reminders.validation'), __('asset_reminders.fields'));
+        return response()->json(['companies' => $service->companies($c['user']), 'month' => $data['month']] + ($request->filled('company_id') ? $service->month($c['user'], (int) $data['company_id'], $data['month']) : []))->header('Cache-Control', 'no-store');
+    }
+
+    public function saveCalendar(Request $request)
+    {
+        $c = $this->context($request, true);
+        try {
+            app(\App\Portals\AssetManager\ReminderCalendarService::class)->save($c['user'], $request->all());
+            return response()->json(['message' => __('asset_reminders.saved')]);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            throw $e;
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            return response()->json(['message' => ReminderCheckException::from($e, ['stage' => 'calendar_save'])->getMessage()], 422);
+        }
     }
 
     public function attendance(Request $request)

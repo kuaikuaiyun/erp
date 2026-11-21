@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('asset-manager/reminders')->name('asset-manager.reminders.')->controller(\App\Portals\AssetManager\Http\Controllers\ReminderController::class)->group(function () {
     Route::get('/', 'index')->name('index');
     Route::get('/options', 'options')->name('options');
+    Route::get('/calendar', 'calendar')->name('calendar');
+    Route::put('/calendar', 'saveCalendar')->name('calendar.save');
     Route::get('/attendance', 'attendance')->middleware('throttle:20,1')->name('attendance');
     Route::get('/runs', 'runs')->name('runs');
     Route::get('/rules/{id}/preview', 'preview')->whereNumber('id')->name('preview');

@@ -392,7 +392,7 @@ class DomainStoreController extends Controller
             'store' => new AssistantDomainStore([
                 'domain_check_status' => AssistantDomainStore::DOMAIN_CHECK_NOT_CHECKED,
                 'shop_status' => AssistantDomainStore::SHOP_STATUS_IN_USE,
-                'email_bound' => false,
+                'email_bound' => null,
                 'email_purchased' => false,
             ]),
             'emailPurchaseStatus' => $this->emailPurchases->statusFor(null),
@@ -1747,7 +1747,7 @@ class DomainStoreController extends Controller
             }
         }
 
-        $data = $this->normalizeValidatedData($request->validate($this->storeRules()));
+        $data = $this->normalizeValidatedData($request->validate($ignoreStore === null ? $this->createRules() : $this->storeRules()));
 
         if ($user !== null) {
             $this->ensureQuickOptionValuesAreAllowed($data, $user, $ignoreStore);
@@ -2150,6 +2150,15 @@ class DomainStoreController extends Controller
             'project' => ['required', 'string', 'max:100'],
             'owner_user_id' => ['required', 'integer', 'min:1'],
             'operation_department_id' => ['required', 'integer', 'min:1'],
+        ]);
+    }
+
+    /** New-form requirements do not alter editing, batch editing, or imports. */
+    private function createRules(): array
+    {
+        return array_replace($this->storeRules(), [
+            'site_builder' => ['required', 'string', 'max:100'],
+            'domain_expires_at' => ['required', 'date'],
         ]);
     }
 
