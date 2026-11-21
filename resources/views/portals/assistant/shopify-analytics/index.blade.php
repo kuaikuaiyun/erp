@@ -325,6 +325,7 @@
                                 </a>
                             </th>
                         @endforeach
+                        <th>{{ $t('table.owner') }}</th>
                         <th class="assistant-shopify-action-column">{{ $t('table.actions') }}</th>
                     </tr>
                     </thead>
@@ -424,6 +425,7 @@
                             <td title="{{ $timezone }}"><span class="assistant-shopify-value-tag assistant-shopify-value-tag-timezone">{{ $timezone }}</span></td>
                             <td>{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('card.not_available') }}</td>
                             <td>{{ \App\Models\AssistantDomainStore::shopStatusLabels()[$store->shop_status] ?? $store->shop_status }}</td>
+                            <td>{{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('table.owner_unassigned') }}</td>
                             <td class="assistant-shopify-action-column">
                                 @if ($isInactive)
                                     <button type="button" class="btn btn-default btn-xs" disabled><i class="fa fa-ban"></i> {{ $t('actions.inactive') }}</button>
@@ -441,7 +443,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="12" class="assistant-shopify-empty-state">
+                            <td colspan="13" class="assistant-shopify-empty-state">
                                 <i class="fa fa-shopping-bag"></i>
                                 <p>{{ $t('card.no_snapshot') }}</p>
                             </td>

@@ -678,6 +678,8 @@ return [
             'domain' => 'Domain',
             'shop_status' => 'Store status',
             'team' => 'Team',
+            'owner' => 'Owner',
+            'owner_unassigned' => 'Unassigned',
             'email_purchased' => 'Email purchased',
             'shop_timezone' => 'Store timezone',
             'report_date' => 'Report date',

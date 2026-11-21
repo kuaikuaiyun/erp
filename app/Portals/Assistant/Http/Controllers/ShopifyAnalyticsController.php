@@ -280,6 +280,7 @@ class ShopifyAnalyticsController extends Controller
     {
         return $this->authorization
             ->scopeDomainStores(AssistantDomainStore::query(), $user)
+            ->with('ownerUser:id,name,username')
             ->where('site_builder', 'shopify');
     }
 

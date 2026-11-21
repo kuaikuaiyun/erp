@@ -9,6 +9,7 @@ use App\Models\AssistantDomainStoreQuickOption;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
+use App\Portals\Assistant\AssistantFashionStoreAnalyticsCsvExportService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Fashion\OperationProjectCatalog;
 use Carbon\CarbonImmutable;
@@ -24,6 +25,7 @@ class FashionStoreAnalyticsController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantEmailPurchaseSyncService $emailPurchases,
+        private readonly AssistantFashionStoreAnalyticsCsvExportService $csvExporter,
     ) {}
 
     public function index(Request $request): Response|View
@@ -86,6 +88,26 @@ class FashionStoreAnalyticsController extends Controller
                 'orders_count' => $ordersCount, 'total_sales' => $totalSales,
                 'average_order_value' => $ordersCount > 0 ? $totalSales / $ordersCount : 0],
         ]);
+    }
+
+    public function export(Request $request): Response
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->authorization->assertAssistantPortal($context['portal']);
+        $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
+        $projectCode = (string) $request->query('project_code', 'fuzhuang');
+        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        $project = OperationProjectCatalog::get($projectCode);
+        $filters = $this->filters($request);
+        $groupBy = in_array($request->input('group_by'), ['store', 'date'], true) ? (string) $request->input('group_by') : 'store';
+
+        return $this->csvExporter->download(
+            $this->stores($context['user'], $filters, $project),
+            $filters,
+            $groupBy,
+            $projectCode === 'danbao-general' ? '单包百货' : '单包服装',
+        );
     }
 
     /** @param array<string,mixed> $filters */
