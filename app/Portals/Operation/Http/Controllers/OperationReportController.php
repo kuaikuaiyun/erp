@@ -469,7 +469,7 @@ class OperationReportController extends Controller
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
-            ?: ($validated['report_date'] ?? null);
+            ?: ($validated['report_date'] ?? Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE)->subDay()->format('Y-m-d'));
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $editingReport ? (int) $editingReport->operator_user_id : ($isBoss
             ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
