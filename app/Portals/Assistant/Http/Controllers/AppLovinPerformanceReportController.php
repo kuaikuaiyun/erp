@@ -108,7 +108,8 @@ class AppLovinPerformanceReportController extends Controller
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $query->when($selectedDepartmentIds !== [], fn ($q) => $q->whereIn('operation_department_id', $selectedDepartmentIds))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
-        $accountSpendReports = (clone $query)->get();
+        // 历史累计只依赖账号、广告和指标字段，避免把整份历史日报的无关大字段全部载入内存。
+        $accountSpendReports = (clone $query)->get(['id', 'operator_user_id', 'advertising_rows', 'metric_rows']);
         $query->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
@@ -119,8 +120,8 @@ class AppLovinPerformanceReportController extends Controller
             ->unique()
             ->sort()
             ->values();
-        $metricsCacheKey = 'assistant-applovin-performance:v1:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
-        $calculatedByOperator = Cache::remember($metricsCacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
+        $metricsCacheKey = 'assistant-applovin-performance:v2:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $calculatedByOperator = Cache::remember($metricsCacheKey, now()->addMinutes(15), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
             $calculated = [];
             // 长时间范围会包含大量订单及商品明细，按运营分批读取，避免 90 天等范围一次性加载导致内存溢出。
             foreach ($operatorIds->chunk(2) as $operatorIdBatch) {
@@ -162,6 +163,8 @@ class AppLovinPerformanceReportController extends Controller
                 ];
             }));
         $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        unset($accountSpendRecords);
+        gc_collect_cycles();
         $giftScreenshots = AppLovinSpendScreenshot::query()
             ->whereIn('operator_user_id', $accountSpendReports->pluck('operator_user_id')->filter()->unique()->values())
             ->get()
@@ -215,6 +218,8 @@ class AppLovinPerformanceReportController extends Controller
 
             return $totals;
         }, []);
+        unset($accountSpendReports);
+        gc_collect_cycles();
 
         $dailyRows = $reports->flatMap(function (OperationReport $report) use ($bindings, $stores, $accountSpendTotals, $calculatedByOperator): array {
             $ads = collect($report->advertising_rows ?: [])
