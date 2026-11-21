@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class DailyAdvertisingRecharge extends Model
 {
     public const STATUS_PENDING = 'pending';
+    public const STATUS_PROCESSING = 'processing';
     public const STATUS_PROCESSED = 'processed';
     public const STATUS_REJECTED = 'rejected';
 
@@ -44,6 +45,7 @@ class DailyAdvertisingRecharge extends Model
     public function statusLabel(): string
     {
         return match ($this->status) {
+            self::STATUS_PROCESSING => '处理中',
             self::STATUS_PROCESSED => '已处理',
             self::STATUS_REJECTED => '已驳回',
             default => '未处理',

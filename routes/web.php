@@ -286,6 +286,8 @@ Route::put('/assistant/daily-submission-departments', [DailyReportDepartmentSett
     ->name('assistant.daily-submission-departments.update');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/processing', [AdvertisingRechargeReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.processing');
 Route::post('/assistant/daily-submissions/advertising-recharges/process-selected', [AdvertisingRechargeReviewController::class, 'processSelected'])
     ->name('assistant.daily-submissions.advertising-recharges.process-selected');
 Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
