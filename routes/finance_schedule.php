@@ -15,12 +15,21 @@ $orderWorker = Schedule::command('queue:work finance_orders --queue=finance-orde
 $indexRefresh = Schedule::command('finance:indexes:apply')->everyMinute()->withoutOverlapping(30)
     ->sendOutputTo(storage_path('logs/finance-indexes-schedule.log'));
 
-$summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()
+$separateReads = config('finance.read_models.enabled', true);
+$summaryRefresh = $separateReads ? null : Schedule::command('finance:summaries:refresh')->everyMinute()
     ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));
+
+$changeConsumer = $separateReads ? Schedule::command('finance:changes:consume')->everyMinute()
+    ->sendOutputTo(storage_path('logs/finance-changes-schedule.log')) : null;
+
+$readModelBuilder = $separateReads ? Schedule::command('finance:read-models:build')->everyMinute()
+    ->sendOutputTo(storage_path('logs/finance-read-models-schedule.log')) : null;
 
 if (! $financeScheduleOnly) {
     $balanceRefresh->runInBackground();
     $orderWorker->runInBackground();
     $indexRefresh->runInBackground();
-    $summaryRefresh->runInBackground();
+    $summaryRefresh?->runInBackground();
+    $changeConsumer?->runInBackground();
+    $readModelBuilder?->runInBackground();
 }

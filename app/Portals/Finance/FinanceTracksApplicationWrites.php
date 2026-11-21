@@ -17,7 +17,7 @@ trait FinanceTracksApplicationWrites
     {
         if (str_contains($query, FinanceApplicationChanges::TABLE)) {
             $this->financeTrackingEnabled = null;
-            foreach (['finance.application-tracking:', 'finance.scoped-tracking:'] as $prefix) {
+            foreach (['finance.application-tracking:', 'finance.scoped-tracking:', 'finance.read-model-versions:'] as $prefix) {
                 app('request')->attributes->remove($prefix.$this->getName().':'.$this->getDatabaseName());
             }
         }
@@ -58,6 +58,23 @@ trait FinanceTracksApplicationWrites
             $targets = $notifications->targets($this);
         } catch (\Throwable $error) { FinanceExternalChanges::failure($error); return $run(); }
         if (! $targets) return $run();
+        if (FinanceReadModelVersions::installed($this) && FinanceApplicationChanges::available($this)) {
+            // The source mutation, outbox and read revision commit together on
+            // the source connection. No dependency joins or report builds run here.
+            $this->financeTrackingQuery = true;
+            try {
+                return $this->transaction(function () use ($observer, $mutation, $query, $bindings, $run) {
+                    $before = $observer->before($this, $query, $bindings, $mutation, false);
+                    $result = $run();
+                    $id = $this->financeInsertId;
+                    $mysqlId = $this instanceof \Illuminate\Database\MySqlConnection ? $this->getLastInsertId() : null;
+                    if ($before !== null) $observer->after($this, $before);
+                    $this->financeInsertId = $id;
+                    if ($this instanceof \Illuminate\Database\MySqlConnection) $this->lastInsertId = $mysqlId;
+                    return $result;
+                }, 3);
+            } finally { $this->financeTrackingQuery = false; }
+        }
         // Observe only the source table. No finance SQL, new transaction, or FOR UPDATE lock belongs in this save.
         $this->financeTrackingQuery = true;
         try { $before = $observer->before($this, $query, $bindings, $mutation, false); }

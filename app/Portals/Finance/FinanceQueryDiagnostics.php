@@ -69,11 +69,14 @@ class FinanceQueryDiagnostics
         $trace->stage = $stage;
         $trace->stageContext = $context;
         $started = hrtime(true);
+        $queryCount = $trace->queryCount;
+        $queryMs = $trace->queryMs;
         if ($sample) $trace->event('stage.start', ['stage' => $stage, ...$context]);
         try {
             $result = $action();
             $duration = round((hrtime(true) - $started) / 1e6, 2);
-            if ($sample || $duration >= 250) $trace->event('stage.end', ['stage' => $stage, ...$context, 'duration_ms' => $duration]);
+            if ($sample || $duration >= 250) $trace->event('stage.end', ['stage' => $stage, ...$context, 'duration_ms' => $duration,
+                'query_count' => $trace->queryCount - $queryCount, 'query_ms' => round($trace->queryMs - $queryMs, 2)]);
             return $result;
         } catch (Throwable $error) {
             $trace->event('stage.failed', ['stage' => $stage, ...$context, 'exception' => $error::class,
@@ -116,6 +119,7 @@ class FinanceQueryDiagnostics
             $this->logger ??= Log::build(['driver' => 'single', 'path' => config('finance.diagnostics.log_path', storage_path('logs/finance-query.log')),
                 'level' => 'info', 'locking' => true]);
             $this->logger->info('Finance query diagnostic', ['trace_id' => $this->id, 'pid' => getmypid(),
+                ...$this->stageContext,
                 'event' => $event, 'stage' => $this->stage, 'elapsed_ms' => round((hrtime(true) - $this->started) / 1e6, 2),
                 'memory_bytes' => memory_get_usage(true), 'peak_bytes' => memory_get_peak_usage(true), ...$context]);
         } catch (Throwable) { /* Diagnostics must never change the query result. */ }

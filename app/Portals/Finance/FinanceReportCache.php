@@ -32,17 +32,22 @@ class FinanceReportCache
         return is_array($cached) && ($cached['version'] ?? null) === $version ? $cached['value'] : null;
     }
 
-    public function remember(string $scope, array $channels, callable $build): mixed
+    public function remember(string $scope, array $channels, callable $build, ?array $background = null): mixed
     {
         $version = $this->versions->forCache($channels);
-        if ($version === null) return $build();
+        if ($version === null) {
+            if ($background !== null && FinanceReadModelBuilds::reader()) app(FinanceReadModelBuilds::class)->pending($background['kind'], $background['payload']);
+            return $build();
+        }
         $key = $this->key($scope);
         $cached = $this->store()->get($key);
         if (is_array($cached) && ($cached['version'] ?? null) === $version) return $cached['value'];
+        if ($background !== null && FinanceReadModelBuilds::reader()) app(FinanceReadModelBuilds::class)->pending($background['kind'], $background['payload']);
         $value = $build();
         // Never publish a calculation that raced a source edit.
         if ($version === $this->versions->forCache($channels)) {
-            $this->store()->forever($key, ['version' => $version, 'value' => $value]);
+            $saved = $this->store()->forever($key, ['version' => $version, 'value' => $value]);
+            if (! $saved && $background !== null) throw new \RuntimeException('后台计算缓存未能保存。');
         }
         return $value;
     }

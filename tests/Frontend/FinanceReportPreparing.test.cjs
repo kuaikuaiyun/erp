@@ -5,6 +5,35 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync('public/assets/erp/finance-report-preparing.js', 'utf8');
 
+test('background calculations only poll status and never execute month requests', async () => {
+    const calls = [];
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    const plans = [
+        { waiting: true, background: true, state: 'queued', message: '排队中', months: [], poll_url: '/poll' },
+        { waiting: true, background: true, state: 'running', message: '计算中', months: [], poll_url: '/poll' },
+        { waiting: false, months: [], resume_url: '/ready' },
+    ];
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        setTimeout: callback => callback(), fetch: async url => {
+            calls.push(url);
+            return { ok: true, headers: { get: () => 'application/json' }, json: async () => plans.shift() };
+        } });
+    const progress = [];
+    assert.equal(await window.financePrepareReport(window.location.href, message => progress.push(message)), '/ready');
+    assert.deepEqual(calls.slice(1), ['/poll', '/poll']);
+    assert.deepEqual(progress, ['排队中', '计算中']);
+});
+
+test('failed background calculations show the real failure and stop polling', async () => {
+    let calls = 0;
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        fetch: async () => { calls++; return { ok: true, headers: { get: () => 'application/json' },
+            json: async () => ({ waiting: true, background: true, state: 'failed', message: '后台失败', months: [] }) }; } });
+    await assert.rejects(window.financePrepareReport(window.location.href), /后台失败/);
+    assert.equal(calls, 1);
+});
+
 function harness(fail = false) {
     const calls = [];
     const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
@@ -36,9 +65,9 @@ test('a failed month stops the range and exposes its error', async () => {
     assert.equal(calls.length, 2);
 });
 
-test('does not add requests to other financial pages', async () => {
+test('does not add requests outside financial report and record pages', async () => {
     const { calls, prepare } = harness();
-    const url = 'http://caiwu.kky.com/finance/reports/paypal-settlement';
+    const url = 'http://caiwu.kky.com/finance/settings/types';
     assert.equal(await prepare(url), url);
     assert.equal(calls.length, 0);
 });

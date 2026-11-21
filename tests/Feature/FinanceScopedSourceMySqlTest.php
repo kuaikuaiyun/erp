@@ -45,6 +45,51 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $cachePath = null;
     private Connection $db;
 
+    public function test_separate_query_versions_follow_commits_without_waiting_for_notification_consumption(): void
+    {
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        $versions = app(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $baseline = $versions->forCache(['paypal']);
+        $files = app(\App\Portals\Finance\FinanceExternalChanges::class);
+        $ticket = $files->begin($this->db);
+        $files->commit($this->db, $ticket, [['source' => 'scope_user', 'values' => []]]);
+        $this->assertSame($baseline, $versions->forCache(['paypal']));
+        $this->db->beginTransaction();
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'NEW-TRANSACTIONAL-ORDER']);
+        $this->assertNotSame($baseline, $versions->forCache(['paypal']));
+        $this->db->rollBack();
+        $this->assertSame($baseline, $versions->forCache(['paypal']));
+        $this->assertFalse($this->db->table('logistics_orders')->where('id', $id)->exists());
+        $this->db->table('logistics_orders')->insert(['transaction_id' => 'COMMITTED-TRANSACTIONAL-ORDER']);
+        $this->assertNotSame($baseline, $versions->forCache(['paypal']));
+        $this->assertFileExists($ticket['path']);
+        $current = $versions->forCache(['paypal']);
+        $this->artisan('finance:read-models:build')->assertSuccessful();
+        $this->assertFileExists($ticket['path']);
+        $this->artisan('finance:changes:consume')->assertSuccessful();
+        $this->assertFileDoesNotExist($ticket['path']);
+        $this->assertSame($current, $versions->forCache(['paypal']));
+        $this->assertSame(0, count(glob($files->directory($this->db).'/change-*.json')));
+    }
+
+    public function test_query_revision_fingerprint_detects_transactions_committing_out_of_id_order(): void
+    {
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        config(['database.connections.scope_concurrent' => $this->db->getConfig()]);
+        $other = DB::connection('scope_concurrent');
+        try {
+            $this->db->beginTransaction();
+            \App\Portals\Finance\FinanceReadModelVersions::touch($this->db, 'finance', ['id' => 1001, 'dataset' => 'paypal-orders']);
+            $other->transaction(fn () => \App\Portals\Finance\FinanceReadModelVersions::touch($other, 'finance', ['id' => 2002, 'dataset' => 'paypal-orders']));
+            $before = \App\Portals\Finance\FinanceReadModelVersions::version($other, ['paypal']);
+            $this->db->commit();
+            $this->assertNotSame($before, \App\Portals\Finance\FinanceReadModelVersions::version($other, ['paypal']));
+        } finally {
+            if ($this->db->transactionLevel()) $this->db->rollBack();
+            DB::purge('scope_concurrent');
+        }
+    }
+
     public function test_indexed_dependency_lookup_preserves_legacy_matching_and_uses_reference_indexes(): void
     {
         (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();

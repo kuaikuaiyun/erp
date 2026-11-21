@@ -52,6 +52,16 @@ class FinanceSummarySourceCache
         return is_file($path) || $this->preparedParts($channel, $filters) !== null || $this->compatibleParts($channel, $filters) !== null;
     }
 
+    public function requestBuild(string $channel, array $filters, bool $transactions = false): string
+    {
+        $filters = self::sharedFilters($filters);
+        unset($filters['team'], $filters['subscription'], $filters['summary_currency'], $filters['summary_row_filters']);
+        $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
+        if ($channel === 'paypal') unset($filters['include_unmatched_fees']);
+        ksort($filters);
+        return app(FinanceReadModelBuilds::class)->enqueue('summary-source', compact('channel', 'filters', 'transactions'));
+    }
+
     public function stream(string $channel, array $filters, bool $transactions, callable $build, ?callable $options = null): iterable
     {
         $native = ! empty($filters['summary_shared_source']) && ! empty($filters['summary_native_settlement']);
@@ -84,6 +94,9 @@ class FinanceSummarySourceCache
 
     private function canonicalStream(string $channel, array $filters, bool $transactions, callable $build, array $constraints, ?callable $options): iterable
     {
+        if (FinanceReadModelBuilds::reader()) {
+            $build = fn () => throw new FinanceReadModelPending($this->requestBuild($channel, $filters, $transactions));
+        }
         $version = $this->versions->forRange($channel, $filters);
         if ($version === null) {
             yield from $this->uncached($build, $options);
@@ -115,6 +128,12 @@ class FinanceSummarySourceCache
             // amount flags. Publish the selected channel under its own revision
             // so a later edit to another channel cannot evict this selection.
             $selected = $filters['summary_payment_channels'] ?? [];
+            if (FinanceReadModelBuilds::reader()) {
+                foreach ($compatible as $part) foreach ($this->read($part, $build, $constraints, $options) as $row) {
+                    if ($selected === [] || in_array($row['payment_channel'] ?? null, $selected, true)) yield $row;
+                }
+                return;
+            }
             $build = function () use ($compatible, $selected) {
                 foreach ($compatible as $part) foreach ($this->read($part,
                     static fn () => throw new \RuntimeException('已计算的源数据损坏，请重试查询。'), [], null) as $row) {
@@ -122,6 +141,7 @@ class FinanceSummarySourceCache
                 }
             };
         }
+        if (FinanceReadModelBuilds::reader()) $build();
         try {
             $lock = Cache::store('file')->lock('finance:summary-source:'.hash('sha256', $directory.':'.$version), 900);
             $acquired = $lock->get();
@@ -363,6 +383,7 @@ class FinanceSummarySourceCache
 
     private function publishIndex(string $path, array $index, int $size): void
     {
+        if (FinanceReadModelBuilds::reader()) return;
         $existing = is_file($path) ? $this->savedIndex($path, $size) : null;
         $options = $index['_options'] ?? $existing['options'] ?? [];
         unset($index['_options']);

@@ -3,8 +3,10 @@
     async function run(plan, progress) {
         var waitingSince = Date.now();
         while (plan.waiting) {
-            progress('正在同步最新数据，完成后自动显示报表…');
-            if (Date.now() - waitingSince > 180000) throw new Error('数据更新仍在进行，请稍后重试。');
+            if (plan.state === 'failed' || plan.state === 'unavailable') throw new Error(plan.message || '后台计算失败，请联系管理员。');
+            progress(plan.message || '正在同步最新数据，完成后自动显示报表…');
+            if (Date.now() - waitingSince > (plan.background ? 1800000 : 180000)) throw new Error(plan.background
+                ? '后台任务仍未完成，请联系管理员查看计算进度。' : '数据更新仍在进行，请稍后重试。');
             await new Promise(function (resolve) { setTimeout(resolve, 2000); });
             var poll = await fetch(plan.poll_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
             if (!poll.ok || !(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
@@ -39,7 +41,7 @@
     }
     window.financePrepareReport = async function (url, progress) {
         var target = new URL(url, window.location.href);
-        if (!/\/finance\/reports\/(summary|losses)$/.test(target.pathname)) return url;
+        if (!/\/finance\/(reports|records)\//.test(target.pathname)) return url;
         if (target.searchParams.get('download_missing') === '1') return url;
         target.searchParams.set('_finance_plan', '1');
         var response = await fetch(target.href, {credentials: 'same-origin', headers: {Accept: 'application/json'}});

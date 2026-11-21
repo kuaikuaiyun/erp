@@ -47,6 +47,7 @@ class FinancePortalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['finance.read_models.enabled' => false]);
         $this->sourceNotificationTestPath = storage_path('framework/testing/finance-external-events-'.bin2hex(random_bytes(6)));
         config(['finance.summaries.external_change_path' => $this->sourceNotificationTestPath]);
         $this->withoutMiddleware(\App\Http\Middleware\EnforceDingTalkSession::class);
@@ -3138,6 +3139,69 @@ class FinancePortalTest extends TestCase
         $controller = app(\App\Portals\Finance\Http\Controllers\FinanceController::class);
         $ready = new \ReflectionMethod($controller, 'calculationMonthReady');
         $this->assertTrue($ready->invoke($controller, 'summary', '2026-11', ['view' => 'transactions', 'channel' => 'ye']));
+    }
+
+    public function test_background_report_generation_finishes_even_with_legacy_notifications_still_pending(): void
+    {
+        $account = $this->financePayPalAccount('后台报表账户');
+        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '日期' => '2026-11-03', '交易 ID' => 'BACKGROUND-PAYMENT', '淨額' => '9.50']], $account->activity_account, 'UTC', 1);
+        $url = '/finance/reports/losses?month_from=2026-11&month_to=2026-11&channel=paypal&loss_scope=PayPal';
+        $expected = $this->get($url)->assertOk()->viewData('monthlyLossGroups');
+        $this->assertNotEmpty($expected);
+        $this->enableBackgroundReadModels();
+        $files = app(\App\Portals\Finance\FinanceExternalChanges::class);
+        $ticket = $files->begin(DB::connection());
+        $files->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
+        $this->assertTrue($files->hasPending(DB::connection()));
+        $changes = $this->mock(\App\Portals\Finance\FinanceSummarySourceChanges::class);
+        $changes->shouldNotReceive('reportReady');
+        $changes->shouldNotReceive('publish');
+        $page = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+        $this->assertTrue($page->viewData('preparationPlan')['background']);
+        $this->assertSame(1, DB::table('finance_read_model_jobs')->count());
+        $this->getJson($page->viewData('preparationPlan')['poll_url'])->assertOk()->assertJsonPath('waiting', true);
+        $this->assertSame(1, DB::table('finance_read_model_jobs')->count());
+        $this->artisan('finance:read-models:build')->assertSuccessful();
+        $this->assertFileExists($ticket['path']);
+        $this->get($url)->assertOk()->assertViewIs('portals.finance.settlement-overview')->assertViewHas('monthlyLossGroups', $expected);
+        $this->getJson($url.'&_finance_plan=1')->assertOk()->assertJsonPath('waiting', false);
+    }
+
+    private function enableBackgroundReadModels(): void
+    {
+        config(['finance.read_models.enabled' => true]);
+        Schema::create('finance_application_tracking', function (Blueprint $table): void { $table->integer('id'); $table->string('mode'); });
+        DB::table('finance_application_tracking')->insert(['id' => 1, 'mode' => 'application']);
+        Schema::create('finance_summary_changes', function (Blueprint $table): void {
+            $table->increments('id'); $table->string('source'); $table->text('payload'); $table->boolean('scopes_resolved');
+        });
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+    }
+
+    public function test_background_menu_options_paypal_pages_and_exports_finish_without_http_rebuilds(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        $account = $this->financePayPalAccount('后台列表账户');
+        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '交易 ID' => 'BACKGROUND-LIST']], $account->activity_account, 'UTC', 1);
+        $this->enableBackgroundReadModels();
+        foreach (['paypal-settlement', 'ye-settlement', 'worldpay-settlement', 'xuzong-credit'] as $report) {
+            $url = '/finance/reports/'.$report;
+            for ($i = 0; $i < 4; $i++) {
+                $response = $this->get($url);
+                $this->assertSame(200, $response->getStatusCode(), $report);
+                if (! $response->headers->has('X-Finance-Preparing')) break;
+                $response->assertViewIs('portals.finance.report-preparing');
+                $this->artisan('finance:read-models:build')->assertSuccessful();
+            }
+            $this->assertFalse($response->headers->has('X-Finance-Preparing'), $report);
+        }
+        $url = '/finance/reports/paypal-settlement?download=1';
+        $this->getJson($url.'&_finance_plan=1')->assertOk()->assertJsonPath('waiting', true);
+        $this->artisan('finance:read-models:build')->assertSuccessful();
+        $this->getJson($url.'&_finance_plan=1')->assertOk()->assertJsonPath('waiting', false);
+        $sheet = $this->readDownload($this->get($url)->assertOk()->streamedContent());
+        $this->assertStringContainsString('BACKGROUND-LIST', json_encode($sheet->toArray(), JSON_UNESCAPED_UNICODE));
     }
 
     public function test_reports_wait_for_source_changes_before_starting_calculations(): void

@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'read_models' => ['enabled' => env('FINANCE_BACKGROUND_READ_MODELS', true)],
     'diagnostics' => [
         'enabled' => env('FINANCE_QUERY_DIAGNOSTICS', true),
     ],

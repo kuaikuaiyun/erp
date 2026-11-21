@@ -20,6 +20,7 @@ class FinanceSummaryDataVersion
     public function forCache(array $channels): ?string
     {
         $db = $this->workbooks->database();
+        if (FinanceReadModelVersions::installed($db)) return FinanceReadModelVersions::version($db, $channels);
         if (FinanceSummarySourceChanges::available($db) && ! app(FinanceExternalChanges::class)->drain($db)) return null;
         if (FinanceSummarySourceChanges::available($db) && app(FinanceSummarySourceChanges::class)->publish($db)) {
             $cardChannels = ['xuzong1', 'xuzong2', 'ye', 'worldpay'];
@@ -39,6 +40,7 @@ class FinanceSummaryDataVersion
     public function current(string $channel): ?string
     {
         $db = $this->workbooks->database();
+        if (FinanceReadModelVersions::installed($db)) return FinanceReadModelVersions::version($db, [$channel]);
         if (! FinanceSummarySourceChanges::available($db)) {
             // Without application tracking, reuse source parts only within this one
             // authenticated range calculation, never across later queries.
@@ -68,6 +70,7 @@ class FinanceSummaryDataVersion
     public function forRange(string $channel, array $filters): ?string
     {
         $db = $this->workbooks->database();
+        if (FinanceReadModelVersions::installed($db)) return FinanceReadModelVersions::version($db, [$channel]);
         if (empty($filters['from']) || empty($filters['to']) || ! FinanceSummarySourceChanges::available($db)) {
             return $this->current($channel);
         }
