@@ -127,6 +127,28 @@ class FinanceQueryDiagnosticsTest extends TestCase
         $this->assertSame(1, DB::table('finance_summary_changes')->count());
     }
 
+    public function test_notification_totals_survive_the_detailed_log_budget(): void
+    {
+        $request = $this->request();
+        DB::connection()->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
+            $table->increments('id'); $table->string('source'); $table->text('payload'); $table->boolean('scopes_resolved');
+        });
+        $notifications = app(FinanceExternalChanges::class);
+        for ($i = 0; $i < 120; $i++) {
+            $ticket = $notifications->begin(DB::connection());
+            $notifications->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
+        }
+        FinanceQueryDiagnostics::start($request);
+        $this->assertTrue($notifications->drain(DB::connection()));
+        FinanceQueryDiagnostics::current()?->finish('worker.end');
+        $records = $this->records();
+        $summary = array_values(array_filter($records, fn ($row) => $row['event'] === 'notifications.summary'));
+        $this->assertCount(1, $summary);
+        $this->assertSame(120, $summary[0]['processed']);
+        $this->assertSame(3, $summary[0]['transactions']);
+        $this->assertGreaterThan(0, end($records)['suppressed_events']);
+    }
+
     public function test_exception_is_recorded_and_still_propagates_to_the_application(): void
     {
         try {

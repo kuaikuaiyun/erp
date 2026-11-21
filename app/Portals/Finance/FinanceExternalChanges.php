@@ -252,7 +252,7 @@ class FinanceExternalChanges
             foreach ($claimed as $item) if (is_resource($item['handle'])) fclose($item['handle']);
             $this->draining = false;
             fclose($consumer);
-            $trace?->event('notifications.summary', $stats);
+            $trace?->event('notifications.summary', $stats, true);
         }
     }
 
