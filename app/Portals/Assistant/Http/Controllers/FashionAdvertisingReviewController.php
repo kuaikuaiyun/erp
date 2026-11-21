@@ -164,8 +164,12 @@ class FashionAdvertisingReviewController extends Controller
                 ->where('account_number', 'like', '%'.$filters['account_number'].'%')))
             ->orderByDesc('report_date')->orderByDesc('id')->paginate($filters['per_page'])->withQueryString();
 
+        $projectDepartmentIds = OperationProjectCatalog::departmentIds($project['code'])->all();
         $performanceCache = [];
-        $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache, $project): FashionAdvertisingReport {
+        $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache, $project, $projectDepartmentIds): FashionAdvertisingReport {
+            $report->setAttribute('review_team_names', $report->submitter?->departments
+                ?->whereIn('id', $projectDepartmentIds)
+                ->pluck('name')->filter()->unique()->implode('、') ?: '—');
             if ($report->project_code !== 'fuzhuang') {
                 $this->loadPerformanceMetrics($report, $project);
 
