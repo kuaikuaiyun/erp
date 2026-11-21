@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Models\AdminUser;
 use App\Models\FashionAdvertisingReport;
+use App\Models\FashionLogisticsOrder;
 use App\Portals\Fashion\OperationProjectCatalog;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -58,28 +60,40 @@ class MigrateFashionAdvertisingAccounts extends Command
             ->orderBy('entries.id')
             ->get();
 
-        if ($entries->isEmpty()) {
+        $targetReportIds = $db->table('fashion_ad_spend_entries as entries')
+            ->join('fashion_advertising_reports as reports', 'reports.id', '=', 'entries.fashion_advertising_report_id')
+            ->where('reports.project_code', $to)
+            ->where('reports.submitter_id', $operatorId)
+            ->whereNull('reports.deleted_at')
+            ->whereIn('entries.account_number', $accounts->all())
+            ->distinct()
+            ->pluck('reports.id');
+
+        if ($entries->isEmpty() && $targetReportIds->isEmpty()) {
             $this->warn('没有找到符合条件的源项目广告明细，无需迁移。');
 
             return self::SUCCESS;
         }
 
-        $this->table(
-            ['日期', '账号编号', '账号名称', '实际广告费', '源日报 ID'],
-            $entries->map(fn ($entry): array => [
-                $entry->report_date,
-                $entry->account_number,
-                $entry->account_name,
-                number_format((float) $entry->actual_spend_usd, 2, '.', ''),
-                $entry->source_report_id,
-            ])->all(),
-        );
-        $this->info(sprintf(
-            '共 %d 条，涉及 %d 天，实际广告费合计 $%s。',
-            $entries->count(),
-            $entries->pluck('report_date')->unique()->count(),
-            number_format((float) $entries->sum('actual_spend_usd'), 2, '.', ''),
-        ));
+        if ($entries->isNotEmpty()) {
+            $this->table(
+                ['日期', '账号编号', '账号名称', '实际广告费', '源日报 ID'],
+                $entries->map(fn ($entry): array => [
+                    $entry->report_date,
+                    $entry->account_number,
+                    $entry->account_name,
+                    number_format((float) $entry->actual_spend_usd, 2, '.', ''),
+                    $entry->source_report_id,
+                ])->all(),
+            );
+            $this->info(sprintf(
+                '待迁移 %d 条，涉及 %d 天，实际广告费合计 $%s。',
+                $entries->count(),
+                $entries->pluck('report_date')->unique()->count(),
+                number_format((float) $entries->sum('actual_spend_usd'), 2, '.', ''),
+            ));
+        }
+        $this->info(sprintf('将重新计算目标项目 %d 份日报的订单量、营业额和 ROI。', $targetReportIds->count() + $entries->pluck('report_date')->unique()->count()));
 
         if (! $this->option('execute')) {
             $this->comment('当前为预览模式；确认无误后增加 --execute 执行。');
@@ -87,7 +101,7 @@ class MigrateFashionAdvertisingAccounts extends Command
             return self::SUCCESS;
         }
 
-        $moved = $db->transaction(function () use ($db, $operatorId, $from, $to, $accounts): int {
+        [$moved, $refreshed] = $db->transaction(function () use ($db, $operatorId, $from, $to, $accounts): array {
             $sourceReports = $db->table('fashion_advertising_reports')
                 ->where('project_code', $from)
                 ->where('submitter_id', $operatorId)
@@ -167,11 +181,97 @@ class MigrateFashionAdvertisingAccounts extends Command
                 ]);
             }
 
-            return $moved;
+            $targetReports = $db->table('fashion_advertising_reports as reports')
+                ->where('reports.project_code', $to)
+                ->where('reports.submitter_id', $operatorId)
+                ->whereNull('reports.deleted_at')
+                ->whereExists(function ($query) use ($accounts): void {
+                    $query->selectRaw('1')
+                        ->from('fashion_ad_spend_entries')
+                        ->whereColumn('fashion_ad_spend_entries.fashion_advertising_report_id', 'reports.id')
+                        ->whereIn('fashion_ad_spend_entries.account_number', $accounts->all());
+                })
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($targetReports as $targetReport) {
+                $performance = $this->calculatedPerformanceRows((string) $targetReport->report_date, $operatorId, $to);
+                $db->table('fashion_performance_entries')
+                    ->where('fashion_advertising_report_id', $targetReport->id)
+                    ->delete();
+                if ($performance !== []) {
+                    $now = now();
+                    $db->table('fashion_performance_entries')->insert(array_map(
+                        fn (array $row): array => [
+                            'fashion_advertising_report_id' => (int) $targetReport->id,
+                            ...$row,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ],
+                        $performance,
+                    ));
+                }
+                $revenue = round((float) collect($performance)->sum('revenue_usd'), 2);
+                $orders = (int) collect($performance)->sum('order_count');
+                $spend = round((float) $db->table('fashion_ad_spend_entries')
+                    ->where('fashion_advertising_report_id', $targetReport->id)
+                    ->sum('actual_spend_usd'), 2);
+                $db->table('fashion_advertising_reports')->where('id', $targetReport->id)->update([
+                    'total_revenue_usd' => $revenue,
+                    'total_order_count' => $orders,
+                    'total_ad_spend_usd' => $spend,
+                    'roi' => $spend > 0 ? round($revenue / $spend, 4) : 0,
+                    'updated_at' => now(),
+                ]);
+            }
+
+            return [$moved, $targetReports->count()];
         });
 
-        $this->info("迁移完成，共移动 {$moved} 条广告明细；源项目和目标项目日报汇总已重新计算。");
+        $this->info("处理完成：移动 {$moved} 条广告明细，重新计算 {$refreshed} 份目标日报的订单量、营业额和 ROI。");
 
         return self::SUCCESS;
+    }
+
+    private function calculatedPerformanceRows(string $reportDate, int $operatorId, string $projectCode): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $orderTable = (new FashionLogisticsOrder)->getTable();
+        $owner = AdminUser::query()->find($operatorId);
+        $ownerNames = collect([$owner?->name, $owner?->username])
+            ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
+        $project = OperationProjectCatalog::get($projectCode);
+
+        return DB::connection($connection)->table($orderTable.' as orders')
+            ->join('assistant_domain_stores as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
+            ->where(function ($binding) use ($operatorId, $ownerNames): void {
+                $binding->where('stores.owner_user_id', $operatorId);
+                if ($ownerNames !== []) {
+                    $binding->orWhereIn('stores.user_name', $ownerNames);
+                }
+            })
+            ->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($project))
+            ->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END")
+            ->where(function ($paid): void {
+                $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
+                    ->orWhere('orders.payment_status', '230');
+            })
+            ->whereBetween('orders.order_created_at', [$reportDate.' 00:00:00', $reportDate.' 23:59:59'])
+            ->where(function ($paid): void {
+                $paid->whereNotNull('orders.paid_at')->orWhereIn('orders.status', ['processing', 'completed']);
+            })
+            ->select(['stores.id', 'stores.shop_name', 'stores.domain'])
+            ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue_usd')
+            ->groupBy('stores.id', 'stores.shop_name', 'stores.domain')
+            ->orderBy('stores.shop_name')
+            ->get()
+            ->map(static fn (object $row): array => [
+                'store_name' => trim((string) $row->shop_name) ?: trim((string) $row->domain),
+                'domain' => trim((string) $row->domain),
+                'revenue_usd' => round((float) $row->revenue_usd, 2),
+                'order_count' => (int) $row->order_count,
+                'screenshot_path' => null,
+                'remark' => '系统根据店铺已支付订单自动统计',
+            ])->values()->all();
     }
 }
