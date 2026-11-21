@@ -286,6 +286,8 @@ Route::put('/assistant/daily-submission-departments', [DailyReportDepartmentSett
     ->name('assistant.daily-submission-departments.update');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/processing', [AdvertisingRechargeReviewController::class, 'markProcessing'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.processing');
 Route::post('/assistant/daily-submissions/advertising-recharges/process-selected', [AdvertisingRechargeReviewController::class, 'processSelected'])
     ->name('assistant.daily-submissions.advertising-recharges.process-selected');
 Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
@@ -378,6 +380,8 @@ Route::get('/operation-dashboard/applovin-account-statistics/accounts', [AppLovi
     ->name('operation-dashboard.applovin-account-statistics.spend-band');
 Route::get('/operation-dashboard/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
     ->whereNumber('operator')->name('operation-dashboard.applovin-account-statistics.show');
+Route::get('/operation-dashboard/applovin-personal-situations', [AppLovinAccountStatisticsController::class, 'personalSituation'])
+    ->name('operation-dashboard.applovin-personal-situations.index');
 Route::get('/operation-dashboard/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
     ->name('operation-dashboard.applovin-performance-reports.index');
 Route::get('/operation-dashboard/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])

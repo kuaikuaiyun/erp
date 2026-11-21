@@ -13,6 +13,7 @@ class FinanceLiveSourceChanges
     public static function install(Connection $db, bool $legacy = false): void
     {
         if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) return;
+        FinanceSummaryTriggers::assertCanInstall($db);
         $sources = [
             'logistics_orders' => ['order',
                 ['id', 'bill_number', 'transaction_id', 'payment_gateway_order_id', 'shopify_order_number', 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number', 'order_created_at', 'payment_method', 'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names'],
@@ -71,6 +72,6 @@ class FinanceLiveSourceChanges
 
     private static function changed(array $columns): string
     {
-        return 'NOT ('.implode(' AND ', array_map(fn ($column) => "OLD.`{$column}` <=> NEW.`{$column}`", $columns)).')';
+        return 'NOT ('.implode(' AND ', array_map(fn ($column) => "BINARY OLD.`{$column}` <=> BINARY NEW.`{$column}`", $columns)).')';
     }
 }

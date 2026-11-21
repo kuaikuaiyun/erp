@@ -12,21 +12,45 @@ class FinanceSummarySourceCache
 
     public function __construct(private readonly FinanceSummaryDataVersion $versions) {}
 
+    public static function directory(): string
+    {
+        return rtrim(config('finance.summaries.source_cache_path') ?: rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources', '/\\');
+    }
+
+    public static function sharedFilters(array $filters): array
+    {
+        if (empty($filters['summary_shared_source'])) return $filters;
+        unset($filters['summary_settlement_only'], $filters['summary_account_counts'], $filters['summary_native_settlement']);
+        $filters['logistics_costs'] = true;
+        return $filters;
+    }
+
+    public static function nativeRow(array $row): array
+    {
+        $row = array_replace($row, $row['_summary_native_values'] ?? []);
+        $row['_summary_settlement_currency'] = $row['_summary_native_currency'] ?? 'USD';
+        $row['_summary_settlement_currency_version'] = 1;
+        return $row;
+    }
+
     public function ready(string $channel, array $filters): bool
     {
-        $version = $this->versions->current($channel);
+        $filters = self::sharedFilters($filters);
+        $version = $this->versions->forRange($channel, $filters);
         if ($version === null) return false;
         unset($filters['team'], $filters['subscription'], $filters['summary_currency'], $filters['summary_row_filters']);
         $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
         if ($channel === 'paypal') unset($filters['include_unmatched_fees']);
         ksort($filters);
         $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
-        $path = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope.'/v-'.$version.'.jsonl';
-        return is_file($path) || $this->preparedParts($channel, $filters, $version) !== null;
+        $path = self::directory().'/'.$scope.'/v-'.$version.'.jsonl';
+        return is_file($path) || $this->preparedParts($channel, $filters) !== null || $this->compatibleParts($channel, $filters) !== null;
     }
 
     public function stream(string $channel, array $filters, bool $transactions, callable $build, ?callable $options = null): iterable
     {
+        $native = ! empty($filters['summary_shared_source']) && ! empty($filters['summary_native_settlement']);
+        $filters = self::sharedFilters($filters);
         $team = $filters['team'] ?? null;
         $subscription = $filters['subscription'] ?? null;
         $currency = $filters['summary_currency'] ?? null;
@@ -39,6 +63,8 @@ class FinanceSummarySourceCache
             $constraints[in_array($field, ['subscription', 'currency'], true) ? $field : 'row_'.$field] = $value;
         }
         foreach ($this->canonicalStream($channel, $filters, $transactions, fn () => $build($filters), $constraints, $options) as $row) {
+            if ($native) $row = self::nativeRow($row);
+            if (! empty($filters['summary_payment_channels']) && ! in_array($row['payment_channel'] ?? null, $filters['summary_payment_channels'], true)) continue;
             if (filled($team) && ($row['_summary_team'] ?? $row['team']) !== $team
                 || filled($subscription) && $row['subscription'] !== FinanceSettlementService::subscriptionLabel($subscription)
                 || filled($currency) && $row['currency'] !== $currency) {
@@ -53,7 +79,7 @@ class FinanceSummarySourceCache
 
     private function canonicalStream(string $channel, array $filters, bool $transactions, callable $build, array $constraints, ?callable $options): iterable
     {
-        $version = $this->versions->current($channel);
+        $version = $this->versions->forRange($channel, $filters);
         if ($version === null) {
             yield from $this->uncached($build, $options);
             return;
@@ -66,18 +92,30 @@ class FinanceSummarySourceCache
             unset($filters['include_unmatched_fees']);
         }
         $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
-        $directory = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope;
+        $directory = self::directory().'/'.$scope;
         $path = $directory.'/v-'.$version.'.jsonl';
         if (is_file($path)) {
             yield from $this->read($path, $build, $constraints, $options);
             return;
         }
-        $parts = $this->preparedParts($channel, $filters, $version);
+        $parts = $this->preparedParts($channel, $filters);
         if ($parts !== null) {
             foreach ($parts as $part) {
                 yield from $this->read($part, static fn () => throw new \RuntimeException('已计算的源数据损坏，请重试查询。'), $constraints, $options);
             }
             return;
+        }
+        if (($compatible = $this->compatibleParts($channel, $filters)) !== null) {
+            // Adopt already calculated rows with identical dates, timezone and
+            // amount flags. Publish the selected channel under its own revision
+            // so a later edit to another channel cannot evict this selection.
+            $selected = $filters['summary_payment_channels'] ?? [];
+            $build = function () use ($compatible, $selected) {
+                foreach ($compatible as $part) foreach ($this->read($part,
+                    static fn () => throw new \RuntimeException('已计算的源数据损坏，请重试查询。'), [], null) as $row) {
+                    if ($selected === [] || in_array($row['payment_channel'] ?? null, $selected, true)) yield $row;
+                }
+            };
         }
         try {
             $lock = Cache::store('file')->lock('finance:summary-source:'.hash('sha256', $directory.':'.$version), 900);
@@ -96,6 +134,7 @@ class FinanceSummarySourceCache
                 return;
             }
             if (! is_dir($directory) && ! @mkdir($directory, 0775, true) && ! is_dir($directory)) {
+                $this->storageFailure($channel, $filters);
                 yield from $this->uncached($build, $options);
                 return;
             }
@@ -129,12 +168,15 @@ class FinanceSummarySourceCache
                 fclose($file);
                 $file = null;
             }
-            if ($cacheable && $version === $this->versions->current($channel)) {
+            if ($cacheable && $version === $this->versions->forRange($channel, $filters)) {
                 // A cold, unfiltered report does not use offset indexes. Persist
                 // only the small option list here; filter indexes are generated
                 // lazily for the fields that are actually requested.
                 $this->publishIndex($path, $index, $offset);
-                if (! @rename($temporary, $path)) return;
+                if (! @rename($temporary, $path)) {
+                    if (! is_file($path)) $this->storageFailure($channel, $filters);
+                    return;
+                }
                 $temporary = null;
                 // Bound retained disk use; an in-flight reader may still have the old file open.
                 $files = glob($directory.'/v-*.jsonl') ?: [];
@@ -146,6 +188,7 @@ class FinanceSummarySourceCache
                     }
                 }
             }
+            if (! $cacheable) $this->storageFailure($channel, $filters);
         } finally {
             if (is_resource($file)) {
                 fclose($file);
@@ -157,7 +200,7 @@ class FinanceSummarySourceCache
         }
     }
 
-    private function preparedParts(string $channel, array $filters, string $version): ?array
+    private function preparedParts(string $channel, array $filters): ?array
     {
         if (empty($filters['from']) || empty($filters['to'])) return null;
         $start = \Carbon\CarbonImmutable::parse($filters['from'])->startOfMonth();
@@ -167,12 +210,67 @@ class FinanceSummarySourceCache
         for ($day = $start; $day <= $end; $day = $day->addDays(7)) {
             $chunk = [...$filters, 'from' => $day->toDateString(), 'to' => min($day->addDays(6)->toDateString(), $end->toDateString())];
             ksort($chunk);
+            $partVersion = $this->versions->forRange($channel, $chunk);
+            if ($partVersion === null) return null;
             $scope = hash('sha256', json_encode([4, $channel, $chunk], JSON_THROW_ON_ERROR));
-            $path = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope.'/v-'.$version.'.jsonl';
+            $path = self::directory().'/'.$scope.'/v-'.$partVersion.'.jsonl';
             if (! is_file($path)) return null;
             $parts[] = $path;
         }
         return array_reverse($parts);
+    }
+
+    private function existingParts(string $channel, array $filters): ?array
+    {
+        ksort($filters);
+        $version = $this->versions->forRange($channel, $filters);
+        if ($version === null) return null;
+        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
+        $path = self::directory().'/'.$scope.'/v-'.$version.'.jsonl';
+        return is_file($path) ? [$path] : $this->preparedParts($channel, $filters);
+    }
+
+    /** Reuse channel selections only when all other calculation inputs match. */
+    private function compatibleParts(string $channel, array $filters): ?array
+    {
+        if ($channel !== 'credit_card') return null;
+        $selected = $filters['summary_payment_channels'] ?? [];
+        $all = ['xuzong1', 'xuzong2', 'ye', 'worldpay'];
+        if (array_diff($selected, $all) !== []) return null;
+        if ($parts = $this->supersetParts($channel, $filters)) return $parts;
+        $parts = [];
+        $groups = [['xuzong1', 'xuzong2'], ['ye'], ['worldpay']];
+        $needed = $selected ?: $all;
+        foreach ($groups as $group) {
+            if (array_intersect($needed, $group) === []) continue;
+            $candidate = [...$filters, 'summary_payment_channels' => $group];
+            $available = $this->existingParts($channel, $candidate) ?? $this->supersetParts($channel, $candidate);
+            if ($available === null) return null;
+            array_push($parts, ...$available);
+        }
+        return $parts ? array_values(array_unique($parts)) : null;
+    }
+
+    private function supersetParts(string $channel, array $filters): ?array
+    {
+        $selected = $filters['summary_payment_channels'] ?? [];
+        if ($selected === []) return null;
+        $all = ['xuzong1', 'xuzong2', 'ye', 'worldpay'];
+        foreach ([['xuzong1', 'xuzong2'], ['ye', 'worldpay'], $all] as $superset) {
+            if (array_diff($selected, $superset) !== [] || (count($selected) === count($superset) && $superset !== $all)) continue;
+            $candidate = $filters;
+            if ($superset === $all) unset($candidate['summary_payment_channels']);
+            else $candidate['summary_payment_channels'] = $superset;
+            if ($parts = $this->existingParts($channel, $candidate)) return $parts;
+        }
+        return null;
+    }
+
+    private function storageFailure(string $channel, array $filters): void
+    {
+        \Illuminate\Support\Facades\Log::warning('Finance source calculations could not be persisted; later queries will rebuild them.', [
+            'channel' => $channel, 'from' => $filters['from'] ?? null, 'to' => $filters['to'] ?? null,
+        ]);
     }
 
     private function uncached(callable $build, ?callable $options): iterable

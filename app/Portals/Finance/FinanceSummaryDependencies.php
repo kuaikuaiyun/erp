@@ -6,6 +6,15 @@ class FinanceSummaryDependencies
 {
     public function resolve(\Illuminate\Database\Connection $db): void
     {
+        if ($db->getSchemaBuilder()->hasTable(FinanceSummarySourceChanges::TABLE)
+            && $db->getSchemaBuilder()->hasColumn('finance_summary_changes', 'scopes_resolved')) {
+            $limit = max(1, min(1000, (int) config('finance.summaries.dependency_changes_per_run', 100)));
+            app(FinanceSummarySourceChanges::class)->publish($db, $limit);
+            // Acknowledging a change does not invalidate an already updated source range.
+            $ids = $db->table('finance_summary_changes')->where('scopes_resolved', true)->orderBy('id')->limit($limit)->pluck('id');
+            $db->table('finance_summary_changes')->whereIntegerInRaw('id', $ids->all())->delete();
+            return;
+        }
         $pending = $db->table('finance_summary_changes');
         $sample = (clone $pending)->orderBy('id')->limit(1001)->pluck('id');
         if ($sample->isEmpty()) return;
@@ -48,7 +57,7 @@ class FinanceSummaryDependencies
         });
     }
 
-    private function match(string $source, array $values, \Illuminate\Database\Connection $db): string
+    public function match(string $source, array $values, \Illuminate\Database\Connection $db): string
     {
         $bill = "TRIM(JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"帳單號碼\"')))";
         $merchant = "JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"商户订单号\"'))";
@@ -87,7 +96,7 @@ class FinanceSummaryDependencies
 
         $image = 'changed';
         $sql = match ($source) {
-            'order' => $order($image),
+            'order' => $order($image).' OR '.$linked("o.id = {$image}.id"),
             'reference' => $reference($image.'.reference_number'),
             'item' => $linked("o.id = {$image}.logistics_order_id"),
             'sku' => $linked("o.id IN (SELECT i.logistics_order_id FROM logistics_order_items i

@@ -52,14 +52,23 @@ class OperationReportDashboardController extends Controller
             'scope_user_id' => ['nullable', 'integer'],
             'sort_by' => ['nullable', Rule::in(['first_subscription_orders', 'first_total_orders'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
-            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
+            'display_mode' => ['nullable', Rule::in(['personal', 'performance', 'team'])],
+            'personal_range' => ['nullable', Rule::in([7, 14])],
+            'profit_coefficient' => ['nullable', 'numeric', 'gt:0', 'max:1000000'],
         ]);
+        $isDashboard = $this->isDashboard($context);
+        $displayMode = (string) ($validated['display_mode'] ?? ($isDashboard ? 'personal' : 'performance'));
+        $isPersonalMode = $isDashboard && $displayMode === 'personal';
+        $personalRange = (int) ($validated['personal_range'] ?? 7);
+        $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1.4);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
-        $dateRange = (string) ($validated['date_range'] ?? (
+        $dateRange = $isPersonalMode ? 'personal' : (string) ($validated['date_range'] ?? (
             $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
         ));
-        [$dateFrom, $dateTo] = match ($dateRange) {
+        [$dateFrom, $dateTo] = $isPersonalMode
+            ? [$reportNow->copy()->subDays($personalRange)->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')]
+            : match ($dateRange) {
             'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
             'yesterday' => [$reportNow->copy()->subDay()->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')],
             'last_7_days' => [$reportNow->copy()->subDays(6)->format('Y-m-d'), $reportNow->format('Y-m-d')],
@@ -77,7 +86,7 @@ class OperationReportDashboardController extends Controller
                 $reportNow->copy()->startOfMonth()->format('Y-m-d'),
                 $reportNow->copy()->endOfMonth()->format('Y-m-d'),
             ],
-        };
+            };
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->visibleDepartmentIds($context);
@@ -334,6 +343,7 @@ class OperationReportDashboardController extends Controller
                 }
             }
         }
+        $dailySourceRows = collect($rows);
         $rows = $this->aggregateRangeRows($rows, $dateFrom, $dateTo);
         $rows = array_map(function (array $row): array {
             $row['daily_first_roi_class'] = $this->roiClass($row['daily_first_roi'] ?? null);
@@ -342,7 +352,6 @@ class OperationReportDashboardController extends Controller
         }, $rows);
         $sortBy = $validated['sort_by'] ?? null;
         $sortDirection = (string) ($validated['sort_direction'] ?? 'desc');
-        $displayMode = (string) ($validated['display_mode'] ?? 'performance');
         usort($rows, function (array $a, array $b) use ($sortBy, $sortDirection, $displayMode): int {
             if ($displayMode === 'team') {
                 $rank = static fn (array $row): int => match ($row['team_position'] ?? Department::POSITION_MEMBER) {
@@ -370,6 +379,48 @@ class OperationReportDashboardController extends Controller
         $approvedAdSpend = (float) $allReports->where('status', OperationReport::STATUS_APPROVED)->sum('actual_ad_spend');
         $totals = $this->totals($rows, $approvedAdSpend);
         $totals['first_roi_class'] = $this->roiClass($totals['first_roi'] ?? null);
+        $personalDates = $isPersonalMode
+            ? collect(range(0, $personalRange - 1))->map(fn (int $offset): string => $reportNow->copy()->subDays($personalRange - $offset)->format('Y-m-d'))
+            : collect();
+        $personalRows = $isPersonalMode
+            ? collect($rows)->unique('_report_id')->map(function (array $row) use ($dailySourceRows, $personalDates, $profitCoefficient, $personalRange): array {
+                $operatorDailyRows = $dailySourceRows->where('operator_user_id', $row['operator_user_id']);
+                $days = $personalDates->map(function (string $date) use ($operatorDailyRows, $profitCoefficient): array {
+                    $source = $operatorDailyRows->firstWhere('date', $date);
+                    $revenue = (float) ($source['daily_first_total_revenue'] ?? 0);
+                    $adSpend = (float) ($source['report_actual_ad_spend'] ?? 0);
+                    $profit = round($revenue / $profitCoefficient - $adSpend, 2);
+
+                    return [
+                        'date' => $date,
+                        'first_subscription_orders' => (int) ($source['daily_first_subscription_orders'] ?? 0),
+                        'first_total_orders' => (int) ($source['daily_first_total_orders'] ?? 0),
+                        'first_total_revenue' => $revenue,
+                        'ad_spend' => $adSpend,
+                        'roi' => $adSpend > 0 ? $revenue / $adSpend : null,
+                        'roi_class' => $this->roiClass($adSpend > 0 ? $revenue / $adSpend : null),
+                        'profit' => $profit,
+                    ];
+                })->values();
+                $periodProfit = round((float) $days->sum('first_total_revenue') / $profitCoefficient - (float) $days->sum('ad_spend'), 2);
+
+                return [
+                    'operation_department_name' => $row['operation_department_name'], 'operator_name' => $row['operator_name'],
+                    'is_resigned' => $row['is_resigned'] ?? false, 'calculation_days' => $row['calculation_days'],
+                    'first_subscription_orders' => (int) $row['daily_first_subscription_orders'], 'first_total_orders' => (int) $row['daily_first_total_orders'],
+                    'first_subscription_rate' => (int) $row['daily_first_total_orders'] > 0 ? (int) $row['daily_first_subscription_orders'] / (int) $row['daily_first_total_orders'] : null,
+                    'actual_ad_spend' => (float) $row['report_actual_ad_spend'], 'first_total_revenue' => (float) $row['daily_first_total_revenue'],
+                    'first_average_order_value' => $row['daily_first_average_order_value'], 'first_total_cost' => (float) $row['daily_first_total_cost'],
+                    'first_loss_rate' => $row['daily_first_loss_rate'], 'media_names' => $row['daily_media_names'],
+                    'media_order_counts' => $row['daily_media_order_counts'], 'media_ad_spends' => $row['daily_media_ad_spends'],
+                    'media_rois' => $row['daily_media_rois'], 'media_roi_classes' => $row['daily_media_roi_classes'],
+                    'first_roi' => $row['daily_first_roi'], 'first_roi_class' => $row['daily_first_roi_class'],
+                    'profit' => $periodProfit,
+                    'continuous_loss' => $days->count() === $personalRange && $days->every(fn (array $day): bool => $day['profit'] < 0),
+                    'days' => $days,
+                ];
+            })->values()
+            : collect();
 
         $canManageDashboardScope = $this->isDashboard($context) && $this->isBoss($context['user']);
         $dashboardScopeUsers = collect();
@@ -407,6 +458,11 @@ class OperationReportDashboardController extends Controller
             'sortBy' => $sortBy,
             'sortDirection' => $sortDirection,
             'displayMode' => $displayMode,
+            'isDashboard' => $isDashboard,
+            'isPersonalMode' => $isPersonalMode,
+            'personalRange' => $personalRange,
+            'profitCoefficient' => $profitCoefficient,
+            'personalRows' => $personalRows,
             'rows' => $rows,
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),

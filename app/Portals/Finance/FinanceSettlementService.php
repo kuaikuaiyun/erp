@@ -743,6 +743,7 @@ class FinanceSettlementService
                     );
                 }
                 $row['card_layout'] = array_replace($row['card_layout'], $displayEdits);
+                $row['card_layout']['operation_region'] = self::normaliseRegionLabel((string) ($row['card_layout']['operation_region'] ?? ''));
             }
 
             if (empty($filters['summary_only'])) {
@@ -924,6 +925,8 @@ class FinanceSettlementService
 
     public static function operationRegion(string $department): string
     {
+        // Subscription describes the business, including in legacy department names.
+        $department = trim(str_replace(['订阅', '訂閱'], '', $department));
         if ($department === '刷单') {
             return $department;
         }
@@ -962,15 +965,16 @@ class FinanceSettlementService
         return count($regions) === 1 ? $regions[0] : '';
     }
 
+    public static function normaliseRegionLabel(string $region): string
+    {
+        return str_contains($region, '订阅') || str_contains($region, '訂閱') ? self::operationRegion($region) : $region;
+    }
+
     public function regionOptions(string $report = 'paypal-settlement'): Collection
     {
-        $db = $this->workbooks->database();
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
-        $revision = app(FinanceSummaryDataVersion::class)->cacheRevision([$channel]);
-        $key = 'finance:active-region-options:v1:'.hash('sha256', $db->getDatabaseName().'|'.$report.'|'.$revision);
-        $store = config('cache.default');
-        $cache = Cache::store(config("cache.stores.{$store}.driver") === 'database' ? 'file' : $store);
-        return collect($cache->remember($key, 3600, function () use ($report, $channel): array {
+        $cacheChannels = $report === 'xuzong-credit' ? ['xuzong1', 'xuzong2'] : [FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? $channel];
+        return collect(app(FinanceReportCache::class)->remember('active-region-options:v2:'.$report, $cacheChannels, function () use ($report, $channel): array {
             $regions = [];
             if ($report === 'xuzong-credit') {
                 $reportService = app(FinanceXuzongCreditReport::class);
@@ -1006,7 +1010,8 @@ class FinanceSettlementService
             $values = array_keys($regions);
             sort($values, SORT_STRING);
             return $values;
-        }));
+        }))->map(fn ($region) => self::normaliseRegionLabel((string) $region))
+            ->filter(fn ($region) => $region !== '')->unique()->sort()->values();
     }
 
     private function brushOrderOwner(?object $group): ?string
@@ -1586,6 +1591,9 @@ class FinanceSettlementService
         $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
         $fields['_summary_team'] = true;
         $fields['_summary_settlement_currency'] = true;
+        if (! empty($filters['summary_shared_source'])) {
+            $fields += array_fill_keys(['_summary_shared_version', '_summary_native_values', '_summary_native_currency'], true);
+        }
         // Keep the original date order for grouping and for assigning costs to the first successful payment.
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
         $paypalOrders = $channel === 'paypal' ? app(FinancePayPalSettlementOrders::class) : null;
@@ -1659,7 +1667,7 @@ class FinanceSettlementService
                         if (isset($paypalAmounts[$record->id])) {
                             $resolved[$record->id] = array_replace($resolved[$record->id], $paypalAmounts[$record->id]);
                         }
-                        yield $resolved[$record->id] + ['_summary_usd_version' => 1,
+                        yield $resolved[$record->id] + (! empty($filters['summary_shared_source']) ? ['_summary_shared_version' => 1] : []) + ['_summary_usd_version' => 1,
                             '_summary_settlement_currency_version' => ! empty($filters['summary_native_settlement']) ? 1 : 0]
                             + (! empty($filters['summary_projection'])
                             ? ['_summary_source_account' => $record->account] : []);
@@ -1704,6 +1712,10 @@ class FinanceSettlementService
                         'id' => -$statement['entry_id'], 'channel' => 'credit_card', 'payment_channel' => 'ye',
                         'account' => $account->account_name, 'account_key' => $account->activity_account,
                         '_summary_source_account' => $account->activity_account, '_summary_team' => '',
+                        ...(! empty($filters['summary_shared_source']) ? ['_summary_shared_version' => 1,
+                            '_summary_native_currency' => $orders[$key]->currency,
+                            '_summary_native_values' => collect(['fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'])
+                                ->mapWithKeys(fn ($field) => [$field => $this->number($statement['card_layout'][$field] ?? null)])->all()] : []),
                         'owner' => '', 'team' => '', 'subscription' => '', 'payment_method' => '',
                         'currency' => $orders[$key]->currency,
                         '_summary_settlement_currency' => ! empty($filters['summary_native_settlement']) ? $orders[$key]->currency : 'USD',
@@ -1760,8 +1772,10 @@ class FinanceSettlementService
         return $details->map(function (array $row) use ($fields, $currencies, $usdRates, $rates, $dates, $moneyFields, $platform, $filters): array {
             $layout = $row['card_layout'];
             $currency = $currencies[$row['id']];
+            $nativeValues = [];
             foreach (array_intersect_key($layout, $moneyFields) as $field => $value) {
                 $amount = $this->number($value);
+                $nativeValues[$field] = $amount;
                 if (empty($filters['summary_native_settlement']) && $amount !== null && $currency !== ''
                     && $currency !== 'USD' && ! in_array($field, ['logistics', 'purchase'], true)) {
                     $amount = $this->number($usdRates->convert($rates, $currency, $dates[$row['id']], $amount));
@@ -1770,6 +1784,13 @@ class FinanceSettlementService
             }
             if ($platform === 'ye' && $row['settlement'] === null) {
                 $row['settlement'] = $this->number($layout['source_settlement_usd'] ?? null);
+            }
+            if ($platform === 'ye' && ($nativeValues['settlement'] ?? null) === null) {
+                $nativeValues['settlement'] = $this->number($layout['source_settlement_usd'] ?? null);
+            }
+            if (! empty($filters['summary_shared_source'])) {
+                $row['_summary_native_currency'] = $currency !== '' ? $currency : (strtoupper(trim((string) ($row['currency'] ?? ''))) ?: 'USD');
+                $row['_summary_native_values'] = array_filter($nativeValues, fn ($amount, $field) => $amount !== ($row[$field] ?? null), ARRAY_FILTER_USE_BOTH);
             }
             if ($row['account_key'] === FinanceWorldpayImport::SOURCE_ACCOUNT) {
                 $row['account'] = 'Worldpay';

@@ -217,6 +217,157 @@ class AppLovinAccountStatisticsController extends Controller
         ]);
     }
 
+    /**
+     * Show per-account AppLovin lifecycle and staged ROI for the operation dashboard.
+     */
+    public function personalSituation(Request $request): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->project($request) === 'dashboard', 404);
+
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user'], 'dashboard');
+        $filters = $request->validate([
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($visibleDepartmentIds)],
+            'keyword' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
+        ]);
+        $selectedDepartmentIds = collect($filters['department_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $keyword = trim((string) ($filters['keyword'] ?? ''));
+        $reports = $this->appLovinPersonalReports($context['user'], $visibleDepartmentIds, $selectedDepartmentIds);
+        $rows = $this->appLovinPersonalRows($reports)
+            ->when($keyword !== '', fn (Collection $items) => $items->filter(function (array $row) use ($keyword): bool {
+                $needle = mb_strtolower($keyword);
+                return str_contains(mb_strtolower($row['operator_name']), $needle)
+                    || str_contains(mb_strtolower($row['account_number']), $needle)
+                    || str_contains(mb_strtolower($row['account_name']), $needle);
+            }))
+            ->sort(function (array $left, array $right): int {
+                return [$left['department'], $left['operator_name'], -(float) $left['total_spend'], $left['account_number'], $left['account_name']]
+                    <=> [$right['department'], $right['operator_name'], -(float) $right['total_spend'], $right['account_number'], $right['account_name']];
+            })->values();
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $page = max(1, (int) $request->query('page', 1));
+        $paginator = new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, [
+            'path' => $request->url(), 'query' => $request->query(),
+        ]);
+
+        return view('portals.assistant.applovin-personal-situations.index', [
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator,
+            'departmentOptions' => Department::business()->whereIn('id', $visibleDepartmentIds)->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']),
+            'filters' => ['department_ids' => $selectedDepartmentIds, 'keyword' => $keyword, 'per_page' => $perPage],
+            'totals' => ['accounts' => $rows->count(), 'reached_2500' => $rows->filter(fn (array $row): bool => $row['reach_2500_date'] !== null)->count(), 'spend' => (float) $rows->sum('total_spend')],
+        ]);
+    }
+
+    /** @return Collection<int, OperationReport> */
+    private function appLovinPersonalReports(AdminUser $viewer, array $visibleDepartmentIds, array $selectedDepartmentIds): Collection
+    {
+        $query = OperationReport::query();
+        if (! $this->canSeeAll($viewer)) {
+            $visibleDepartmentIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $visibleDepartmentIds);
+        }
+        if ($selectedDepartmentIds !== []) $query->whereIn('operation_department_id', $selectedDepartmentIds);
+
+        return $query->orderBy('report_date')->orderBy('id')->get();
+    }
+
+    /** @return Collection<int, array<string, mixed>> */
+    private function appLovinPersonalRows(Collection $reports): Collection
+    {
+        $bindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
+        $storeIds = $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->pluck('assistant_domain_store_id'))
+            ->merge($bindings->values())->filter()->map(fn ($id): int => (int) $id)->unique()->values();
+        $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain'])->keyBy('id');
+        $activation = [];
+        $daily = [];
+
+        foreach ($reports as $report) {
+            $ads = collect($report->advertising_rows ?: [])->filter(fn (array $ad): bool => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
+                ->map(function (array $ad) use ($report, $bindings, $stores): array {
+                    $number = trim((string) ($ad['account_number'] ?? ''));
+                    $name = trim((string) ($ad['account_name'] ?? ''));
+                    $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->operator_user_id, (string) ($ad['agency'] ?? ''), 'AppLovin', $name, $number);
+                    $identity = (int) $report->operator_user_id.'|'.mb_strtolower($number !== '' ? $number : $name);
+                    $storeId = (int) ($ad['assistant_domain_store_id'] ?? $bindings->get($accountKey) ?? 0);
+                    $domain = trim((string) ($ad['store_domain'] ?? $stores->get($storeId)?->domain ?? ''));
+                    return ['identity' => $identity, 'store_id' => $storeId, 'domain' => $domain, 'spend' => (float) ($ad['actual_spend'] ?? 0), 'account_name' => $name, 'account_number' => $number];
+                })->values();
+            $submittedAt = $report->submitted_at ?: $report->created_at;
+            foreach ($ads as $ad) {
+                $activation[$ad['identity']] ??= ['date' => $report->report_date->format('Y-m-d'), 'time' => $submittedAt?->format('Y-m-d H:i:s'), 'department' => (string) $report->operation_department_name, 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name, 'account_name' => $ad['account_name'], 'account_number' => $ad['account_number'], 'store_domains' => []];
+                if ($ad['domain'] !== '') {
+                    $activation[$ad['identity']]['store_domains'][mb_strtolower($ad['domain'])] = $ad['domain'];
+                }
+            }
+            if ($report->status !== OperationReport::STATUS_APPROVED) continue;
+
+            $ads->groupBy(fn (array $ad): string => $ad['store_id'] > 0 ? 'store:'.$ad['store_id'] : 'account:'.$ad['identity'])
+                ->each(function (Collection $storeAds) use (&$daily, $report): void {
+                    $domain = mb_strtolower(trim((string) $storeAds->first()['domain']));
+                    $revenue = $domain === '' ? 0.0 : (float) collect($report->metric_rows ?: [])
+                        ->filter(fn (array $metric): bool => mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domain && mb_strtolower(trim((string) ($metric['media_source'] ?? ''))) === 'applovin')
+                        ->sum(fn (array $metric): float => (float) ($metric['first_total_revenue'] ?? 0));
+                    $totalSpend = (float) $storeAds->sum('spend');
+                    foreach ($storeAds as $ad) {
+                        $share = $totalSpend > 0 ? $ad['spend'] / $totalSpend : 1 / max(1, $storeAds->count());
+                        $daily[$ad['identity']][] = ['date' => $report->report_date->format('Y-m-d'), 'spend' => (float) $ad['spend'], 'revenue' => $revenue * $share];
+                    }
+                });
+        }
+
+        return collect($activation)->map(function (array $account, string $identity) use ($daily): array {
+            $entries = collect($daily[$identity] ?? [])->groupBy('date')->map(fn (Collection $items, string $date): array => ['date' => $date, 'spend' => (float) $items->sum('spend'), 'revenue' => (float) $items->sum('revenue')])->sortBy('date')->values();
+            $bands = ['to_2500' => ['spend' => 0.0, 'revenue' => 0.0], '2500_to_5000' => ['spend' => 0.0, 'revenue' => 0.0], 'over_5000' => ['spend' => 0.0, 'revenue' => 0.0]];
+            $cumulative = 0.0; $reachDate = null; $reach5000Date = null; $over5000Date = null;
+            foreach ($entries as $entry) {
+                $spend = (float) $entry['spend']; $revenue = (float) $entry['revenue']; $remaining = $spend;
+                foreach ([['to_2500', 2500.0], ['2500_to_5000', 5000.0], ['over_5000', INF]] as [$band, $limit]) {
+                    if ($remaining <= 0) break;
+                    $capacity = $limit === INF ? $remaining : max(0, $limit - $cumulative);
+                    $portion = min($remaining, $capacity);
+                    if ($portion <= 0) continue;
+                    $bands[$band]['spend'] += $portion;
+                    $bands[$band]['revenue'] += $spend > 0 ? $revenue * ($portion / $spend) : 0;
+                    $before = $cumulative; $cumulative += $portion; $remaining -= $portion;
+                    if ($reachDate === null && $before < 2500 && $cumulative >= 2500) $reachDate = $entry['date'];
+                    if ($reach5000Date === null && $before < 5000 && $cumulative >= 5000) $reach5000Date = $entry['date'];
+                    if ($over5000Date === null && $before <= 5000 && $cumulative > 5000) $over5000Date = $entry['date'];
+                }
+            }
+            $start = \Carbon\CarbonImmutable::parse($account['date'], 'Asia/Shanghai');
+            $reachDays = $reachDate ? $start->diffInDays(\Carbon\CarbonImmutable::parse($reachDate, 'Asia/Shanghai')) + 1 : null;
+            $reach5000Days = $reach5000Date ? $start->diffInDays(\Carbon\CarbonImmutable::parse($reach5000Date, 'Asia/Shanghai')) + 1 : null;
+            $over5000Days = $over5000Date ? $start->diffInDays(\Carbon\CarbonImmutable::parse($over5000Date, 'Asia/Shanghai')) + 1 : null;
+            $ratio = static fn (array $band): ?float => $band['spend'] > 0 ? $band['revenue'] / $band['spend'] : null;
+            $storeDomains = collect($account['store_domains'] ?? [])->values()->filter()->unique(fn ($domain) => mb_strtolower((string) $domain))->implode('、');
+            $storePerformance = (float) $entries->sum('revenue');
+            // A phase is only meaningful after its spend threshold has been reached.
+            // Do not calculate or flag a partially completed phase.
+            $reach2500Roi = $reachDate ? $ratio($bands['to_2500']) : null;
+            $midRoi = $reach5000Date ? $ratio($bands['2500_to_5000']) : null;
+            $overRoi = $over5000Date ? $ratio($bands['over_5000']) : null;
+            $reach2500Performance = $reachDate ? (float) $bands['to_2500']['revenue'] : null;
+            $reach5000Performance = $reach5000Date
+                ? (float) ($bands['to_2500']['revenue'] + $bands['2500_to_5000']['revenue'])
+                : null;
+            $over5000Performance = $over5000Date ? (float) $bands['over_5000']['revenue'] : null;
+            $reach2500Spend = $reachDate ? (float) $bands['to_2500']['spend'] : null;
+            $reach5000Spend = $reach5000Date
+                ? (float) ($bands['to_2500']['spend'] + $bands['2500_to_5000']['spend'])
+                : null;
+            $over5000Spend = $over5000Date ? (float) $bands['over_5000']['spend'] : null;
+            $isBelowTarget = ($reach2500Roi !== null && $reach2500Roi > 0 && $reach2500Roi < 1.2)
+                || ($midRoi !== null && $midRoi > 0 && $midRoi < 1.3)
+                || ($overRoi !== null && $overRoi > 0 && $overRoi < 1.4);
+            // array_merge is intentional: the activation payload holds domains as an
+            // array while the table needs a displayable string.
+            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
+        })->values();
+    }
+
     private function accounts(AdminUser $viewer, string $project): Collection
     {
         $visibleIds = $this->visibleDepartmentIds($viewer, $project);
@@ -321,7 +472,7 @@ class AppLovinAccountStatisticsController extends Controller
 
     private function project(Request $request): string
     {
-        if ($request->routeIs('operation-dashboard.applovin-account-statistics.*')) return 'dashboard';
+        if ($request->routeIs('operation-dashboard.applovin-account-statistics.*') || $request->routeIs('operation-dashboard.applovin-personal-situations.*')) return 'dashboard';
         if ($request->routeIs('operation.applovin-account-statistics.*')) return 'operation';
         if ($request->routeIs('fashion.applovin-account-statistics.*')) return 'fashion';
         return 'assistant';

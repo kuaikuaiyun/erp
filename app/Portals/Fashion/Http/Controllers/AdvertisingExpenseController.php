@@ -71,9 +71,26 @@ class AdvertisingExpenseController extends Controller
             }
         }
 
+        $reuseReport = null;
+        if ($request->filled('reuse')) {
+            $reuseReport = FashionAdvertisingReport::query()
+                ->where('project_code', $this->project['code'])
+                ->with('adSpendEntries')
+                ->findOrFail((int) $request->input('reuse'));
+            $this->authorizeReport($user, $reuseReport);
+
+            if ($isBoss && ! $operatorOptions->contains('id', (int) $reuseReport->submitter_id)) {
+                $reuseOperator = AdminUser::query()->find((int) $reuseReport->submitter_id);
+                if ($reuseOperator) {
+                    $operatorOptions->push($reuseOperator);
+                }
+            }
+        }
+
         $selectedOperatorId = $editing?->submitter_id
-            ?: ($isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id);
+            ?: ($reuseReport?->submitter_id ?: ($isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id));
         $selectedOperator = $operatorOptions->firstWhere('id', $selectedOperatorId) ?: $user;
+        abort_unless(! $reuseReport || (int) $reuseReport->submitter_id === (int) $selectedOperator->getKey(), 422, '只能复用当前运营人员的广告费记录。');
         $operatorStores = AssistantDomainStore::query()->where('owner_user_id', $selectedOperator->getKey())
             ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get(['id', 'domain', 'shop_name']);
 
@@ -84,6 +101,21 @@ class AdvertisingExpenseController extends Controller
             ...$context,
             'reports' => $reports,
             'editing' => $editing,
+            'reusedAdvertisingRows' => $reuseReport
+                ? $reuseReport->adSpendEntries->map(fn ($item): array => [
+                    'agency' => (string) $item->agency,
+                    'media' => (string) $item->media,
+                    'account_name' => (string) $item->account_name,
+                    'account_number' => (string) $item->account_number,
+                    'assistant_domain_store_id' => $item->assistant_domain_store_id,
+                    'store_domain' => $item->store_domain,
+                    'book_spend_usd' => '',
+                    'settlement_coefficient' => '',
+                    'actual_spend_usd' => '',
+                    'misc_fee_rmb' => '',
+                    'remark' => '',
+                ])->values()->all()
+                : [],
             'filters' => ['from' => $from ?? '', 'to' => $to ?? ''],
             'agencyOptions' => $advertisingOptions['agencies'],
             'agencyMediaOptions' => $advertisingOptions['agency_media'],

@@ -256,7 +256,7 @@
     @include('portals.finance.partials.timezone-options', ['selectedTimezone' => null])
 </select>
 @else
-<input id="edit-{{ $field }}" name="{{ $field }}" class="form-control" @if(in_array($field, $editorNumericFields, true)) type="number" step="0.00000001" @if(isset($moneyFields[$field]) && $field !== 'usd_rate') data-settlement-cost @endif @else maxlength="{{ $field === 'note' ? 2000 : 191 }}" @endif @if($field === 'subscription') list="settlement-subscriptions" @elseif($field === 'account') list="settlement-accounts" @endif>
+<input id="edit-{{ $field }}" name="{{ $field }}" class="form-control" @if(in_array($field, $editorNumericFields, true)) type="number" step="{{ $field === 'refund_count' ? '1' : '0.00000001' }}" @if($field === 'refund_count') min="0" @endif @if(isset($moneyFields[$field]) && $field !== 'usd_rate') data-settlement-cost @endif @else maxlength="{{ $field === 'note' ? 2000 : 191 }}" @endif @if($field === 'subscription') list="settlement-subscriptions" @elseif($field === 'account') list="settlement-accounts" @endif>
 @endif
 </div>@endforeach
 <div style="grid-column:1/-1" class="settlement-note">{{ $cardChannel === 'ye' ? '叶总支付专用字段。' : ($cardChannel === 'worldpay' ? 'Worldpay专用字段。' : '') }}记录ID由系统生成。交易ID及支付记录须保持唯一；日期时间填写 YYYY-MM-DD HH:mm:ss，月份填写 YYYY-MM。日期、地区和应结算由对应来源及公式计算，物流及采购通过成本导入维护。已锁定月份不可修改。</div>

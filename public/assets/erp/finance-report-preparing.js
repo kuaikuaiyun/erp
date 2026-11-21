@@ -1,13 +1,30 @@
 (function () {
     'use strict';
     async function run(plan, progress) {
-        for (var index = 0; index < plan.months.length; index++) {
-            var month = plan.months[index];
-            progress('正在计算 ' + month.month + '（' + (index + 1) + '/' + plan.months.length + '）…');
-            var response = await fetch(month.url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
-            var data = (response.headers.get('Content-Type') || '').includes('application/json') ? await response.json() : {};
-            if (!response.ok || data.state !== 'ready') throw new Error(data.message || '该月份计算失败，请重试。');
+        var next = 0;
+        var completed = plan.months.filter(function (month) { return month.completed; }).length;
+        var failure = null;
+        async function worker() {
+            while (!failure && next < plan.months.length) {
+                var month = plan.months[next++];
+                if (month.completed) continue;
+                progress('正在计算 ' + month.month + '（已完成 ' + completed + '/' + plan.months.length + '）…');
+                try {
+                    var response = await fetch(month.url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+                    var data = (response.headers.get('Content-Type') || '').includes('application/json') ? await response.json() : {};
+                    if (!response.ok || data.state !== 'ready') throw new Error(data.message || '该月份计算失败，请重试。');
+                    month.completed = true;
+                    completed++;
+                } catch (error) {
+                    failure = failure || error;
+                }
+            }
         }
+        // Keep server load bounded. Wait for in-flight parts before enabling
+        // retry, so it cannot duplicate a request that is still finishing.
+        var concurrency = Math.max(1, Math.min(2, Number(plan.concurrency) || 1));
+        await Promise.all(Array.from({length: concurrency}, worker));
+        if (failure) throw failure;
         return plan.resume_url;
     }
     window.financePrepareReport = async function (url, progress) {

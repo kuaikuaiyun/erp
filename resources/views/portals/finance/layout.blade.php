@@ -93,4 +93,4 @@ document.querySelectorAll('form').forEach(function (form) {
 </script>
 @endpush
 
-@push('scripts')<script src="{{ asset('assets/erp/finance-report-preparing.js') }}?v=2"></script>@endpush
+@push('scripts')<script src="{{ asset('assets/erp/finance-report-preparing.js') }}?v=3"></script>@endpush

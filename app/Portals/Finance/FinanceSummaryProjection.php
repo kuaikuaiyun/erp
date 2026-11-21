@@ -37,8 +37,9 @@ class FinanceSummaryProjection
     {
         // Xu Zong's transaction rows are already USD. Ye/Worldpay's transaction
         // rows retain settlement currency, so use their USD settlement rows.
-        $variants = $channel === 'paypal' ? [[false, ['paypal']]]
-            : [[true, ['xuzong1', 'xuzong2']], [false, ['ye', 'worldpay']]];
+        $variants = ! empty($filters['summary_shared_source']) ? [[false, $channel === 'paypal' ? ['paypal'] : ['xuzong1', 'xuzong2', 'ye', 'worldpay']]]
+            : ($channel === 'paypal' ? [[false, ['paypal']]]
+            : [[true, ['xuzong1', 'xuzong2']], [false, ['ye', 'worldpay']]]);
         $streams = [];
         foreach ($variants as [$transactions, $platforms]) {
             $selected = $paymentChannels === [] ? $platforms : array_values(array_intersect($platforms, $paymentChannels));
@@ -70,8 +71,12 @@ class FinanceSummaryProjection
 
         $month = substr($filters['from'], 0, 7);
         $timezone = $filters['timezone'] ?? 'Asia/Shanghai';
-        return $db->transaction(function () use ($db, $month, $channel, $timezone, $filters, $transactions, $currency, $paymentChannels, $aggregateTransactions): ?iterable {
+        $scoped = FinanceSummarySourceChanges::available($db);
+        if (! $scoped && $db->getSchemaBuilder()->hasTable(FinanceSummarySourceChanges::TABLE)) return null;
+        if ($scoped && ! app(FinanceSummarySourceChanges::class)->publish($db)) return null;
+        return $db->transaction(function () use ($db, $month, $channel, $timezone, $filters, $transactions, $currency, $paymentChannels, $aggregateTransactions, $scoped): ?iterable {
             if ($db->table('finance_summary_changes')
+                ->when($scoped, fn ($query) => $query->where('scopes_resolved', false))
                 ->when($channel === 'paypal', fn ($query) => $query->whereNotIn('source', ['fashion', 'fashion_item']))->exists()) {
                 return null;
             }
@@ -106,6 +111,11 @@ class FinanceSummaryProjection
             }
 
             $first = (clone $rows)->value('payload');
+            if (! empty($filters['summary_shared_source'])) {
+                $certificate = $first ?? $db->table('finance_summary_rows')->where(compact('month', 'channel'))
+                    ->where('revision', $period->published)->where('transactions', false)->value('payload');
+                if ($certificate !== null && (json_decode($certificate, true, 512, JSON_THROW_ON_ERROR)['_summary_shared_version'] ?? null) !== 1) return null;
+            }
             if ($first !== null && ! isset(json_decode($first, true, 512, JSON_THROW_ON_ERROR)['payment_channel'])) {
                 return null;
             }
@@ -204,16 +214,17 @@ class FinanceSummaryProjection
         $nextRevision = (int) $db->table('finance_summary_periods')->where([
             'month' => $start->addMonth()->format('Y-m'), 'channel' => $period->channel,
         ])->value('revision');
-        $projectionVersion = hash('sha256', json_encode([3, $nextRevision], JSON_THROW_ON_ERROR));
+        $projectionVersion = hash('sha256', json_encode([4, $nextRevision], JSON_THROW_ON_ERROR));
         $fxVersion = $period->channel === 'credit_card' ? app(FinanceCreditUsdRates::class)->fingerprint($period->month) : null;
         if ((int) $period->published >= (int) $period->revision) {
             $publishedRows = $db->table('finance_summary_rows')->where(['month' => $period->month, 'channel' => $period->channel,
                 'revision' => $period->published]);
-            $first = (clone $publishedRows)->orderBy('position')->value('payload');
+            $first = (clone $publishedRows)->where('transactions', false)->orderBy('position')->value('payload');
             $payload = $first === null ? null : json_decode($first, true, 512, JSON_THROW_ON_ERROR);
             $variants = (clone $publishedRows)->select('timezone', 'transactions')
                 ->groupBy('timezone', 'transactions')->get()->count();
-            if ($payload !== null && $variants === 4 && ($payload['_summary_projection_version'] ?? null) === $projectionVersion
+            if ($payload !== null && $variants === 4 && ($payload['_summary_shared_version'] ?? null) === 1
+                && ($payload['_summary_projection_version'] ?? null) === $projectionVersion
                 && ($period->channel === 'paypal'
                 ? ($payload['_summary_calculation_version'] ?? null) === 2
                 : ($payload['_summary_fx_version'] ?? null) === $fxVersion)) {
@@ -233,10 +244,11 @@ class FinanceSummaryProjection
             $batch = [];
             $position = 0;
             $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(),
-                'timezone' => $timezone, 'logistics_costs' => $transactions, 'summary_projection' => true,
+                'timezone' => $timezone, 'logistics_costs' => true, 'summary_projection' => true,
+                'summary_shared_source' => ! $transactions,
                 'summary_native_settlement' => $transactions, 'include_unmatched_fees' => true];
-            if ($period->channel === 'credit_card' && ($timezone === '-04:00' || ! $transactions)) {
-                $filters['summary_payment_channels'] = $timezone === '-04:00' ? ['xuzong1', 'xuzong2'] : ['ye', 'worldpay'];
+            if ($period->channel === 'credit_card' && $timezone === '-04:00') {
+                $filters['summary_payment_channels'] = ['xuzong1', 'xuzong2'];
             }
             foreach ($this->settlements->summaryRowStream($period->channel, $filters, $transactions) as $row) {
                 $row['_summary_projection_version'] = $projectionVersion;
@@ -283,16 +295,15 @@ class FinanceSummaryProjection
     private function warmSourceFiles(object $period): void
     {
         $start = CarbonImmutable::parse($period->month.'-01', 'Asia/Shanghai');
-        $scopes = [['Asia/Shanghai', true], ['Asia/Shanghai', false], ['-04:00', false]];
-        foreach ($scopes as [$zone, $costs]) {
+        foreach (['Asia/Shanghai', '-04:00'] as $zone) {
             $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(),
-                'timezone' => $zone, 'logistics_costs' => $costs,
-                'summary_native_settlement' => $costs, 'include_unmatched_fees' => true];
-            if ($period->channel === 'credit_card' && ! $costs) {
-                $filters['summary_payment_channels'] = $zone === '-04:00' ? ['xuzong1', 'xuzong2'] : ['ye', 'worldpay'];
+                'timezone' => $zone, 'logistics_costs' => true,
+                'summary_shared_source' => true, 'include_unmatched_fees' => true];
+            if ($period->channel === 'credit_card' && $zone === '-04:00') {
+                $filters['summary_payment_channels'] = ['xuzong1', 'xuzong2'];
             }
-            foreach (app(FinanceSummarySourceCache::class)->stream($period->channel, $filters, $costs,
-                fn (array $sourceFilters) => $this->settlements->summaryRowStream($period->channel, $sourceFilters, $costs),
+            foreach (app(FinanceSummarySourceCache::class)->stream($period->channel, $filters, false,
+                fn (array $sourceFilters) => $this->settlements->summaryRowStream($period->channel, $sourceFilters),
                 static function (array $options): void {}) as $row) {
                 // Consume a streaming build; source files publish atomically at the same revision.
             }

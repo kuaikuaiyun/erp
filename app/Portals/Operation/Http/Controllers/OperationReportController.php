@@ -457,6 +457,7 @@ class OperationReportController extends Controller
             'report_date' => ['nullable', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
             'edit_report' => ['nullable', 'integer'],
+            'reuse_report' => ['nullable', 'integer'],
         ]);
         $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
         if ($editingReport) {
@@ -475,6 +476,13 @@ class OperationReportController extends Controller
             : (int) $user->getKey());
         $operator = AdminUser::query()->findOrFail($operatorId);
         if ($isBoss) $this->assertAssignableOperator($operatorId);
+        $reuseReport = ! empty($validated['reuse_report'])
+            ? OperationReport::query()->findOrFail((int) $validated['reuse_report'])
+            : null;
+        if ($reuseReport) {
+            abort_unless($isBoss || (int) $reuseReport->operator_user_id === (int) $user->getKey(), 403);
+            abort_unless((int) $reuseReport->operator_user_id === $operatorId, 422, '只能复用当前运营人员的广告提报。');
+        }
         $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
         $advertisingAssistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
@@ -486,7 +494,16 @@ class OperationReportController extends Controller
             ? OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first()
             : null;
         $metricRows = $calculated['rows'];
-        $advertisingRows = $request->session()->pull('advertising_import_rows', $editingReport?->advertising_rows ?: []);
+        $reusedAdvertisingRows = $reuseReport
+            ? collect($reuseReport->advertising_rows ?: [])->map(fn (array $row): array => [
+                'agency' => (string) ($row['agency'] ?? ''),
+                'media_source' => (string) ($row['media_source'] ?? ''),
+                'assistant_domain_store_id' => $row['assistant_domain_store_id'] ?? null,
+                'account_name' => (string) ($row['account_name'] ?? ''),
+                'account_number' => (string) ($row['account_number'] ?? ''),
+            ])->values()->all()
+            : [];
+        $advertisingRows = $request->session()->pull('advertising_import_rows', $reusedAdvertisingRows ?: ($editingReport?->advertising_rows ?: []));
         $submittedMetricRows = $report?->metric_rows ?: [];
         $submittedAdvertisingRows = $report?->advertising_rows ?: [];
         $history = OperationReport::query()
@@ -779,7 +796,9 @@ class OperationReportController extends Controller
             'ads.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+(?:-\d+)*$/'],
             'ads.*.assistant_domain_store_id' => ['nullable', 'integer'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
-            'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
+            // The coefficient is derived from the selected advertising agency on the server.
+            // Reused rows do not submit it until the browser has re-rendered the agency option.
+            'ads.*.settlement_coefficient' => ['nullable', 'numeric', 'min:0'],
             'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
         ]);
         $operatorId = $isBoss && ! empty($validated['operator_user_id'])
@@ -810,7 +829,7 @@ class OperationReportController extends Controller
             if (empty($ad['existing_screenshot'])) {
                 throw ValidationException::withMessages(['ads.'.$index.'.screenshot' => '请上传第 '.($index + 1).' 条广告账户的广告消耗截图。']);
             }
-            $hasContent = collect(['media_source','agency','account_name','account_number','book_spend','settlement_coefficient'])
+            $hasContent = collect(['media_source','agency','account_name','account_number','book_spend'])
                 ->contains(fn ($field) => ($ad[$field] ?? '') !== '' && ($ad[$field] ?? null) !== null);
             if (! $hasContent && empty($ad['existing_screenshot'])) continue;
             $path = $ad['existing_screenshot'] ?? null;

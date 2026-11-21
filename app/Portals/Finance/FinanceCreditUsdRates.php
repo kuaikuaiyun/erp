@@ -23,6 +23,15 @@ class FinanceCreditUsdRates
         return hash('sha256', json_encode([$manual, app(FinanceEcbReferenceRates::class)->cachedFingerprint($month)], JSON_THROW_ON_ERROR));
     }
 
+    public function rangeFingerprint(string $from, string $to): string
+    {
+        $manual = $this->workbooks->database()->table(self::TABLE)
+            ->where('starts_on', '<=', $to)->where('ends_on', '>=', $from)
+            ->orderBy('currency')->orderBy('scope')->orderBy('starts_on')->orderBy('ends_on')
+            ->get(['currency', 'scope', 'starts_on', 'ends_on', 'usd_rate']);
+        return hash('sha256', json_encode([$manual, app(FinanceEcbReferenceRates::class)->rangeFingerprint($from, $to)], JSON_THROW_ON_ERROR));
+    }
+
     public function save(array $data, int $actor): void
     {
         $scope = $data['usd_scope'];

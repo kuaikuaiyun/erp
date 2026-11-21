@@ -634,6 +634,7 @@ class FinancePortalTest extends TestCase
         $generation = (string) \Illuminate\Support\Str::uuid();
         $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
         $versions->shouldReceive('current')->with('paypal')->andReturn('current-source');
+        $versions->shouldReceive('forCache')->andReturn(null);
         $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
         DB::table('finance_paypal_settlement_projections')->insert([
             'id' => 1, 'generation' => $generation, 'source_revision' => hash('sha256', 'paypal-settlement-attribution-v2:current-source'),
@@ -667,6 +668,7 @@ class FinancePortalTest extends TestCase
         ]);
         $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
         $versions->shouldReceive('current')->with('paypal')->andReturn('new-source', null);
+        $versions->shouldReceive('forCache')->andReturn(null);
         $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
         foreach (['changed source', 'untracked source'] as $case) {
             $this->get('/finance/reports/paypal-settlement')->assertOk()
@@ -2992,7 +2994,8 @@ class FinancePortalTest extends TestCase
     public function test_prepared_ye_tab_does_not_wait_for_other_channels_when_switching_back(): void
     {
         $projection = Mockery::mock(\App\Portals\Finance\FinanceSummaryProjection::class);
-        $projection->shouldReceive('stream')->once()->with('credit_card', Mockery::any(), true, null, ['ye'])->andReturnNull();
+        $projection->shouldReceive('stream')->once()->with('credit_card', Mockery::on(fn ($filters) => $filters['summary_shared_source'] === true
+            && ! isset($filters['summary_native_settlement'])), false, null, ['ye'])->andReturnNull();
         $this->app->instance(\App\Portals\Finance\FinanceSummaryProjection::class, $projection);
         $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
         $sources->shouldReceive('ready')->once()->with('credit_card', Mockery::on(fn ($filters) => $filters['summary_payment_channels'] === ['ye']
@@ -3012,6 +3015,7 @@ class FinancePortalTest extends TestCase
         $this->workbooks = $workbooks;
         $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
         $revision = 'revision-1';
+        $versions->shouldReceive('forRange')->andReturnUsing(fn ($channel) => $versions->current($channel));
         $versions->shouldReceive('current')->andReturnUsing(function () use (&$revision) {
             $run = request()->attributes->get('finance.source_run');
             return $revision ?? ($run ? hash('sha256', $run) : null);
@@ -3046,6 +3050,41 @@ class FinancePortalTest extends TestCase
         $this->getJson($withoutTracking['months'][0]['url'])->assertOk()->assertExactJson(['state' => 'ready']);
         $this->get($withoutTracking['resume_url'])->assertOk()->assertViewIs('portals.finance.settlement-overview');
         $this->getJson($url.'&_source_run=invalid')->assertUnprocessable();
+    }
+
+    public function test_calculation_plan_resumes_only_missing_parts_of_the_selected_channel(): void
+    {
+        $db = Mockery::mock(\Illuminate\Database\Connection::class);
+        $db->shouldReceive('getDriverName')->andReturn('mysql');
+        $workbooks = Mockery::mock(FinanceWorkbookService::class)->makePartial();
+        $workbooks->shouldReceive('database')->andReturn($db);
+        $this->workbooks = $workbooks;
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $versions->shouldReceive('current')->andReturn('current-version');
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
+        $projection = Mockery::mock(\App\Portals\Finance\FinanceSummaryProjection::class);
+        $projection->shouldReceive('lossStream')->with('credit_card', Mockery::any(), ['worldpay'])->andReturnNull();
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryProjection::class, $projection);
+        $prepared = ['2026-09-01', '2026-09-08'];
+        $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
+        $sources->shouldReceive('ready')->with('credit_card', Mockery::on(function ($filters) {
+            return $filters['summary_payment_channels'] === ['worldpay'] && $filters['logistics_costs'] === true;
+        }))->andReturnUsing(function ($channel, $filters) use (&$prepared) {
+            return $filters['to'] !== '2026-09-30' && in_array($filters['from'], $prepared, true);
+        });
+        $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
+        $this->directReportController();
+        $url = '/finance/reports/losses?month_from=2026-09&month_to=2026-09&loss_scope=Worldpay&_finance_plan=1';
+        $plan = $this->getJson($url)->assertOk()->assertJsonCount(3, 'months')->json();
+        $this->assertSame(2, $plan['concurrency']);
+        parse_str(parse_url($plan['months'][0]['url'], PHP_URL_QUERY), $query);
+        $this->assertSame('2026-09-15', $query['_source_from']);
+        $this->assertSame('2026-09-21', $query['_source_to']);
+        $prepared[] = '2026-09-15';
+        $this->getJson($url)->assertOk()->assertJsonCount(2, 'months');
+        // Invalidated source files must never be treated as completed work.
+        $prepared = [];
+        $this->getJson($url)->assertOk()->assertJsonCount(5, 'months');
     }
 
     public function test_loss_report_calculates_every_selected_month_without_report_snapshots(): void
@@ -7303,6 +7342,145 @@ class FinancePortalTest extends TestCase
         (new Xlsx($book))->save($path);
 
         return new UploadedFile($path, 'finance.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+    }
+
+    public function test_detail_editor_round_trips_the_rendered_form_and_reloads_saved_business_fields(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $layout = \App\Portals\Finance\FinanceCreditSettlementLayout::class;
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        foreach (['paypal', 'ye', 'worldpay'] as $platform) {
+            $account = $this->financePayPalAccount('表单保存-'.$platform, $platform === 'paypal' ? [] : ['account_type' => 'credit_card', 'card_platform' => $platform]);
+            $reference = 'FORM-'.$platform;
+            $source = $platform === 'paypal' ? [...$this->recordRow(), '交易 ID' => $reference, '日期' => '2026-11-03']
+                : $layout::importPayload($platform, array_replace(array_fill_keys(array_keys($layout::columns($platform)), ''), ['reference' => $reference, 'merchant_order' => 'ORDER-'.$platform,
+                    'gateway' => 'gateway', 'website_name' => 'site', 'currency' => 'USD', 'gross' => '10', 'status' => 'SUCCESS',
+                    'initiated_at' => '2026-11-03 01:02:03', 'date' => '2026-11-03 01:02:03',
+                    'completed_at' => '2026-11-03 01:03:03', 'refund_count' => '0.0',
+                    'statement_currency' => 'USD', 'statement_rate' => '1.00000']));
+            $this->workbooks->importRecords($platform === 'paypal' ? 'paypal-orders' : 'xuzong2-details', [2 => $source], $account->activity_account, 'UTC', 1);
+            $record = FinanceRecord::where('reference', $reference)->sole();
+            $originalPayload = $record->payload;
+            $report = $platform === 'paypal' ? 'paypal-settlement' : ($platform === 'ye' ? 'ye-settlement' : 'worldpay-settlement');
+            $url = '/finance/reports/'.$report.'?reference='.$reference.'&timezone=UTC';
+            $values = $this->renderedSettlementEditorValues($this->get($url)->assertOk()->getContent());
+            $this->assertSame((string) $record->id, $values['id']);
+            $field = $platform === 'worldpay' ? 'product_name' : 'note';
+            $values[$field] = '编辑验证-'.$platform;
+            $this->post('/finance/reports/'.$report.'/save?timezone=UTC', $values)->assertRedirect()->assertSessionHasNoErrors();
+            $this->assertSame($originalPayload, $record->fresh()->payload);
+            $saved = $this->get($url)->assertOk();
+            $this->assertSame($values[$field], $this->renderedSettlementEditorValues($saved->getContent())[$field]);
+            $this->get($url.'&download=1&export_columns[]='.$field)->assertOk();
+            if ($platform === 'ye') {
+                $this->assertSame('0.0', $record->fresh()->payload['退款次数']);
+                $values['refund_count'] = '1.5';
+                $this->post('/finance/reports/'.$report.'/save', $values)->assertSessionHasErrors('refund_count');
+                $values['refund_count'] = '2.000';
+                $this->post('/finance/reports/'.$report.'/save', $values)->assertSessionHasNoErrors();
+                $this->assertSame('2', (string) $service->rows('credit_card', ['card_channel' => 'ye', 'reference' => $reference])->sole()['card_layout']['refund_count']);
+            }
+            $this->user->manage = false;
+            $this->get($url)->assertOk()->assertDontSee('type="button" data-edit-settlement', false);
+            $this->post('/finance/reports/'.$report.'/save', $values)->assertForbidden();
+            $this->user->manage = true;
+            DB::table('finance_period_locks')->updateOrInsert(['month' => '2026-11'], ['report_snapshot' => '[]']);
+            $values[$field] = '锁定后不可保存';
+            $this->post('/finance/reports/'.$report.'/save', $values)->assertSessionHasErrors('month');
+            $this->get($url)->assertOk()->assertViewHas('rows', fn ($rows) => ($rows->first()['card_layout'][$field] ?? $rows->first()[$field]) === '编辑验证-'.$platform);
+            DB::table('finance_period_locks')->delete();
+        }
+    }
+
+    public function test_xuzong_rendered_order_editor_saves_and_reloads_without_changing_source_amounts(): void
+    {
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        $dataset = \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET;
+        $source = array_replace(array_fill_keys(FinanceCatalog::dataset($dataset)['headers'], ''), [
+            '商户名称' => '测试商户', '商户订单号' => 'XU-FORM-ORDER', '平台订单号' => 'XU-FORM',
+            '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS',
+            '创建时间' => '2026-11-03 01:02:03', '完成时间' => '2026-11-03 01:03:03',
+        ]);
+        $this->workbooks->importRecords($dataset, [2 => $source], 'SHANGYUN-v2', 'UTC', 1);
+        $record = FinanceRecord::query()->sole();
+        $url = '/finance/reports/xuzong-credit/statement/'.$record->id;
+        $page = $this->get($url, ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()->assertSee('id="xuzong-order-edit-form"', false);
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="UTF-8">'.$page->getContent());
+        $pairs = [];
+        foreach ((new \DOMXPath($dom))->query('//*[@id="xuzong-order-edit-form"]//input[@name and not(@disabled)]') as $input) {
+            if ($input->getAttribute('name') !== '_token') $pairs[$input->getAttribute('name')] = $input->getAttribute('value');
+        }
+        parse_str(http_build_query($pairs), $values);
+        $originalTimestamp = $record->updated_at->toDateTimeString();
+        $this->travel(1)->days();
+        $this->postJson($url, $values)->assertOk();
+        $this->assertSame($originalTimestamp, $record->fresh()->updated_at->toDateTimeString());
+        $this->travelBack();
+        $values['report_fields']['备注'] = '徐总编辑验证';
+        $this->postJson($url, $values)->assertOk();
+        $this->get($url, ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()->assertSee('徐总编辑验证');
+        $this->assertSame('10', $record->fresh()->payload['交易金额']);
+        $this->assertSame('徐总编辑验证', app(\App\Portals\Finance\FinanceXuzongCreditReport::class)->orderValues($record->id)['备注']);
+        $this->user->manage = false;
+        $this->get($url, ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()->assertDontSee('id="xuzong-order-edit-form"', false);
+        $this->postJson($url, $values)->assertForbidden();
+        $this->user->manage = true;
+        DB::table('finance_period_locks')->updateOrInsert(['month' => '2026-11'], ['report_snapshot' => '[]']);
+        $values['report_fields']['备注'] = '锁定后不可保存';
+        $this->postJson($url, $values)->assertUnprocessable()->assertJsonValidationErrors('statement');
+        $this->assertSame('徐总编辑验证', app(\App\Portals\Finance\FinanceXuzongCreditReport::class)->orderValues($record->id)['备注']);
+    }
+
+    public function test_legacy_region_cache_is_cleaned_without_rebuilding_source_data(): void
+    {
+        $cache = Mockery::mock(\App\Portals\Finance\FinanceReportCache::class);
+        $cache->shouldReceive('remember')->times(4)->andReturn(['深圳外部shopify订阅', '雨果订阅', '雨果', '订阅']);
+        $this->app->instance(\App\Portals\Finance\FinanceReportCache::class, $cache);
+        foreach (['paypal-settlement', 'ye-settlement', 'worldpay-settlement', 'xuzong-credit'] as $report) {
+            $this->assertSame(['深圳', '雨果'], app(\App\Portals\Finance\FinanceSettlementService::class)->regionOptions($report)->all());
+        }
+    }
+
+    public function test_xuzong_legacy_region_labels_match_the_list_filter_and_export_without_rewriting_source(): void
+    {
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        $dataset = \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET;
+        $source = array_replace(array_fill_keys(FinanceCatalog::dataset($dataset)['headers'], ''), [
+            '平台订单号' => 'LEGACY-REGION', '商户订单号' => 'LEGACY-REGION-ORDER',
+            '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS', '创建时间' => '2026-11-03 01:02:03',
+        ]);
+        $this->workbooks->importRecords($dataset, [2 => $source], 'SHANGYUN-v2', 'UTC', 1);
+        $record = FinanceRecord::query()->sole();
+        $record->update(['payload' => [...$record->payload, '_edited_report_fields' => ['地区' => '雨果订阅']]]);
+        $report = app(\App\Portals\Finance\FinanceXuzongCreditReport::class);
+        $this->assertSame('雨果', $report->orderValues($record->id)['地区']);
+        $url = '/finance/reports/xuzong-credit';
+        foreach (['雨果', '雨果订阅'] as $selection) {
+            $this->get($url.'?region='.rawurlencode($selection))->assertOk()
+                ->assertViewHas('filters', fn ($filters) => $filters['region'] === '雨果')
+                ->assertViewHas('records', fn ($records) => $records->total() === 1);
+        }
+        $sheet = $this->readDownload($this->get($url.'/export?region='.rawurlencode('雨果订阅')
+            .'&export_scope=filtered&report_columns[]=48')->assertOk()->streamedContent())->toArray();
+        $this->assertSame([['地区'], ['雨果']], $sheet);
+        $this->assertSame('雨果订阅', $record->fresh()->payload['_edited_report_fields']['地区']);
+    }
+
+    private function renderedSettlementEditorValues(string $html): array
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="UTF-8">'.$html);
+        $xpath = new \DOMXPath($dom);
+        $button = $xpath->query('//*[@data-edit-settlement]')->item(0);
+        $this->assertNotNull($button);
+        $row = json_decode($button->getAttribute('data-row'), true, 512, JSON_THROW_ON_ERROR);
+        $values = [];
+        foreach ($xpath->query('//*[@id="settlement-editor"]//form//*[@name and not(@disabled)]') as $input) {
+            $name = $input->getAttribute('name');
+            if ($name !== '_token') $values[$name] = (string) ($row[$name] ?? $input->getAttribute('value'));
+        }
+        return $values;
     }
 
     private function readDownload(string $content): Worksheet
