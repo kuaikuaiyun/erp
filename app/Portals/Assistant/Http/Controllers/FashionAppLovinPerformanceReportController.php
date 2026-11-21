@@ -15,6 +15,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -51,15 +52,23 @@ class FashionAppLovinPerformanceReportController extends Controller
         }
 
         $canSeeAll = $context['user']->isAdministrator() || strcasecmp((string) $context['user']->username, 'kky_boss') === 0;
+        $projectCode = 'fuzhuang';
+        $projectDepartmentIds = OperationProjectCatalog::departmentIds($projectCode)
+            ->map(fn ($id) => (int) $id)->values()->all();
         $managedDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
             ->map(fn ($id) => (int) $id)->values()->all();
-        $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedDepartmentIds === [];
+        $managedProjectDepartmentIds = array_values(array_intersect($managedDepartmentIds, $projectDepartmentIds));
+        $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedProjectDepartmentIds === [];
         $visibleDepartmentIds = $isDashboard
             ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : ($isFashionPortal
-            ? ($canSeeAll ? null : $managedDepartmentIds)
+            ? ($canSeeAll ? $projectDepartmentIds : $managedProjectDepartmentIds)
             : $this->visibleDepartmentIds($context['user']));
+        if ($visibleDepartmentIds !== null) {
+            $visibleDepartmentIds = array_values(array_intersect($visibleDepartmentIds, $projectDepartmentIds));
+        }
         $submitterIds = FashionAdvertisingReport::query()->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
+            ->where('project_code', $projectCode)
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
             ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
@@ -67,6 +76,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->pluck('submitter_id')->filter()->unique()->values();
         $departments = Department::business()->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $submitterIds))
+            ->whereIn('id', $projectDepartmentIds)
             ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $query->whereIn('id', $visibleDepartmentIds))
             ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
         $departmentIds = $departments->pluck('id')->map(fn ($id) => (int) $id)->all();
@@ -108,9 +118,14 @@ class FashionAppLovinPerformanceReportController extends Controller
 
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $reportQuery = FashionAdvertisingReport::query()
+            ->where('project_code', $projectCode)
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
-            ->with(['adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"), 'performanceEntries', 'submitter.departments'])
+            ->with([
+                'adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"),
+                'performanceEntries',
+                'submitter.departments' => fn ($query) => $query->whereIn('admin_roles.id', $projectDepartmentIds),
+            ])
             ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
             ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
@@ -212,8 +227,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             return $totals;
         }, []);
         $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone, $departments): array {
-            $reportDepartment = $report->submitter?->departments?->first(fn ($department) => $departments->contains('id', $department->id))
-                ?: $report->submitter?->departments?->first();
+            $reportDepartment = $report->submitter?->departments?->first(fn ($department) => $departments->contains('id', $department->id));
             return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity) {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);

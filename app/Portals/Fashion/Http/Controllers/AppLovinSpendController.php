@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -141,11 +142,21 @@ class AppLovinSpendController extends Controller
 
     private function reportsFor($user, bool $includeManaged = true): Collection
     {
+        $projectDepartmentIds = OperationProjectCatalog::departmentIds(self::PORTAL_CODE)
+            ->map(fn ($id) => (int) $id)->values();
         $query = FashionAdvertisingReport::query()
-            ->with(['adSpendEntries', 'submitter.departments'])
+            ->with([
+                'adSpendEntries',
+                'submitter.departments' => fn ($departments) => $departments
+                    ->whereIn('admin_roles.id', $projectDepartmentIds->all()),
+            ])
+            ->where('project_code', self::PORTAL_CODE)
             ->where('status', '!=', FashionAdvertisingReport::STATUS_REJECTED);
         if (! $this->canSeeAll($user)) {
-            $departmentIds = $includeManaged ? $this->departmentAuthorization->managedDepartmentIds($user) : collect();
+            $departmentIds = $includeManaged
+                ? $this->departmentAuthorization->managedDepartmentIds($user)
+                    ->map(fn ($id) => (int) $id)->intersect($projectDepartmentIds)->values()
+                : collect();
             $query->where(function ($scope) use ($user, $departmentIds): void {
                 $scope->where('submitter_id', $user->getKey());
                 if ($departmentIds->isNotEmpty()) {
@@ -231,8 +242,12 @@ class AppLovinSpendController extends Controller
     private function canViewOperator($user, int $operatorId): bool
     {
         if ($this->canSeeAll($user) || $operatorId === (int) $user->getKey()) return true;
-        $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user);
+        $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user)
+            ->map(fn ($id) => (int) $id)
+            ->intersect(OperationProjectCatalog::departmentIds(self::PORTAL_CODE))
+            ->values();
         return $departmentIds->isNotEmpty() && FashionAdvertisingReport::query()
+            ->where('project_code', self::PORTAL_CODE)
             ->where('submitter_id', $operatorId)
             ->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds->all()))
             ->exists();
