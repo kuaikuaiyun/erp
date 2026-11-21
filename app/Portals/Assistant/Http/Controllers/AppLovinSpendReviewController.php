@@ -13,6 +13,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -63,7 +64,12 @@ class AppLovinSpendReviewController extends Controller
         $rows = $query->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => $report->operator_name, 'department_id' => (int) $report->operation_department_id, 'department' => $report->operation_department_name]));
+        $operationProjects = OperationProjectCatalog::all();
+        $projectDepartmentIds = collect(array_keys($operationProjects))->mapWithKeys(
+            fn (string $code): array => [$code => OperationProjectCatalog::departmentIds($code)->all()]
+        );
         $fashionQuery = FashionAdvertisingReport::query()
+            ->whereIn('project_code', array_keys($operationProjects))
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments']);
         if ($isDashboard || ! $context['user']->isAdministrator()) {
@@ -74,11 +80,11 @@ class AppLovinSpendReviewController extends Controller
         $fashionQuery->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('submitter_name', 'like', '%'.$name.'%'));
         $restrictToVisibleDepartments = $isDashboard || ! $context['user']->isAdministrator();
         $fashionRows = $fashionQuery->get()
-            ->flatMap(function (FashionAdvertisingReport $report) use ($restrictToVisibleDepartments, $visibleIds) {
+            ->flatMap(function (FashionAdvertisingReport $report) use ($restrictToVisibleDepartments, $visibleIds, $projectDepartmentIds) {
                 $departments = $report->submitter?->departments ?? collect();
-                $department = $restrictToVisibleDepartments
-                    ? $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true))
-                    : ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first());
+                $reportProjectDepartmentIds = $projectDepartmentIds->get((string) $report->project_code, []);
+                $department = $departments->first(fn ($item) => in_array((int) $item->id, $reportProjectDepartmentIds, true)
+                    && (! $restrictToVisibleDepartments || in_array((int) $item->id, $visibleIds, true)));
 
                 return $report->adSpendEntries
                     ->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
@@ -93,7 +99,7 @@ class AppLovinSpendReviewController extends Controller
                         'operator_user_id' => (int) $report->submitter_id,
                         'operator_name' => (string) $report->submitter_name,
                         'department_id' => (int) ($department?->id ?: 0),
-                        'department' => (string) ($department?->name ?: '服装运营部门'),
+                        'department' => (string) ($department?->name ?: '未设置项目团队'),
                         'source' => 'fashion',
                     ]);
             });
