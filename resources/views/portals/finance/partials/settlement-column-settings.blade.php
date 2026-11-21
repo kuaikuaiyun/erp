@@ -6,9 +6,11 @@
     data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}{{ isset($columnCardChannel) ? ':'.$columnCardChannel : '' }}{{ $columnExceptionScope ? ':exceptions' : '' }}"
     @if($orderView) data-export-visible-columns @endif
     @if($report === 'paypal-settlement')
-    data-new-display-fields="{{ implode(' ', [...array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS), 'operation_region', 'shop_difference_usd']) }}"
+    data-new-display-fields="{{ implode(' ', [...array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS), 'operation_region', 'shop_difference_usd', 'product_name']) }}"
+    @elseif($report === 'xuzong-credit')
+    data-new-display-fields="51 54"
     @elseif(isset($columns['shop_difference_usd']))
-    data-new-display-fields="shop_difference_usd"
+    data-new-display-fields="shop_difference_usd product_name"
     @endif
     @if($report === 'paypal-orders')
     data-filter-form="finance-filters"
@@ -139,5 +141,5 @@
 </style>
 @endpush
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=8"></script>
+<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=9"></script>
 @endpush

@@ -10,12 +10,54 @@ use Tests\TestCase;
 
 class FinanceSummarySourceCacheTest extends TestCase
 {
+    public static function summaryChannels(): array
+    {
+        return [['credit_card'], ['paypal']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryChannels')]
+    public function test_summary_rebuilds_legacy_source_rows_after_calculation_changes(string $channel): void
+    {
+        $original = config('cache.stores.file.path');
+        $directory = storage_path('framework/testing/summary-schema-'.bin2hex(random_bytes(6)));
+        config(['cache.stores.file.path' => $directory]);
+        app('cache')->forgetDriver('file');
+        try {
+            $versions = Mockery::mock(FinanceSummaryDataVersion::class);
+            $versions->shouldReceive('forRange')->andReturn('same-source-data');
+            $cache = new FinanceSummarySourceCache($versions);
+            $oldScope = hash('sha256', json_encode([4, $channel, []], JSON_THROW_ON_ERROR));
+            $oldDirectory = $directory.'/finance-summary-sources/'.$oldScope;
+            File::ensureDirectoryExists($oldDirectory);
+            $platform = $channel === 'credit_card' ? 'xuzong2' : 'paypal';
+            File::put($oldDirectory.'/v-same-source-data.jsonl', json_encode([
+                'id' => 1, 'payment_channel' => $platform, 'team' => 'A', 'per_order_fee' => '0.60',
+            ])."\n");
+            $builds = 0;
+            $build = function () use (&$builds, $platform) {
+                $builds++;
+                yield ['id' => 1, 'payment_channel' => $platform, 'team' => 'A', 'per_order_fee' => '0.30'];
+            };
+            foreach ([false, true] as $transactions) {
+                $rows = iterator_to_array($cache->stream($channel, [], $transactions, $build), false);
+                $this->assertSame('0.30', $rows[0]['per_order_fee']);
+            }
+            $this->assertSame(1, $builds);
+            $this->assertFileExists($oldDirectory.'/v-same-source-data.jsonl');
+        } finally {
+            File::deleteDirectory($directory);
+            config(['cache.stores.file.path' => $original]);
+            app('cache')->forgetDriver('file');
+        }
+    }
+
     public function test_option_and_order_graph_revisions_change_when_sources_change(): void
     {
         $db = Mockery::mock(\Illuminate\Database\Connection::class);
         $db->shouldReceive('getDriverName')->andReturn('sqlite');
         $db->shouldReceive('getName')->andReturn('cache-revision-test');
         $db->shouldReceive('getDatabaseName')->andReturn('finance');
+        $db->shouldReceive('getSchemaBuilder->hasTable')->andReturn(false);
         $workbooks = Mockery::mock(\App\Portals\Finance\FinanceWorkbookService::class);
         $workbooks->shouldReceive('database')->andReturn($db);
         $versions = Mockery::mock(FinanceSummaryDataVersion::class, [$workbooks])->makePartial();
@@ -36,6 +78,9 @@ class FinanceSummarySourceCacheTest extends TestCase
     {
         $db = Mockery::mock(\Illuminate\Database\Connection::class);
         $db->shouldReceive('getDriverName')->andReturn('sqlite');
+        $db->shouldReceive('getName')->andReturn('untracked-revision-test');
+        $db->shouldReceive('getDatabaseName')->andReturn('finance');
+        $db->shouldReceive('getSchemaBuilder->hasTable')->andReturn(false);
         $workbooks = Mockery::mock(\App\Portals\Finance\FinanceWorkbookService::class);
         $workbooks->shouldReceive('database')->andReturn($db);
         $versions = new FinanceSummaryDataVersion($workbooks);

@@ -15,6 +15,19 @@ use Illuminate\Support\Collection;
 
 class FinanceSettlementService
 {
+    public const CREDIT_SUMMARY_VERSION = 2;
+
+    public const PAYPAL_SUMMARY_VERSION = 3;
+
+    public static function summarySourceSchemaVersion(string $channel): int
+    {
+        return match ($channel) {
+            'credit_card' => 3 + self::CREDIT_SUMMARY_VERSION,
+            'paypal' => 2 + self::PAYPAL_SUMMARY_VERSION,
+            default => 4,
+        };
+    }
+
     public const REPORT_CHANNELS = ['paypal' => 'PayPal', 'xuzong' => '徐总支付', 'xuzong1' => '徐总支付 1', 'xuzong2' => '徐总支付 2',
         'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'credit_card' => '信用卡合计', 'combined' => '全部通道'];
     public const PAYPAL_COST_HEADERS = ['通途订单', '物流-元', '采购成本-元'];
@@ -41,6 +54,7 @@ class FinanceSettlementService
         'fee_return' => '返还手续费', 'dispute_release' => '返还争议冻结', 'release' => '返还冻结',
         'per_order_fee' => '单笔费用（含失败交易）', 'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用',
         'ethoca_refund' => 'ETHOCA预警退款', 'ethoca_fee' => 'ETHOCA费用', 'rdr_refund' => 'RDR退款', 'rdr_fee' => 'RDR费用',
+        'cdrn_fee' => 'CDRN费用', 'chargeback_return' => '拒付返还',
         'logistics' => '物流费用（人民币）', 'purchase' => '采购成本（人民币）',
     ];
     public const TEXT = ['domain' => '域名', 'subscription' => '订阅类型', 'upsell' => '是否加购', 'erp_order' => '通途订单', 'note' => '备注'];
@@ -89,7 +103,7 @@ class FinanceSettlementService
             'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'settlement' => '结算金额-美元',
             ...array_diff_key($this->moneyFields('paypal'), array_flip(['converted_usd', 'usd_rate'])),
             'domain' => '域名', 'owner' => '使用人', 'team' => self::OPERATION_DEPARTMENT, 'operation_region' => '地区',
-            'erp_order' => '通途订单', 'note' => '备注'];
+            'erp_order' => '通途订单', 'note' => '备注', 'product_name' => '商品名称-简称'];
     }
 
     public function exportColumns(string $channel): array
@@ -136,7 +150,11 @@ class FinanceSettlementService
         if (! empty($filters['summary_only'])) {
             $creditSources = [...$creditSources, ...array_values(FinanceCatalog::XUZONG_REPORT_IMPORTS), FinanceLogisticsCreditOrders::IMPORTED_DATASET];
         }
-        $query = FinanceRecord::query()->whereIn('finance_records.dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
+        $structured = empty($filters['_legacy_source']) && empty($filters['card_wallet'])
+            && ! in_array($filters['card_match'] ?? null, ['matched', 'waiting'], true) && app(FinanceTransactions::class)->ready();
+        $query = FinanceRecord::query();
+        if ($structured) $query->from('finance_transactions as finance_records');
+        $query->whereIn('finance_records.dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
         $query->whereNotIn('finance_records.id', function ($deleted): void {
             $deleted->select('finance_settlement_supplements.finance_record_id')->from('finance_settlement_supplements')
                 ->whereNotNull('finance_settlement_supplements.finance_record_id')
@@ -151,23 +169,34 @@ class FinanceSettlementService
             $query->where('finance_records.dataset', $filters['source']);
         } else {
             // Imported current-card details take precedence over an order with the same account/reference.
-            $query->where(function ($query): void {
-                $query->whereNotIn('finance_records.dataset', ['xuzong2-orders', FinanceLogisticsCreditOrders::IMPORTED_DATASET])->orWhereNotExists(function ($sub): void {
-                    $sub->selectRaw('1')->from('finance_records as detail')->where('detail.dataset', 'xuzong2-details')
-                        ->whereColumn('detail.account', 'finance_records.account')->whereColumn('detail.reference', 'finance_records.reference')
-                        ->where(function ($match): void {
+            $query->where(function ($query) use ($structured): void {
+                $query->whereNotIn('finance_records.dataset', ['xuzong2-orders', FinanceLogisticsCreditOrders::IMPORTED_DATASET])->orWhereNotExists(function ($sub) use ($structured): void {
+                    $sub->selectRaw('1')->from(($structured ? 'finance_transactions' : 'finance_records').' as detail')->where('detail.dataset', 'xuzong2-details')
+                        ->whereColumn('detail.account', 'finance_records.account')->whereColumn('detail.reference', 'finance_records.reference');
+                    if ($structured) {
+                        $sub->join('finance_card_transaction_details as detail_refs', 'detail_refs.record_id', '=', 'detail.id')
+                            ->whereExists(function ($refs): void {
+                                $refs->selectRaw('1')->from('finance_card_transaction_details as order_refs')->whereColumn('order_refs.record_id', 'finance_records.id')
+                                    ->where(fn ($match) => $match->whereColumn('detail_refs.merchant_order', 'order_refs.shopify_order')
+                                        ->orWhereColumn('detail_refs.merchant_order', 'order_refs.merchant_order'));
+                            });
+                    } else {
+                        $sub->where(function ($match): void {
                             $match->whereColumn('detail.payload->商户订单号', 'finance_records.payload->Shopify订单号')
                                 ->orWhereColumn('detail.payload->商户订单号', 'finance_records.payload->商户订单号');
-                        })
-                        ->whereColumn('detail.occurred_at', 'finance_records.occurred_at')->whereColumn('detail.currency', 'finance_records.currency')
+                        });
+                    }
+                    $sub->whereColumn('detail.occurred_at', 'finance_records.occurred_at')->whereColumn('detail.currency', 'finance_records.currency')
                         ->whereColumn('detail.status', 'finance_records.status');
                 });
             });
         }
         if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
-            FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
+            FinanceCreditSettlementLayout::filter($query, $filters['card_channel'], structured: empty($filters['_legacy_source']));
         }
-        if ($channel === 'credit_card' && ! empty($filters['summary_payment_channels'])) {
+        if ($channel === 'credit_card' && ! empty($filters['summary_payment_channels']) && app(FinanceTransactions::class)->ready()) {
+            app(FinanceTransactions::class)->filter($query, $filters['summary_payment_channels']);
+        } elseif ($channel === 'credit_card' && ! empty($filters['summary_payment_channels'])) {
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get();
             $predicates = [];
             foreach (['ye', 'worldpay'] as $platform) {
@@ -201,14 +230,22 @@ class FinanceSettlementService
             $query->whereIntegerInRaw('finance_records.id', $filters['export_record_ids']);
         }
         if (($filters['card_channel'] ?? null) === 'worldpay' && filled($filters['gateway'] ?? null)) {
-            $query->where('finance_records.payload->网关接入号', $filters['gateway']);
+            if (app(FinanceTransactions::class)->ready()) {
+                $query->whereIn('finance_records.id', $this->workbooks->database()->table('finance_card_transaction_details')
+                    ->select('record_id')->where('gateway', $filters['gateway']));
+            } else $query->where('finance_records.payload->网关接入号', $filters['gateway']);
         }
         if (($filters['card_channel'] ?? null) === 'worldpay') {
+            if (app(FinanceTransactions::class)->ready() && filled($filters['worldpay_exception'] ?? null)) {
+                $query->whereIn('finance_records.id', $this->workbooks->database()->table('finance_card_transaction_details')->select('record_id')
+                    ->where('has_worldpay_events', $filters['worldpay_exception'] === 'yes'));
+            } else {
             match ($filters['worldpay_exception'] ?? null) {
                 'yes' => $query->whereNotNull('finance_records.payload->_worldpay_events'),
                 'no' => $query->whereNull('finance_records.payload->_worldpay_events'),
                 default => null,
             };
+            }
         }
         if ($channel === 'credit_card' && filled($filters['card_group'] ?? null)) {
             $query->whereIn('finance_records.account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
@@ -216,7 +253,7 @@ class FinanceSettlementService
         }
         $statusCodes = self::TRANSACTION_STATUS_CODES[$filters['card_transaction_status'] ?? ''] ?? null;
         if ($channel === 'credit_card' && $statusCodes !== null) {
-            $query->whereIn($query->getQuery()->raw('UPPER(TRIM(finance_records.status))'), $statusCodes);
+            $query->whereIn($structured ? 'finance_records.status_code' : $query->getQuery()->raw('UPPER(TRIM(finance_records.status))'), $statusCodes);
         }
         foreach (['account', 'reference'] as $field) {
             if (filled($filters[$field] ?? null)) {
@@ -287,7 +324,8 @@ class FinanceSettlementService
         if (($filters['card_channel'] ?? null) === 'ye'
             && in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
             // Read each keyset batch in date order instead of sorting the entire matching ledger again.
-            $query->forceIndex('finance_records_occurred_at_index');
+            $query->forceIndex($query->getQuery()->from === 'finance_transactions as finance_records'
+                ? 'finance_tx_channel_page_idx' : 'finance_records_occurred_at_index');
         }
         $batchSize = $walletMatchesOnly ? 1000 : 500;
         $last = null;
@@ -770,7 +808,22 @@ class FinanceSettlementService
                 }
             }
 
-            if ($channel === 'paypal') $row = array_replace($row, $saved['_edited_fields'] ?? []);
+            if ($channel === 'paypal') {
+                // Business edits were applied before classification. Do not undo brush-order
+                // attribution when restoring manually edited monetary values after calculation.
+                $row = array_replace($row, array_diff_key($saved['_edited_fields'] ?? [],
+                    array_flip(['domain', 'owner', 'team', 'subscription', 'upsell'])));
+            }
+            if ($channel === 'paypal') {
+                $row['product_name'] = $row['success']
+                    ? FinanceProductNames::shortNameForOrder($order, (string) ($p['物品标题'] ?? '')) : '';
+            } elseif ($ye || $worldpay) {
+                if (! ($worldpay && array_key_exists('product_name', $manual))) {
+                    $row['card_layout']['product_name'] = $row['success']
+                        ? (filled($row['card_layout']['product_name'] ?? null) ? $row['card_layout']['product_name']
+                            : FinanceProductNames::shortNameForOrder($matchedOrder)) : '';
+                }
+            }
             return $row;
         })->filter();
         if ($businessMatchesOnly) {
@@ -983,7 +1036,7 @@ class FinanceSettlementService
                     foreach ($reportService->regionsForRecords($records) as $region) if (filled($region)) $regions[$region] = true;
                 }
             } else {
-                $filters = ['card_channel' => FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null, 'region_options_only' => true, 'order_view' => $channel === 'paypal'];
+                $filters = ['card_channel' => FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null, 'region_options_only' => true, 'order_view' => $channel === 'paypal', '_legacy_source' => true];
                 $query = $this->query($channel, $filters);
                 $context = $this->rowContext($channel);
                 if ($filters['card_channel'] === 'ye') {
@@ -1081,7 +1134,7 @@ class FinanceSettlementService
         }
         $columns = $schema->getColumnListing('logistics_orders');
         $selected = array_intersect(['id', 'transaction_id', 'payment_gateway_order_id', 'bill_number', 'buyer_email', 'order_created_at', 'tongtu_order_number', 'shopify_payload', 'paid_amount_usd',
-            'assistant_domain_store_id', 'assigned_owner_name', 'assigned_owner_user_id', 'owner_assignment_resolved_at', 'operator_name', 'group_names', 'subscription_type', 'is_add_on'], $columns);
+            'assistant_domain_store_id', 'assigned_owner_name', 'assigned_owner_user_id', 'owner_assignment_resolved_at', 'operator_name', 'group_names', 'subscription_type', 'is_add_on', 'tongtu_product_name'], $columns);
         $query = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $ids->all())
             ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
         $domain = in_array('source_shop_domain', $columns, true) ? "NULLIF(logistics_orders.source_shop_domain, '')" : 'NULL';
@@ -1433,9 +1486,10 @@ class FinanceSettlementService
         $references = $db->table('finance_records')->where('dataset', 'paypal-orders')
             ->whereNotNull('reference')->where('reference', '!=', '')
             ->selectRaw('id as record_id, reference as match_reference');
+        $bill = app(FinanceSourceStorage::class)->active('record') ? 'source_bill' : 'payload->帳單號碼';
         $references->union($db->table('finance_records')->where('dataset', 'paypal-orders')
-            ->whereNotNull('payload->帳單號碼')->where('payload->帳單號碼', '!=', '')
-            ->select('id as record_id', 'payload->帳單號碼 as match_reference'));
+            ->whereNotNull($bill)->where($bill, '!=', '')
+            ->select('id as record_id', $bill.' as match_reference'));
         $matches = null;
         foreach (array_intersect(['bill_number', 'transaction_id', 'payment_gateway_order_id'], $schema->getColumnListing('logistics_orders')) as $field) {
             $branch = $db->query()->fromSub(clone $references, 'refs')
@@ -1510,7 +1564,7 @@ class FinanceSettlementService
         return $label === '订阅首次购买' ? '订阅' : preg_replace('/^订阅复购\s*(\d+)\s*次$/u', '订阅复购$1次', $label);
     }
 
-    private static function isUpsell(mixed $value): bool
+    public static function isUpsell(mixed $value): bool
     {
         return in_array(strtolower(FinanceCatalog::simplified(trim((string) $value))), ['1', 'true', 'yes', '是', '加购', '已加购'], true);
     }
@@ -1591,6 +1645,7 @@ class FinanceSettlementService
         $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
         $fields['_summary_team'] = true;
         $fields['_summary_settlement_currency'] = true;
+        $fields['_summary_xuzong_detail'] = $fields['_summary_payable'] = $fields['_summary_amount_usd'] = true;
         if (! empty($filters['summary_shared_source'])) {
             $fields += array_fill_keys(['_summary_shared_version', '_summary_native_values', '_summary_native_currency'], true);
         }
@@ -1667,7 +1722,8 @@ class FinanceSettlementService
                         if (isset($paypalAmounts[$record->id])) {
                             $resolved[$record->id] = array_replace($resolved[$record->id], $paypalAmounts[$record->id]);
                         }
-                        yield $resolved[$record->id] + (! empty($filters['summary_shared_source']) ? ['_summary_shared_version' => 1] : []) + ['_summary_usd_version' => 1,
+                        yield $resolved[$record->id] + ($channel === 'credit_card' ? ['_summary_credit_version' => self::CREDIT_SUMMARY_VERSION] : [])
+                            + (! empty($filters['summary_shared_source']) ? ['_summary_shared_version' => 1] : []) + ['_summary_usd_version' => 1,
                             '_summary_settlement_currency_version' => ! empty($filters['summary_native_settlement']) ? 1 : 0]
                             + (! empty($filters['summary_projection'])
                             ? ['_summary_source_account' => $record->account] : []);
@@ -1712,6 +1768,7 @@ class FinanceSettlementService
                         'id' => -$statement['entry_id'], 'channel' => 'credit_card', 'payment_channel' => 'ye',
                         'account' => $account->account_name, 'account_key' => $account->activity_account,
                         '_summary_source_account' => $account->activity_account, '_summary_team' => '',
+                        '_summary_credit_version' => self::CREDIT_SUMMARY_VERSION,
                         ...(! empty($filters['summary_shared_source']) ? ['_summary_shared_version' => 1,
                             '_summary_native_currency' => $orders[$key]->currency,
                             '_summary_native_values' => collect(['fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'])
@@ -1731,6 +1788,14 @@ class FinanceSettlementService
 
     private function summaryDetailRows(string $channel, array $filters, Collection $records, array $context, array $fields): array
     {
+        $xuzong = $channel === 'credit_card' ? $records->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET) : collect();
+        $sourceRows = [];
+        if ($xuzong->isNotEmpty()) {
+            $sourceRows = app(FinanceXuzongCreditReport::class)->summaryRows($xuzong, $filters['timezone'] ?? 'Asia/Shanghai');
+            $sourceRows = array_map(fn ($row) => array_intersect_key($row, $fields), $sourceRows);
+            $records = $records->where('dataset', '!=', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+            if ($records->isEmpty()) return $sourceRows;
+        }
         $details = $this->rows($channel, $filters, $records, $context)->keyBy('id');
         if (! empty($filters['summary_account_counts'])) {
             $failed = $details->filter(fn ($row) => $row['failed'] && ! $row['success'])->map(function ($row) {
@@ -1759,7 +1824,7 @@ class FinanceSettlementService
                     $row['_summary_settlement_currency'] = 'USD';
                 }
                 return array_intersect_key($row, $fields);
-            })->union($failed->map(fn ($row) => array_intersect_key($row, $fields)))->all();
+            })->union($failed->map(fn ($row) => array_intersect_key($row, $fields)))->all() + $sourceRows;
         }
         $currencyField = $platform === 'worldpay' ? 'statement_currency' : 'settlement_currency';
         $currencies = $details->map(fn ($row) => strtoupper(trim((string) ($row['card_layout'][$currencyField] ?? ''))));
@@ -1800,7 +1865,7 @@ class FinanceSettlementService
                 : 'USD';
             $row = array_replace($row, array_intersect_key($layout, array_flip(['domain', 'owner', 'team', 'payment_method'])));
             return array_intersect_key($row, $fields);
-        })->union($failed->map(fn ($row) => array_intersect_key($row, $fields)))->all();
+        })->union($failed->map(fn ($row) => array_intersect_key($row, $fields)))->all() + $sourceRows;
     }
 
     public function totals(iterable $rows, string $layer): array

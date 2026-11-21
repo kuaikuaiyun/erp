@@ -155,7 +155,8 @@ class FinanceTransactionSummary
 
     private const CARD = ['fee' => FinanceSettlementService::MONEY['fee'], 'per_order_fee' => '单笔费用', 'refund' => '退款金额', 'refund_fee' => '退款费用',
         'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用', 'ethoca_refund' => 'ethoca-预警退款', 'ethoca_fee' => '拒付预警ethoca',
-        'rdr_refund' => '拒付RDR金额', 'rdr_fee' => '拒付RDR费用', 'release' => '保证金返还'];
+        'rdr_refund' => '拒付RDR金额', 'rdr_fee' => '拒付RDR费用', 'cdrn_fee' => 'CDRN费用',
+        'chargeback_return' => '拒付返还', 'release' => '保证金返还'];
 
     public function columns(string $tab): array
     {
@@ -232,6 +233,16 @@ class FinanceTransactionSummary
             $failedByMonth[$row['month']] = ($failedByMonth[$row['month']] ?? 0) + ($row['_row_count'] ?? 1);
         }
         $paypal = $row['channel'] === 'paypal';
+        if (! empty($row['_summary_xuzong_detail'])) {
+            $group['_summary_xuzong_detail'] = true;
+            if (($row['_summary_payable'] ?? null) !== null) {
+                $group['_summary_payable'] = bcadd($group['_summary_payable'] ?? '0', $row['_summary_payable'], 8);
+            } elseif ($row['success']) {
+                $group['_missing_detail_payable'] = true;
+            }
+        } else {
+            $group['_summary_other_rows'] = true;
+        }
         $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
         $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
         $values['settlement'] = $row['failed'] ? null : $row['settlement'];
@@ -258,20 +269,10 @@ class FinanceTransactionSummary
     private function finish(array $groups, array $failedByMonth, string $tab, bool $usd, ?string $cnyPerUsd, array $cnyPerUsdByChannel): array
     {
         $groups = $this->allocateFailures($groups, $failedByMonth, $tab);
-        if ($tab === 'credit_card') {
-            foreach ($groups as &$group) {
-                if ($group['failed_orders'] > 0) {
-                    $fee = bcmul((string) $group['failed_orders'], '0.30', 8);
-                    $group['per_order_fee'] = bcadd($group['per_order_fee'] ?? '0', $fee, 8);
-                }
-            }
-            unset($group);
-        }
-
         $deductions = match ($tab) {
             'paypal' => ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee'],
-            'credit_card', 'ye', 'worldpay' => ['hold', ...array_diff(array_keys(self::CARD), ['release'])],
-            'combined' => ['hold', 'dispute_hold', ...array_diff(array_keys(self::CARD), ['release'])],
+            'credit_card', 'ye', 'worldpay' => ['hold', ...array_diff(array_keys(self::CARD), ['release', 'chargeback_return'])],
+            'combined' => ['hold', 'dispute_hold', ...array_diff(array_keys(self::CARD), ['release', 'chargeback_return'])],
         };
         foreach ($groups as &$group) {
             if ($usd) {
@@ -299,11 +300,20 @@ class FinanceTransactionSummary
                 foreach ($deductions as $field) {
                     $payable = bcsub($payable, $group[$field] ?? '0', 8);
                 }
-                foreach ($tab === 'paypal' ? ['fee_return', 'dispute_release', 'release'] : ['release'] as $field) {
+                foreach ($tab === 'paypal' ? ['fee_return', 'dispute_release', 'release'] : ['release', 'chargeback_return'] as $field) {
                     $payable = bcadd($payable, $group[$field] ?? '0', 8);
                 }
             }
+            if (! empty($group['_summary_xuzong_detail']) && empty($group['_summary_other_rows'])) {
+                $payable = empty($group['_missing_detail_payable']) && empty($group['_missing_usd_settlement'])
+                    ? ($group['_summary_payable'] ?? null) : null;
+            }
+            if (! empty($group['_missing_detail_payable'])) {
+                $payable = null;
+                $group['_incomplete_usd_fields'][] = 'payable';
+            }
             $group['payable'] = $payable;
+            unset($group['_summary_xuzong_detail'], $group['_summary_other_rows'], $group['_summary_payable'], $group['_missing_detail_payable']);
             // The PayPal amount is USD in the template; do not add it to non-USD card amounts.
             if (! $usd && $tab === 'combined' && $group['currency'] !== 'USD') {
                 $group['amount'] = null;

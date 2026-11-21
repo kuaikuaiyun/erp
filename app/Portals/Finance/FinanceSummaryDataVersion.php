@@ -20,6 +20,7 @@ class FinanceSummaryDataVersion
     public function forCache(array $channels): ?string
     {
         $db = $this->workbooks->database();
+        if (FinanceSummarySourceChanges::available($db) && ! app(FinanceExternalChanges::class)->drain($db)) return null;
         if (FinanceSummarySourceChanges::available($db) && app(FinanceSummarySourceChanges::class)->publish($db)) {
             $cardChannels = ['xuzong1', 'xuzong2', 'ye', 'worldpay'];
             $scopes = in_array('credit_card', $channels, true) ? array_unique([...$channels, ...$cardChannels]) : $channels;
@@ -38,13 +39,13 @@ class FinanceSummaryDataVersion
     public function current(string $channel): ?string
     {
         $db = $this->workbooks->database();
-        if (! FinanceSummaryTriggers::available($db) || ($db->getSchemaBuilder()->hasTable(FinanceSummarySourceChanges::TABLE)
-            && ! FinanceSummarySourceChanges::available($db))) {
-            // Without DB triggers, reuse source parts only within this one
+        if (! FinanceSummarySourceChanges::available($db)) {
+            // Without application tracking, reuse source parts only within this one
             // authenticated range calculation, never across later queries.
             $run = app('request')->attributes->get('finance.source_run');
             return is_string($run) && $run !== '' ? hash('sha256', 'request-source:'.$channel.':'.$run) : null;
         }
+        if (! app(FinanceExternalChanges::class)->drain($db)) return null;
         // Related refunds, statements and FX can change an earlier month's payment.
         $periods = $db->table('finance_summary_periods')->where('channel', $channel)
             ->orderBy('month')->get(['month', 'revision']);

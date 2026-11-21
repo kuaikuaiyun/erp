@@ -62,6 +62,13 @@ class FinanceSummaryDependencies
         $bill = "TRIM(JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"帳單號碼\"')))";
         $merchant = "JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"商户订单号\"'))";
         $shopify = "JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"Shopify订单号\"'))";
+        $storage = app(FinanceSourceStorage::class);
+        $field = fn (string $name) => $storage->active('record')
+            ? $storage->expression('record', 'f', [$name])->getValue($db->getQueryGrammar())
+            : "JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"{$name}\"'))";
+        if ($storage->active('record')) {
+            $bill = 'TRIM(f.source_bill)'; $merchant = 'f.source_merchant'; $shopify = 'f.source_shopify';
+        }
         $references = "f.reference, IF(f.dataset = 'paypal-orders', {$bill}, {$merchant}), IF(f.dataset = 'paypal-orders', NULL, {$shopify})";
         $reference = fn (string $column) => "NULLIF({$column}, '') IN ({$references})";
         $order = fn (string $alias) => implode(' OR ', [
@@ -78,10 +85,10 @@ class FinanceSummaryDependencies
         $fashion = fn (string $condition) => "f.dataset <> 'paypal-orders' AND f.reference IN (
             SELECT o.transaction_id FROM fashion_logistics_orders o WHERE ({$condition})
         )";
-        $store = function (string $id, string $domain, string $name) use ($linked, $fashion): string {
-            $url = "JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"交易网址\"'))";
+        $store = function (string $id, string $domain, string $name) use ($linked, $fashion, $field): string {
+            $url = $field('交易网址');
             $host = "LOWER(SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(TRIM({$url}), '://', -1), '/', 1), '?', 1), ':', 1))";
-            $custom = "TRIM(JSON_UNQUOTE(JSON_EXTRACT(f.payload, '$.\"自定义编号\"')))";
+            $custom = 'TRIM('.$field('自定义编号').')';
             $savedDomain = "LOWER(TRIM(COALESCE(
                 JSON_UNQUOTE(JSON_EXTRACT(s.payload, '$.\"_edited_fields\".\"domain\"')),
                 JSON_UNQUOTE(JSON_EXTRACT(s.payload, '$.\"domain\"')), '')))";

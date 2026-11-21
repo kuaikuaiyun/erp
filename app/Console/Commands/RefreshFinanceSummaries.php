@@ -49,7 +49,7 @@ class RefreshFinanceSummaries extends Command
             && ini_set('memory_limit', '256M') !== false;
         try {
             $this->recordStage('处理依赖变更');
-            $tracksRevisions = \App\Portals\Finance\FinanceSummaryTriggers::available($db);
+            $tracksRevisions = \App\Portals\Finance\FinanceSummarySourceChanges::available($db);
             $failed = false;
             if ($tracksRevisions) {
                 $dependencies->resolve($db);

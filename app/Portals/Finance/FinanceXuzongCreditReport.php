@@ -77,7 +77,7 @@ class FinanceXuzongCreditReport
         }
 
         return array_map(fn ($header) => self::DISPLAY_HEADERS[$header] ?? $header,
-            $ordered + [52 => '原始支付状态', 53 => self::PLATFORM_RESULT]);
+            $ordered + [52 => '原始支付状态', 53 => self::PLATFORM_RESULT, 54 => '商品名称-简称']);
     }
 
     public static function additionalEditableHeaders(): array
@@ -85,7 +85,7 @@ class FinanceXuzongCreditReport
         $baseHeaders = array_map(fn ($field) => self::DISPLAY_HEADERS[$field] ?? $field,
             FinanceXuzongOrderImport::EDITABLE_ORDER_FIELDS);
 
-        return array_values(array_diff(self::headers(), $baseHeaders, FinanceXuzongCostEligibility::FIELDS));
+        return array_values(array_diff(self::headers(), $baseHeaders, FinanceXuzongCostEligibility::FIELDS, ['商品名称-简称']));
     }
 
     public function orderValues(int $id): array
@@ -139,7 +139,7 @@ class FinanceXuzongCreditReport
         });
     }
 
-    public function rows(Collection $records, string $timezone): Collection
+    public function rows(Collection $records, string $timezone, bool $includeCostEligibility = true): Collection
     {
         if ($records->isEmpty()) {
             return collect();
@@ -148,7 +148,7 @@ class FinanceXuzongCreditReport
         $orders = $this->linkedOrders($records);
         $attribution = $this->attribution ??= $this->settlements->liveOrderAttributionResolver();
         $matched = $this->matches->forOrders($records, $orders);
-        $costEditable = app(FinanceXuzongCostEligibility::class)->editable($records, $orders);
+        $costEditable = $includeCostEligibility ? app(FinanceXuzongCostEligibility::class)->editable($records, $orders) : collect();
 
         return $records->mapWithKeys(function (FinanceRecord $record) use ($orders, $attribution, $timezone, $matched, $costEditable): array {
             $order = $orders->get($record->id);
@@ -276,8 +276,47 @@ class FinanceXuzongCreditReport
                 $row['备注'] = implode('；', $notes);
             }
 
-            return [$record->id => ['_cost_editable' => $costEditable->get($record->id), ...array_replace($row, $overrides)]];
+            $row = array_replace($row, $overrides);
+            $row['商品名称-简称'] = FinanceSettlementService::isSuccessfulTransaction($record->status)
+                ? FinanceProductNames::shortNameForOrder($order, (string) ($record->payload['商品名称-简称'] ?? '')) : '';
+            return [$record->id => ['_cost_editable' => $costEditable->get($record->id), ...$row]];
         });
+    }
+
+    /** Summary amounts use the same overrides, currency conversion and rounding as the detail page. */
+    public function summaryRows(Collection $records, string $timezone): array
+    {
+        $sources = $records->keyBy('id');
+        $amounts = ['settlement' => '结算金额', 'fee' => '手续费', 'hold' => '保证金', 'per_order_fee' => '单笔费用',
+            'refund' => '退款金额', 'refund_fee' => '退款费用', 'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用',
+            'ethoca_refund' => 'ethoca预警退款', 'ethoca_fee' => '拒付预警ethoca', 'rdr_refund' => '拒付RDR金额',
+            'rdr_fee' => 'RDR费用', 'cdrn_fee' => 'CDRN费用', 'chargeback_return' => '拒付返还',
+            'dispute_fee' => '争议费', 'release' => '保证金返还', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
+            '_summary_payable' => '应结算（USD）', '_summary_amount_usd' => FinancePayPalSettlementOrders::USD_RECEIPT_LABEL];
+        return $this->rows($records, $timezone, includeCostEligibility: false)->map(function (array $detail, int $id) use ($sources, $amounts, $timezone): array {
+            $record = $sources[$id];
+            $time = $record->occurred_at->setTimezone($timezone);
+            $row = array_fill_keys(array_keys(FinanceSettlementService::MONEY), null);
+            foreach ($amounts as $field => $header) {
+                $row[$field] = $this->settlements->number(self::formatCell($header, $detail[$header] ?? ''));
+            }
+            // A legacy combined RDR/CDRN amount must be counted once when split fields are absent.
+            if ((! isset($detail['RDR费用']) || ! isset($detail['CDRN费用']))
+                && is_numeric($detail['拒付RDR+CDRN费用'] ?? null)) {
+                $row['rdr_fee'] = $this->settlements->number(self::formatCell('拒付RDR+CDRN费用', $detail['拒付RDR+CDRN费用']));
+                $row['cdrn_fee'] = null;
+            }
+            $success = FinanceSettlementService::isSuccessfulTransaction($record->status);
+            return $row + ['id' => $id, 'channel' => 'credit_card', 'account' => $record->account, 'account_key' => $record->account,
+                'currency' => $detail['货币'] ?? $record->currency, 'gross' => $this->settlements->number($detail['总额'] ?? null),
+                'month' => $time->format('Y-m'), 'date' => $time->format('Y-m-d H:i:s'),
+                'domain' => $detail['域名'] ?? '', 'owner' => $detail['使用人'] ?? '', 'team' => $detail['地区'] ?? $detail['区域'] ?? '',
+                '_summary_team' => $detail['地区'] ?? $detail['区域'] ?? '', 'payment_method' => $detail['支付方式'] ?? '',
+                'subscription' => FinanceSettlementService::isUpsell($detail['是否加购'] ?? '') ? '加购' : ($detail['订阅类型'] ?? ''),
+                'success' => $success, 'failed' => FinanceSettlementService::transactionStatusCategory($record->status) === 'failed',
+                '_summary_xuzong_detail' => true, '_summary_settlement_currency' => 'USD',
+                '_summary_native_currency' => 'USD', '_summary_native_values' => []];
+        })->all();
     }
 
     private static function platformResult(array $payload): string
@@ -356,6 +395,9 @@ class FinanceXuzongCreditReport
 
     public static function formatCell(string $header, mixed $value): mixed
     {
+        if ($header === '订阅类型' && blank($value)) {
+            return '未匹配';
+        }
         $field = array_search($header, self::DISPLAY_HEADERS, true) ?: $header;
         if ($field === '通途订单') {
             return FinanceCatalog::displayTongtuOrder($value);

@@ -28,7 +28,7 @@ class FinanceCreditSettlementLayout
         'rdr_refund' => '拒付RDR金额', 'rdr_fee' => '拒付RDR费用', 'release' => '保证金返还', 'payable' => '应结算',
         'logistics' => '物流-元', 'nbc_fee' => 'NBC费用', 'store_fee' => 'Shopline+店匠费用',
         'domain' => '域名', 'owner' => '使用人', 'team' => '团队', 'store_platform' => '索引/NBC/shopline/超店/店匠',
-        'project' => 'PH/DB/DB-BH/FB', 'note' => '备注',
+        'project' => 'PH/DB/DB-BH/FB', 'note' => '备注', 'product_name' => '商品名称-简称',
     ];
 
     private const WORLDPAY = [
@@ -97,8 +97,13 @@ class FinanceCreditSettlementLayout
         ], $columns));
     }
 
-    public static function filter(Builder $query, string $channel, ?\Illuminate\Support\Collection $accountModels = null): void
+    public static function filter(Builder $query, string $channel, ?\Illuminate\Support\Collection $accountModels = null, bool $structured = true): void
     {
+        $transactions = app(FinanceTransactions::class);
+        if ($structured && $transactions->ready()) {
+            $transactions->filter($query, [$channel]);
+            return;
+        }
         $accounts = ($accountModels ?? FinancePaymentAccount::query()->where('account_type', 'credit_card')->get())
             ->filter(fn (FinancePaymentAccount $account) => self::accountPlatform($account) === $channel)
             ->pluck('activity_account');

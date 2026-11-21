@@ -269,7 +269,7 @@ class FinanceXuzongCreditMatches
                 ->where(fn ($row) => $row->whereIn('reference', $txnKeys)->orWhereIn('payload->交易流水号', $txnKeys)));
         $uploads = FinanceRecord::query()->whereIn('dataset', array_values(FinanceCatalog::XUZONG_REPORT_IMPORTS))
             ->where($matchReferences)->get();
-        $candidates = $uploads->concat($this->settlements->query('credit_card', [])
+        $candidates = $uploads->concat($this->settlements->query('credit_card', ['_legacy_source' => true])
             ->whereIn('dataset', ['xuzong1-details', 'xuzong2-details'])->where($matchReferences)->get())
             ->groupBy(fn (FinanceRecord $detail) => array_unique([
                 $detail->reference,

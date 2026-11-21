@@ -12,8 +12,8 @@ class FinanceFilterSelection
         if (isset($filters['regions'])) $filters['regions'] = array_values(array_unique(array_filter(array_map(
             FinanceSettlementService::normaliseRegionLabel(...), $filters['regions'],
         ), fn ($region) => $region !== '')));
-        if (filled($filters['region'] ?? null) && ! in_array($filters['region'], $available, true)) unset($filters['region']);
-        if (isset($filters['regions'])) $filters['regions'] = array_values(array_intersect($filters['regions'], [...$available, self::EMPTY]));
+        // Keep an explicit selection even if no current order has that region.
+        // Dropping it silently broadens a no-match query into all regions.
         return $filters;
     }
 

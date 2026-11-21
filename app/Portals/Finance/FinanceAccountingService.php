@@ -70,15 +70,18 @@ class FinanceAccountingService
             $from = CarbonImmutable::parse($month.'-01', 'Asia/Shanghai')->utc();
             $to = $from->setTimezone('Asia/Shanghai')->addMonth()->utc();
             $rows = $db->table('finance_payment_transactions as t')->join('finance_records as r', 'r.id', '=', 't.finance_record_id')
-                ->where('r.occurred_at', '>=', $from)->where('r.occurred_at', '<', $to)->select(['t.id', 't.raw_payload', 'r.occurred_at'])->get();
-            foreach ($rows as $row) {
-                $raw = json_decode($row->raw_payload, true, 512, JSON_THROW_ON_ERROR);
+                ->where('r.occurred_at', '>=', $from)->where('r.occurred_at', '<', $to)->select(['t.id', 'r.occurred_at'])
+                ->when(! app(FinanceSourceStorage::class)->active('payment'), fn ($query) => $query->addSelect('t.raw_payload'))->lazyById(500, 't.id', 'id');
+            $count = 0;
+            foreach (app(FinanceSourceStorage::class)->stream('payment', $rows) as $row) {
+                $raw = app(FinanceSourceStorage::class)->values('payment', $row);
                 $db->table('finance_payment_transactions')->where('id', $row->id)->update([
                     ...$this->attributes($raw, CarbonImmutable::parse($row->occurred_at, 'UTC')), 'updated_at' => now(),
                 ]);
+                $count++;
             }
 
-            return $rows->count();
+            return $count;
         });
     }
 
@@ -181,10 +184,27 @@ class FinanceAccountingService
     {
         $db = $this->workbooks->database();
         $accounts = FinancePaymentAccount::withTrashed()->get()->keyBy('id');
-        $rows = $db->table('finance_payment_transactions')->where('accounting_month', $month)->get();
+        if (app(FinanceSourceStorage::class)->active('payment') && in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
+            $groups = $db->table('finance_payment_transactions')->where('accounting_month', $month)
+                ->select('payment_account_id', 'amount_currency', 'category', 'direction', 'loss_subject')
+                ->selectRaw('COUNT(*) as total, SUM(amount) as amount, SUM(fee_amount) as fee, SUM(cny_amount) as cny_amount, MIN(id) as first_id')
+                ->selectRaw('SUM(amount IS NULL) as missing_amount, SUM(fee_amount IS NULL) as missing_fee, SUM(cny_amount IS NULL) as missing_cny')
+                ->groupBy('payment_account_id', 'amount_currency', 'category', 'direction', 'loss_subject')->orderBy('first_id')->get();
+            return $groups->map(function ($group) use ($accounts, $month): array {
+                $amount = $group->missing_amount ? null : FinanceSourceStorage::money($group->amount);
+                $fee = $group->missing_fee ? null : FinanceSourceStorage::money($group->fee);
+                return ['account_id' => (int) $group->payment_account_id, 'account' => $accounts->get($group->payment_account_id)?->account_name ?? '—',
+                    'channel' => 'paypal', 'month' => $month, 'currency' => $group->amount_currency, 'category' => $group->category,
+                    'direction' => $group->direction, 'loss_subject' => $group->loss_subject,
+                    'count' => (int) $group->total, 'unclassified' => $group->category === null ? (int) $group->total : 0,
+                    'amount' => $amount, 'fee' => $fee, 'net' => $amount === null || $fee === null ? null : bcadd($amount, $fee, 8),
+                    'cny_amount' => $group->missing_cny ? null : FinanceSourceStorage::money($group->cny_amount)];
+            })->all();
+        }
+        $rows = $db->table('finance_payment_transactions')->where('accounting_month', $month)->lazyById(500);
         $groups = [];
-        foreach ($rows as $row) {
-            $raw = json_decode($row->raw_payload, true, 512, JSON_THROW_ON_ERROR);
+        foreach (app(FinanceSourceStorage::class)->stream('payment', $rows) as $row) {
+            $raw = app(FinanceSourceStorage::class)->values('payment', $row);
             $currency = Arr::get($raw, 'transaction_info.transaction_amount.currency_code');
             $key = json_encode([$row->payment_account_id, $currency, $row->category, $row->direction, $row->loss_subject]);
             $groups[$key] ??= [
