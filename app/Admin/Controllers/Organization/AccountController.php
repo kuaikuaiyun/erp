@@ -38,7 +38,8 @@ class AccountController extends Controller
             ->description(__('organization.accounts.description'))
             ->body($this->grid())
             ->body($this->dingtalkModals())
-            ->body($this->companyAssignmentModal());
+            ->body($this->companyAssignmentModal())
+            ->body(view('admin.organization.accounts.transfer')->render());
     }
 
     public function create(Content $content): Content
@@ -315,6 +316,9 @@ class AccountController extends Controller
         });
 
         $grid->tools(function (Tools $tools) use ($bindingAccess): void {
+            if ($this->administrator()->isAdministrator()) {
+                foreach (['import','export'] as $action) $tools->append('<button type="button" class="btn btn-sm btn-default" data-account-transfer="'.$action.'">'.e(__('account_transfer.'.$action)).'</button>');
+            }
             if ($this->administrator()->isAdministrator()) $tools->append('<button type="button" class="btn btn-sm btn-default" data-account-company-open>'.e(__('organization.company_assignment.title')).'</button>');
             if ($bindingAccess->isOwner()) $tools->append('<button type="button" class="btn btn-sm btn-default" data-ding-grants>'.e(__('dingtalk.company.assign')).'</button>');
             $tools->batch(function (Tools\BatchActions $actions): void {

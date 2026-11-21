@@ -1,0 +1,86 @@
+.account-transfer-dialog {
+    width: min(1000px, 94vw);
+    max-height: 88vh;
+    border: 1px solid #d8e4ee;
+    border-radius: 12px;
+    padding: 0;
+    color: #20445a;
+    box-shadow: 0 20px 70px #10293845;
+}
+.account-transfer-dialog::backdrop {
+    background: #122a4266;
+}
+.account-transfer-dialog header,
+.account-transfer-dialog footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 22px;
+    background: #f6faff;
+}
+.account-transfer-dialog header h3 {
+    margin: 0;
+    font-size: 20px;
+}
+.account-transfer-dialog header button {
+    border: 0;
+    background: none;
+    font-size: 25px;
+}
+.account-transfer-dialog section {
+    padding: 20px 22px;
+}
+.account-transfer-dialog label {
+    display: block;
+    margin-top: 16px;
+}
+.account-transfer-dialog input[type='file'],
+.account-transfer-dialog input[type='password'] {
+    display: block;
+    margin: 8px 0;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #c8dbe9;
+    border-radius: 5px;
+}
+.account-transfer-dialog [hidden] {
+    display: none !important;
+}
+.account-transfer-dialog [data-transfer-status] {
+    margin: 0 22px 16px;
+    white-space: pre-wrap;
+}
+.account-transfer-dialog [data-error='1'] {
+    color: #b33424;
+}
+.account-transfer-table {
+    overflow: auto;
+    max-height: 38vh;
+    margin-top: 18px;
+}
+.account-transfer-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.account-transfer-table th,
+.account-transfer-table td {
+    padding: 9px;
+    border: 1px solid #dbe6ed;
+    vertical-align: top;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.account-transfer-table th {
+    background: #edf5fb;
+    position: sticky;
+    top: 0;
+}
+.account-transfer-dialog footer {
+    justify-content: flex-end;
+    gap: 10px;
+}
+.account-transfer-dialog,
+.account-transfer-dialog * {
+    box-sizing: border-box;
+}

@@ -231,6 +231,7 @@ return [
          * or specific method to path like: get:admin/auth/logs.
          */
         'except' => [
+            'post:' . env('ADMIN_ROUTE_PREFIX', 'kky') . '/organization/accounts/transfer/commit',
             env('ADMIN_ROUTE_PREFIX', 'admin') . '/auth/logs*',
             'post:' . env('ADMIN_ROUTE_PREFIX', 'kky') . '/configuration/dingtalk/companies',
         ],

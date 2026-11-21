@@ -47,3 +47,6 @@ Ladmin\Admin::js(asset('js/dingtalk-companies.js').'?v=20261116-4');
 Ladmin\Admin::css(asset('css/account-company-assignment.css').'?v=20261119-1');
 Ladmin\Admin::js(asset('js/account-company-assignment.js').'?v=20261119-1');
 app(\App\Services\AdminWatermarkService::class)->registerForCurrentAdministrator();
+
+Ladmin\Admin::css(asset('css/account-transfer.css').'?v=20261121-1');
+Ladmin\Admin::js(asset('js/account-transfer.js').'?v=20261121-1');
