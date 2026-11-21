@@ -58,6 +58,21 @@ class AssistantAdvertisingAgency extends Model
             ->all();
     }
 
+    /** @return array<string, int> */
+    public static function enabledMediaIds(?array $assistantDepartmentIds = null): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $schema = Schema::connection($connection);
+        if (! $schema->hasTable((new static)->getTable())
+            || ! $schema->hasColumn((new static)->getTable(), 'advertising_media_id')) return [];
+
+        return static::query()->where('is_enabled', true)
+            ->when($assistantDepartmentIds !== null, fn ($query) => $query->whereIn('assistant_department_id', $assistantDepartmentIds))
+            ->orderBy('sort')->orderBy('id')->get()
+            ->mapWithKeys(fn (self $agency) => [$agency->optionKey() => (int) $agency->advertising_media_id])
+            ->all();
+    }
+
     /** @return array<string, string> */
     public static function enabledNames(?array $assistantDepartmentIds = null): array
     {
@@ -69,11 +84,12 @@ class AssistantAdvertisingAgency extends Model
             ->all();
     }
 
-    /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
+    /** @return array<string, list<array{key:string,agency_id:int,media_id:int,media:string,coefficient:float}>> */
     public static function enabledGroups(?array $assistantDepartmentIds = null): array
     {
         $options = static::enabledOptions($assistantDepartmentIds);
         $mediaNames = static::enabledMediaNames($assistantDepartmentIds);
+        $mediaIds = static::enabledMediaIds($assistantDepartmentIds);
         $agencyNames = static::enabledNames($assistantDepartmentIds);
         $groups = [];
 
@@ -86,6 +102,8 @@ class AssistantAdvertisingAgency extends Model
 
             $groups[$agencyName][] = [
                 'key' => (string) $key,
+                'agency_id' => (int) $key,
+                'media_id' => (int) ($mediaIds[$key] ?? 0),
                 'media' => $mediaName,
                 'coefficient' => (float) $coefficient,
             ];

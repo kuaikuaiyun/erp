@@ -16,8 +16,8 @@
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $dateTo }}" required></div>
             <div class="form-group"><label>项目类型</label><select class="form-control" name="project"><option value="">全部项目</option><option value="shopify" @selected($selectedProject === 'shopify')>Shopify订阅项目</option><option value="fashion" @selected($selectedProject === 'fashion')>服装项目</option></select></div>
-            <div class="form-group"><label>广告代理</label><select class="form-control" name="agency"><option value="">全部代理</option>@foreach($agencyOptions as $agency)<option value="{{ $agency }}" @selected($selectedAgency === $agency)>{{ $agency }}</option>@endforeach</select></div>
-            <div class="form-group"><label>广告媒体</label><select class="form-control" name="media"><option value="">全部媒体</option>@foreach($mediaOptions as $media)<option value="{{ $media }}" @selected($selectedMedia === $media)>{{ $media }}</option>@endforeach</select></div>
+            <div class="form-group"><label>广告代理</label><select class="form-control" name="agency"><option value="">全部代理</option>@foreach($agencyOptions as $agencyKey=>$agency)<option value="{{ $agencyKey }}" @selected($selectedAgency === (string)$agencyKey)>{{ $agency }}</option>@endforeach</select></div>
+            <div class="form-group"><label>广告媒体</label><select class="form-control" name="media"><option value="">全部媒体</option>@foreach($mediaOptions as $mediaKey=>$media)<option value="{{ $mediaKey }}" @selected($selectedMedia === (string)$mediaKey)>{{ $media }}</option>@endforeach</select></div>
             <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询分析</button>
             <a class="btn btn-default" href="{{ route('assistant.advertising-spend-analysis.index') }}"><i class="fa fa-refresh"></i> 重置</a>
             <div class="analysis-range">{{ $dateFrom }} 至 {{ $dateTo }}</div>

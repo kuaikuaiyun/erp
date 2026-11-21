@@ -771,6 +771,7 @@ class OperationReportController extends Controller
         $mediaSources = $this->advertisingMedia($advertisingAssistantDepartmentIds);
         $agencyOptions = AssistantAdvertisingAgency::enabledOptions($advertisingAssistantDepartmentIds);
         $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames($advertisingAssistantDepartmentIds);
+        $agencyMediaIds = AssistantAdvertisingAgency::enabledMediaIds($advertisingAssistantDepartmentIds);
         $agencyNames = AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds);
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
@@ -846,6 +847,8 @@ class OperationReportController extends Controller
                 if (! $store) throw ValidationException::withMessages(['ads.'.$index.'.assistant_domain_store_id' => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
             }
             $ads[] = [
+                'agency_id' => (int) $ad['agency'],
+                'media_id' => (int) ($agencyMediaIds[$ad['agency']] ?? 0),
                 'media_source' => $mediaSource,
                 'agency' => trim((string) ($agencyNames[$ad['agency']] ?? '')),
                 'account_name' => trim((string) ($ad['account_name'] ?? '')),

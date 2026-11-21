@@ -89,6 +89,8 @@ class AdvertisingReportBulkImportService
                 $key = $operatorId.'|'.$row['report_date'];
                 $groups[$key] ??= ['operator_id' => $operatorId, 'report_date' => $row['report_date'], 'ads' => []];
                 $groups[$key]['ads'][] = [
+                    'agency_id' => (int) $matchedAgency['agency_id'],
+                    'media_id' => (int) $matchedAgency['media_id'],
                     'agency' => $row['agency_name'], 'media_source' => (string) $matchedAgency['media'],
                     'account_name' => $row['account_name'], 'account_number' => $row['account_number'],
                     'book_spend' => $bookSpend, 'settlement_coefficient' => $coefficient,
@@ -168,17 +170,24 @@ class AdvertisingReportBulkImportService
         return $name !== '' && $username !== '' && $name !== $username ? $name.'（'.$username.'）' : ($name ?: $username);
     }
 
-    /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
+    /** @return array<string, list<array{key:string,agency_id:int,media_id:int,media:string,coefficient:float}>> */
     private function agencyGroups(array $assistantDepartmentIds): array
     {
         $options = AssistantAdvertisingAgency::enabledOptions($assistantDepartmentIds);
         $media = AssistantAdvertisingAgency::enabledMediaNames($assistantDepartmentIds);
+        $mediaIds = AssistantAdvertisingAgency::enabledMediaIds($assistantDepartmentIds);
         $names = AssistantAdvertisingAgency::enabledNames($assistantDepartmentIds);
         $groups = [];
         foreach ($options as $key => $coefficient) {
             $agencyName = trim((string) ($names[$key] ?? ''));
             $mediaName = trim((string) ($media[$key] ?? ''));
-            if ($agencyName !== '' && $mediaName !== '') $groups[$agencyName][] = ['key' => (string) $key, 'media' => $mediaName, 'coefficient' => (float) $coefficient];
+            if ($agencyName !== '' && $mediaName !== '') $groups[$agencyName][] = [
+                'key' => (string) $key,
+                'agency_id' => (int) $key,
+                'media_id' => (int) ($mediaIds[$key] ?? 0),
+                'media' => $mediaName,
+                'coefficient' => (float) $coefficient,
+            ];
         }
         return $groups;
     }
