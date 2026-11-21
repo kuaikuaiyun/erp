@@ -56,7 +56,7 @@ class OperationReportDashboardController extends Controller
             'sort_by' => ['nullable', Rule::in(['first_subscription_orders', 'first_total_orders'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
             'display_mode' => ['nullable', Rule::in(['personal', 'performance', 'team'])],
-            'personal_range' => ['nullable', Rule::in([7, 14])],
+            'personal_range' => ['nullable', Rule::in(['7', '14', 'custom'])],
             'profit_coefficient' => ['nullable', 'numeric', 'gt:0', 'max:1000000'],
         ]);
         $isDashboard = $this->isDashboard($context);
@@ -65,7 +65,8 @@ class OperationReportDashboardController extends Controller
             ? 'performance'
             : (string) ($validated['display_mode'] ?? ($isDashboard ? 'personal' : 'performance'));
         $isPersonalMode = $isDashboard && $displayMode === 'personal';
-        $personalRange = (int) ($validated['personal_range'] ?? 7);
+        $personalRangeMode = (string) ($validated['personal_range'] ?? '7');
+        $personalRange = $personalRangeMode === '14' ? 14 : 7;
         $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1.4);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
@@ -484,6 +485,7 @@ class OperationReportDashboardController extends Controller
             'isOperationPortal' => $isOperationPortal,
             'isPersonalMode' => $isPersonalMode,
             'personalRange' => $personalRange,
+            'personalRangeMode' => $personalRangeMode,
             'profitCoefficient' => $profitCoefficient,
             'personalRows' => $personalRows,
             'rows' => $rows,

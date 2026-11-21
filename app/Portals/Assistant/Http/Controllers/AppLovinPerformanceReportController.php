@@ -17,6 +17,7 @@ use App\Portals\Operation\OperationReportMetricsService;
 use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -112,13 +113,29 @@ class AppLovinPerformanceReportController extends Controller
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
         $reports = $query->with('operator.departments')->orderBy('report_date')->orderBy('operator_name')->get();
-        $calculatedByOperator = $this->metrics->buildRangeForOperators(
-            $dateFrom,
-            $dateTo,
-            $reports->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all(),
-            $timezone,
-            requireBothSubscriptionTags: true,
-        );
+        $operatorIds = $reports->pluck('operator_user_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
+        $metricsCacheKey = 'assistant-applovin-performance:v1:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $calculatedByOperator = Cache::remember($metricsCacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
+            $calculated = [];
+            // 长时间范围会包含大量订单及商品明细，按运营分批读取，避免 90 天等范围一次性加载导致内存溢出。
+            foreach ($operatorIds->chunk(2) as $operatorIdBatch) {
+                $calculated += $this->metrics->buildRangeForOperators(
+                    $dateFrom,
+                    $dateTo,
+                    $operatorIdBatch->values()->all(),
+                    $timezone,
+                    requireBothSubscriptionTags: true,
+                );
+                gc_collect_cycles();
+            }
+
+            return $calculated;
+        });
         $bindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
         $storeIds = $bindings->values()->merge(
             $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->pluck('assistant_domain_store_id'))

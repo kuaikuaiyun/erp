@@ -68,14 +68,15 @@ class FashionOperationReportController extends Controller
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
             'display_mode' => ['nullable', Rule::in(['personal', 'performance', 'team'])],
-            'personal_range' => ['nullable', Rule::in(['7', '14'])],
+            'personal_range' => ['nullable', Rule::in(['7', '14', 'custom'])],
             'profit_coefficient' => ['nullable', 'numeric', 'gt:0', 'max:1000000'],
         ]);
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $excludeResigned = (bool) ($validated['exclude_resigned'] ?? false);
         $displayMode = (string) ($validated['display_mode'] ?? ($isDashboard ? 'personal' : 'performance'));
         $isPersonalMode = $isDashboard && $displayMode === 'personal';
-        $personalRange = (int) ($validated['personal_range'] ?? 7);
+        $personalRangeMode = (string) ($validated['personal_range'] ?? '7');
+        $personalRange = $personalRangeMode === '14' ? 14 : 7;
         $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1.65);
         $reportNow = now($timezone);
         $personalCalendarNow = now('Asia/Shanghai');
@@ -395,7 +396,7 @@ class FashionOperationReportController extends Controller
             'reportProject' => $project,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
-                'exclude_resigned' => $excludeResigned, 'personal_range' => $personalRange, 'profit_coefficient' => $profitCoefficient,
+                'exclude_resigned' => $excludeResigned, 'personal_range' => $personalRangeMode, 'profit_coefficient' => $profitCoefficient,
                 'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
