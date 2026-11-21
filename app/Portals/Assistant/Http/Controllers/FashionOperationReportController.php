@@ -78,6 +78,7 @@ class FashionOperationReportController extends Controller
         $personalRange = (int) ($validated['personal_range'] ?? 7);
         $profitCoefficient = (float) ($validated['profit_coefficient'] ?? 1.65);
         $reportNow = now($timezone);
+        $personalCalendarNow = now('Asia/Shanghai');
         $dateRange = (string) ($validated['date_range'] ?? (
             $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
         ));
@@ -108,7 +109,10 @@ class FashionOperationReportController extends Controller
                 $dateFrom = (string) $validated['date_from'];
                 $dateTo = (string) $validated['date_to'];
             } else {
-                $personalDateTo = $reportNow->copy()->subDays(2);
+                // Personal-report defaults follow the China business date, so
+                // "today 21st" always closes on the 19th regardless of the
+                // selected reporting timezone (for example UTC-8).
+                $personalDateTo = $personalCalendarNow->copy()->subDays(2);
                 $dateFrom = $personalDateTo->copy()->subDays($personalRange - 1)->toDateString();
                 $dateTo = $personalDateTo->toDateString();
             }
