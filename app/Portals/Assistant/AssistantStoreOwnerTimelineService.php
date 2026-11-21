@@ -248,25 +248,77 @@ class AssistantStoreOwnerTimelineService
 
     public function refreshSnapshots(AssistantDomainStore $store, ?CarbonInterface $from = null): int
     {
+        // Read the same precedence as resolveAt() once instead of querying for
+        // every order. A range's upper boundary remains exclusive.
+        $histories = AssistantDomainStoreOwnerHistory::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->orderByDesc('effective_from')
+            ->get();
         $count = 0;
         LogisticsOrder::query()
+            ->select(['id', 'order_created_at'])
             ->where('assistant_domain_store_id', $store->getKey())
             ->when($from, static fn ($query) => $query->where('order_created_at', '>=', $from))
             ->orderBy('id')
-            ->chunkById(200, function ($orders) use ($store, &$count): void {
+            // 100 rows keep the parameter count below SQLite's legacy limit,
+            // and keep finance's existing per-statement capture below 500 rows.
+            ->chunkById(100, function ($orders) use ($store, $histories, &$count): void {
+                $rows = [];
                 foreach ($orders as $order) {
-                    $assignment = $this->resolveAt($store, $order->order_created_at);
-                    $order->forceFill([
-                        'assigned_owner_user_id' => $assignment['owner_user_id'],
-                        'assigned_owner_name' => $assignment['owner_name'],
-                        'owner_assignment_effective_from' => $assignment['effective_from'],
-                        'owner_assignment_resolved_at' => now(),
-                    ])->save();
-                    $count++;
+                    $at = $order->order_created_at ? Carbon::parse($order->order_created_at)->utc() : now()->utc();
+                    $history = $histories->first(static fn (AssistantDomainStoreOwnerHistory $item): bool =>
+                        $item->effective_from->lessThanOrEqualTo($at)
+                        && ($item->effective_to === null || $item->effective_to->greaterThan($at))
+                    );
+                    $rows[] = [
+                        'id' => (int) $order->getKey(),
+                        'assigned_owner_user_id' => $history?->owner_user_id === null ? null : (int) $history->owner_user_id,
+                        'assigned_owner_name' => $history?->owner_name_snapshot,
+                        'owner_assignment_effective_from' => $history?->effective_from,
+                    ];
                 }
+                $this->writeSnapshotBatch($store, $rows);
+                $count += count($rows);
             });
 
         return $count;
+    }
+
+    /** @param list<array{id:int,assigned_owner_user_id:?int,assigned_owner_name:?string,owner_assignment_effective_from:?CarbonInterface}> $rows */
+    private function writeSnapshotBatch(AssistantDomainStore $store, array $rows): void
+    {
+        if ($rows === []) return;
+        $model = new LogisticsOrder;
+        $connection = $model->getConnection();
+        $grammar = $connection->getQueryGrammar();
+        $idColumn = $grammar->wrap('id');
+        $bindings = [];
+        $sets = [];
+        foreach (['assigned_owner_user_id', 'assigned_owner_name', 'owner_assignment_effective_from'] as $field) {
+            $cases = [];
+            foreach ($rows as $row) {
+                $cases[] = 'WHEN ? THEN ?';
+                $bindings[] = $row['id'];
+                $bindings[] = $row[$field];
+            }
+            $column = $grammar->wrap($field);
+            $sets[] = $column.' = CASE '.$idColumn.' '.implode(' ', $cases).' ELSE '.$column.' END';
+        }
+        $resolvedAt = now();
+        foreach (['owner_assignment_resolved_at', $model->getUpdatedAtColumn()] as $field) {
+            $sets[] = $grammar->wrap($field).' = ?';
+            $bindings[] = $resolvedAt;
+        }
+        $ids = array_column($rows, 'id');
+        $bindings[] = $store->getKey();
+        array_push($bindings, ...$ids);
+        $sql = 'UPDATE '.$grammar->wrapTable($model->getTable()).' SET '.implode(', ', $sets)
+            .' WHERE '.$grammar->wrap('assistant_domain_store_id').' = ?'
+            .' AND '.$idColumn.' IN ('.implode(', ', array_fill(0, count($ids), '?')).')';
+
+        // Use the original connection update path: finance still observes the
+        // exact old/new source rows and receives normal commit/rollback callbacks.
+        $connection->update($sql, $bindings);
     }
 
     private function ownerForStore(AssistantDomainStore $store): ?AdminUser
