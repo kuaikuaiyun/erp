@@ -45,6 +45,53 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $cachePath = null;
     private Connection $db;
 
+    public function test_indexed_dependency_lookup_preserves_legacy_matching_and_uses_reference_indexes(): void
+    {
+        (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+        (require database_path('migrations/2026_11_21_000009_index_finance_dependency_references.php'))->up();
+        $this->db->getSchemaBuilder()->table('finance_records', fn (Blueprint $table) => $table->index('reference'));
+        $fixtures = [
+            ['paypal-orders', 'PAY-TXN', ' BILL ', null, null],
+            ['xuzong2-details', 'CARD-TXN', null, 'MERCHANT', 'SHOPIFY'],
+            ['xuzong2-details', 'REF-ONLY', null, null, null],
+            ['xuzong2-details', 'FASHION-TXN', null, null, null],
+            ['xuzong2-details', '0', null, null, null],
+            ['xuzong2-details', 'LONG-A', null, str_repeat('L', 191).'A', null],
+            ['xuzong2-details', 'LONG-B', null, str_repeat('L', 191).'B', null],
+        ];
+        foreach ($fixtures as [$dataset, $reference, $bill, $merchant, $shopify]) {
+            $id = $this->record('2026-11-03', $reference, $dataset);
+            $this->db->table('finance_records')->where('id', $id)->update([
+                'source_bill' => $bill, 'source_merchant' => $merchant, 'source_shopify' => $shopify,
+            ]);
+        }
+        app(\App\Portals\Finance\FinanceSourceStorage::class)->setState('record', 'active');
+        $orderId = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'CARD-TXN', 'bill_number' => 'BILL', 'shopify_order_number' => 'SHOPIFY']);
+        $this->db->table('logistics_order_payment_references')->insert(['logistics_order_id' => $orderId, 'reference_number' => 'REF-ONLY']);
+        $fashionId = $this->db->table('fashion_logistics_orders')->insertGetId(['transaction_id' => 'FASHION-TXN']);
+        $dependencies = app(FinanceSummaryDependencies::class);
+        foreach ([['order', ['id' => $orderId, 'transaction_id' => 'MERCHANT']],
+            ['order', ['id' => 999999, 'transaction_id' => 'REF-ONLY']],
+            ['reference', ['reference_number' => 'BILL']], ['reference', ['reference_number' => '0']],
+            ['reference', ['reference_number' => str_repeat('L', 191).'A']],
+            ['reference', ['reference_number' => '']], ['reference', ['reference_number' => null]],
+            ['item', ['logistics_order_id' => $orderId]], ['scope_credit_refund', ['logistics_order_id' => $orderId]],
+            ['fashion', ['transaction_id' => 'FASHION-TXN']], ['fashion_item', ['fashion_logistics_order_id' => $fashionId]]] as [$source, $values]) {
+            $legacy = $this->db->table('finance_records as f')->whereIn('f.dataset', FinanceSummarySourceChanges::DATASETS)
+                ->whereRaw($dependencies->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $this->db))
+                ->when($source === 'scope_credit_refund', fn ($query) => $query->where('f.dataset', '<>', 'paypal-orders'))->pluck('id')->sort()->values()->all();
+            $fast = $dependencies->sourceRecords($source, $values, $this->db);
+            $this->assertNotNull($fast);
+            $this->assertSame($legacy, $fast->pluck('id')->sort()->values()->all(), $source.' '.json_encode($values));
+        }
+        foreach (['source_bill_trimmed' => ['BILL', 'finance_dependency_bill_idx'],
+            'source_merchant' => ['MERCHANT', 'finance_dependency_merchant_idx'],
+            'source_shopify' => ['SHOPIFY', 'finance_dependency_shopify_idx']] as $column => [$value, $index]) {
+            $plan = $this->db->selectOne('EXPLAIN SELECT id FROM finance_records WHERE '.$column.' = ?', [$value]);
+            $this->assertStringContainsString($index, (string) $plan->possible_keys);
+        }
+    }
+
     public function test_worker_reports_pending_and_skips_projection_when_notification_delivery_fails(): void
     {
         $notifications = new class extends \App\Portals\Finance\FinanceExternalChanges {

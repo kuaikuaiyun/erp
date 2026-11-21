@@ -93,6 +93,7 @@ class FinanceSummarySourceChanges
         if (in_array($source, ['scope_user', 'scope_membership', 'scope_department'], true)) return [['paypal', '*'], ['credit_card', '*']];
         if ($source === 'scope_account_day') return [[$values['channel'], $values['source_date']]];
         $records = $db->table('finance_records')->whereIn('dataset', self::DATASETS);
+        $matchedRows = null;
         $extra = [];
         if ($source === 'finance') {
             $keys = array_values(array_unique(array_filter(array_map(fn ($key) => trim((string) ($values[$key] ?? '')),
@@ -138,11 +139,15 @@ class FinanceSummarySourceChanges
                 $extra[] = [$platform, $date->addDay()->subSecond()->utc()->toDateString()];
             }
         } else {
-            $match = app(FinanceSummaryDependencies::class)->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $db);
-            $records = $db->table('finance_records as f')->whereIn('f.dataset', self::DATASETS)->whereRaw($match);
-            if ($source === 'scope_credit_refund') $records->where('f.dataset', '<>', 'paypal-orders');
+            $dependencies = app(FinanceSummaryDependencies::class);
+            $matchedRows = $dependencies->sourceRecords($source, $values, $db);
+            if ($matchedRows === null) {
+                $match = $dependencies->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $db);
+                $records = $db->table('finance_records as f')->whereIn('f.dataset', self::DATASETS)->whereRaw($match);
+                if ($source === 'scope_credit_refund') $records->where('f.dataset', '<>', 'paypal-orders');
+            }
         }
-        $rows = $records->get(['id', 'dataset', 'occurred_at']);
+        $rows = $matchedRows ?? $records->get(['id', 'dataset', 'occurred_at']);
         if ($source === 'finance') $rows = $rows->concat($this->relatedBusinessRecords($db, $rows->pluck('id')->all(), $values));
         $paypalIds = $rows->where('dataset', 'paypal-orders')->pluck('id')->all();
         if ($paypalIds !== [] || ($source === 'finance' && $values['dataset'] === 'paypal-orders')) {
