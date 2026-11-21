@@ -753,6 +753,8 @@ return [
             'domain' => '域名',
             'shop_status' => '店铺状态',
             'team' => '团队',
+            'owner' => '归属人',
+            'owner_unassigned' => '未归属',
             'email_purchased' => '邮箱购买',
             'shop_timezone' => '店铺时区',
             'report_date' => '统计日期',
