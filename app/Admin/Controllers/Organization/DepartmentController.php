@@ -356,6 +356,7 @@ class DepartmentController extends Controller
         $grid = new Grid(new Department());
 
         $grid->setName('organization-departments');
+        $grid->paginate(100);
         $grid->setActionClass(OrganizationActions::class);
         $returnTo = request()->fullUrl();
         $grid->model()
