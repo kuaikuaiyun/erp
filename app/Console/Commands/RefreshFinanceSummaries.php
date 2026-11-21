@@ -6,6 +6,7 @@ use App\Portals\Finance\FinanceSummaryProjection;
 use App\Portals\Finance\FinanceSummaryDependencies;
 use App\Portals\Finance\FinancePayPalSettlementProjection;
 use App\Portals\Finance\FinanceWorkbookService;
+use App\Portals\Finance\FinanceQueryDiagnostics;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -39,6 +40,12 @@ class RefreshFinanceSummaries extends Command
         if (! $acquired) {
             return self::SUCCESS;
         }
+        $ownsTrace = FinanceQueryDiagnostics::current() === null && config('finance.diagnostics.enabled', true);
+        $trace = $ownsTrace ? FinanceQueryDiagnostics::start(request()) : FinanceQueryDiagnostics::current();
+        $trace?->event('worker.start', ['command' => 'finance:summaries:refresh']);
+        if ($trace !== null) $db->listen(function (\Illuminate\Database\Events\QueryExecuted $query) use ($db, $trace): void {
+            if ($query->connection === $db) $trace->query($query->sql, $query->time);
+        });
         $executionLimit = (int) ini_get('max_execution_time');
         if ($executionLimit === 0 || $executionLimit > 900) {
             set_time_limit(900);
@@ -88,6 +95,7 @@ class RefreshFinanceSummaries extends Command
             return ! $failed && $paypalRefreshed ? self::SUCCESS : self::FAILURE;
         } catch (\Throwable $exception) {
             $this->recordStage('执行异常（'.$exception::class.'）');
+            $trace?->event('worker.failed', ['exception' => $exception::class]);
             throw $exception;
         } finally {
             if ($pdo !== null) {
@@ -101,6 +109,7 @@ class RefreshFinanceSummaries extends Command
             } else {
                 $lock->release();
             }
+            if ($ownsTrace) $trace?->finish('worker.end');
             if ($raisedLimit && memory_get_usage(true) < $memoryBytes) {
                 ini_set('memory_limit', $memoryLimit);
             }
@@ -110,6 +119,7 @@ class RefreshFinanceSummaries extends Command
 
     private function recordStage(string $stage): void
     {
+        FinanceQueryDiagnostics::current()?->phase('worker.stage', ['name' => $stage], true);
         try {
             Cache::put('finance:summaries:worker-status', [
                 'stage' => $stage, 'at' => now('Asia/Shanghai')->format('Y-m-d H:i:s'),

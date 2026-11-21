@@ -673,6 +673,120 @@ class FinancePortalTest extends TestCase
         $this->assertTrue($storage->page($generation, 0, 1)->sole()['locked']);
     }
 
+    public function test_paypal_status_pages_and_counts_use_the_current_projection(): void
+    {
+        (require database_path('migrations/2026_11_21_000004_replace_paypal_json_list_projection.php'))->up();
+        $account = $this->financePayPalAccount('状态分页账户');
+        $this->workbooks->importRecords('paypal-orders', [
+            [...$this->recordRow(), '交易 ID' => 'STATUS-A'],
+            [...$this->recordRow(), '交易 ID' => 'STATUS-B'],
+            [...$this->recordRow(), '交易 ID' => 'STATUS-C'],
+        ], $account->activity_account, 'UTC', 1);
+        [$source] = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->page(['timezone' => 'Asia/Shanghai'], 0, 10);
+        $rows = $source->values()->all();
+        $rows[0]['order_status'] = '已付款 · 仍有冻结';
+        $rows[1]['order_status'] = '全额退款';
+        $rows[2]['order_status'] = '已付款';
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $versions->shouldReceive('forCache')->with(['paypal'])->andReturn('status-source');
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
+        $generation = (string) \Illuminate\Support\Str::uuid();
+        DB::table('finance_paypal_list_publications')->insert([
+            'id' => 1, 'generation' => $generation, 'source_revision' => hash('sha256', 'paypal-settlement-relational-v5:status-source'),
+            'row_count' => 3, 'published_at' => now(),
+        ]);
+        $position = 0;
+        app(\App\Portals\Finance\FinancePayPalListStorage::class)->insert($generation, $position, $rows);
+        $orders = Mockery::mock(\App\Portals\Finance\FinancePayPalSettlementOrders::class);
+        $orders->shouldNotReceive('page');
+        $this->app->instance(\App\Portals\Finance\FinancePayPalSettlementOrders::class, $orders);
+        $url = '/finance/reports/paypal-settlement?order_status='.rawurlencode('已付款');
+        $this->get($url)->assertOk()->assertViewHas('rows', fn ($page) => $page->total() === 2
+            && $page->getCollection()->pluck('id')->all() === [$rows[0]['id'], $rows[2]['id']]);
+        $this->get($url.'&page=2')->assertOk()->assertViewHas('rows', fn ($page) => $page->total() === 2 && $page->isEmpty());
+        $this->getJson($url.'&settlement_total=1')->assertOk()->assertJsonPath('total', 2);
+        $this->get('/finance/reports/paypal-settlement?order_status='.rawurlencode('仍有冻结'))
+            ->assertOk()->assertViewHas('rows', fn ($page) => $page->total() === 1 && $page->first()['id'] === $rows[0]['id']);
+    }
+
+    public function test_ye_domains_are_normalized_for_imports_historical_rows_filters_and_exports(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        DB::table('finance_domain_groups')->insert([
+            ['domain' => 'trztrain.com', 'owner' => '域名使用人', 'team' => '深圳团队'],
+            ['domain' => 'agenorisa.com', 'owner' => '店匠使用人', 'team' => '厦门总部'],
+        ]);
+        $base = ['_card_channel' => 'ye', '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD',
+            '交易金额' => '10', '支付状态' => 'SUCCESS'];
+        foreach (['www.trztrain.com', 'agenorisa.myshoplaza.com', 'WWW.AGENORISA.MYSHOPLAZA.COM'] as $i => $domain) {
+            $this->workbooks->importRecords('xuzong2-details', [[...$base, '平台订单号' => 'YE-DOMAIN-'.$i,
+                '域名' => $domain]], 'Domain account', 'UTC', 1);
+        }
+        $this->assertSame(['trztrain.com', 'agenorisa.com', 'agenorisa.com'],
+            FinanceRecord::orderBy('id')->pluck('domain')->all());
+        // Historical records and saved edits must follow the same rule without reimporting.
+        FinanceRecord::where('reference', 'YE-DOMAIN-0')->update(['domain' => 'www.trztrain.com']);
+        FinanceRecord::where('reference', 'YE-DOMAIN-1')->update(['domain' => 'agenorisa.myshoplaza.com']);
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $service->save(FinanceRecord::where('reference', 'YE-DOMAIN-2')->sole(),
+            ['_edited_fields' => ['domain' => 'www.agenorisa.myshoplaza.com']], 1);
+        $filters = ['card_channel' => 'ye', 'timezone' => 'Asia/Shanghai'];
+        $rows = $service->rows('credit_card', $filters)->keyBy('reference');
+        foreach (['YE-DOMAIN-0' => ['trztrain.com', '域名使用人', '深圳团队'],
+            'YE-DOMAIN-1' => ['agenorisa.com', '店匠使用人', '厦门总部'],
+            'YE-DOMAIN-2' => ['agenorisa.com', '店匠使用人', '厦门总部']] as $reference => $expected) {
+            $row = $rows[$reference];
+            $this->assertSame($expected, [$row['domain'], $row['owner'], $row['team']]);
+            $this->assertSame($expected[0], $row['card_layout']['domain']);
+        }
+        foreach ([['domain' => 'agenorisa.com'], ['team' => '厦门总部'], ['regions' => ['厦门']]] as $selection) {
+            $selected = $service->rows('credit_card', $filters + $selection)->pluck('id')->sort()->values()->all();
+            $this->assertCount(2, $selected);
+            $this->assertSame($selected, $service->confluxBusinessQuery($filters + $selection)->pluck('id')->sort()->values()->all());
+        }
+        $this->assertContains('厦门', $service->regionOptions('ye-settlement')->all());
+        $summaryRows = $service->summaryRows('credit_card', $filters)->keyBy('reference');
+        $this->assertCount(3, $summaryRows);
+        $this->assertSame(2, $summaryRows->where('team', '厦门总部')->count());
+        $response = $this->get('/finance/reports/ye-settlement?'.http_build_query([
+            'download' => 1, 'domain' => 'agenorisa.com', 'export_columns' => ['domain', 'owner', 'team'],
+        ]))->assertOk();
+        $export = json_encode($this->readDownload($response->streamedContent())->toArray(), JSON_UNESCAPED_UNICODE);
+        $this->assertStringContainsString('agenorisa.com', $export);
+        $this->assertStringNotContainsString('myshoplaza', $export);
+        $this->assertStringNotContainsString('www.', $export);
+    }
+
+    public function test_conflux_business_pagination_preserves_overrides_unknown_domains_and_empty_selections(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        DB::table('finance_domain_groups')->insert([
+            ['domain' => 'sz.example', 'owner' => 'A', 'team' => '深圳团队'],
+            ['domain' => 'xm.example', 'owner' => 'B', 'team' => '厦门总部'],
+            ['domain' => 'empty.example', 'owner' => 'C', 'team' => ''],
+        ]);
+        $base = ['_card_channel' => 'ye', '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD',
+            '交易金额' => '10', '支付状态' => 'SUCCESS'];
+        foreach (['sz.example', 'www.sz.example', 'xm.example', 'unknown.example', '', 'empty.example', 'sz.example'] as $i => $domain) {
+            $this->workbooks->importRecords('xuzong2-details', [[...$base, '平台订单号' => 'BUSINESS-'.$i,
+                '域名' => $domain, '团队' => '深圳团队']], 'Business account', 'UTC', 1);
+        }
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $service->save(FinanceRecord::where('reference', 'BUSINESS-2')->sole(), ['_edited_fields' => ['team' => '深圳团队']], 1);
+        $service->save(FinanceRecord::where('reference', 'BUSINESS-6')->sole(), ['_edited_fields' => ['domain' => 'xm.example']], 1);
+        foreach ([['team' => '深圳团队'], ['teams' => ['深圳团队', '厦门总部']], ['regions' => ['深圳']],
+            ['teams' => ['__empty__']], ['domain' => 'sz.'], ['domain' => 'SZ.'],
+            ['teams' => ['深圳团队'], 'accounts' => ['Business account']]] as $selection) {
+            $filters = ['card_channel' => 'ye', 'timezone' => 'Asia/Shanghai', ...$selection];
+            $expected = collect($service->rowBatches('credit_card', $filters, businessMatchesOnly: true))->flatten(1)->pluck('id')->sort()->values()->all();
+            $actual = $service->confluxBusinessQuery($filters)->pluck('id')->sort()->values()->all();
+            $this->assertSame($expected, $actual, json_encode($selection));
+        }
+        $this->assertNull($service->confluxBusinessQuery(['card_channel' => 'ye', 'team' => '深圳团队', 'subscriptions' => ['订阅']]));
+        $this->getJson('/finance/reports/ye-settlement?team='.rawurlencode('深圳团队').'&settlement_total=1')
+            ->assertOk()->assertJsonPath('total', 5);
+    }
+
     public function test_paypal_settlement_does_not_show_a_projection_after_its_source_has_changed(): void
     {
         (require database_path('migrations/2026_11_21_000004_replace_paypal_json_list_projection.php'))->up();
@@ -1687,11 +1801,14 @@ class FinancePortalTest extends TestCase
                 && $rows->getCollection()->pluck('reference')->all() === array_map(
                     fn ($index) => 'BATCH-'.$index, range(12, 3)
                 ));
-        $this->get('/finance/reports/ye-settlement?team=Shopify&page=51')->assertOk()
-            ->assertViewHas('rows', fn ($rows) => $rows->total() === 512
-                && $rows->getCollection()->pluck('reference')->all() === array_map(
-                    fn ($index) => 'BATCH-'.$index, range(12, 3)
-                ));
+        $optimized = app(\App\Portals\Finance\FinanceSettlementService::class)->confluxBusinessQuery([
+            'card_channel' => 'ye', 'team' => 'Shopify', 'timezone' => 'Asia/Shanghai',
+        ]);
+        $this->assertEqualsCanonicalizing(FinanceRecord::query()->pluck('id')->all(), $optimized->pluck('id')->all());
+        $page = $this->get('/finance/reports/ye-settlement?team=Shopify&page=51')->assertOk();
+        $this->assertSame(512, $page->viewData('rows')->total());
+        $this->assertSame(array_map(fn ($index) => 'BATCH-'.$index, range(12, 3)),
+            $page->viewData('rows')->getCollection()->pluck('reference')->all());
     }
 
     public function test_conflux_wallet_candidates_preserve_case_and_manual_overrides(): void
@@ -3023,8 +3140,38 @@ class FinancePortalTest extends TestCase
         $this->assertTrue($ready->invoke($controller, 'summary', '2026-11', ['view' => 'transactions', 'channel' => 'ye']));
     }
 
+    public function test_reports_wait_for_source_changes_before_starting_calculations(): void
+    {
+        $db = Mockery::mock(\Illuminate\Database\Connection::class);
+        $db->shouldReceive('getDriverName')->andReturn('mysql');
+        $workbooks = Mockery::mock(FinanceWorkbookService::class)->makePartial();
+        $workbooks->shouldReceive('database')->andReturn($db);
+        $this->workbooks = $workbooks;
+        $ready = false;
+        $changes = $this->mock(\App\Portals\Finance\FinanceSummarySourceChanges::class);
+        // A reference is needed because the worker's next run changes readiness.
+        $changes->shouldReceive('reportReady')->andReturnUsing(function () use (&$ready) { return $ready; });
+        $versions = Mockery::mock(\App\Portals\Finance\FinanceSummaryDataVersion::class);
+        $calls = 0;
+        $versions->shouldReceive('current')->andReturnUsing(function () use (&$calls) { $calls++; return 'revision-1'; });
+        $versions->shouldReceive('forRange')->andReturn('revision-1');
+        $this->app->instance(\App\Portals\Finance\FinanceSummaryDataVersion::class, $versions);
+        $this->directReportController();
+        $url = '/finance/reports/losses?month_from=2026-11&month_to=2026-11';
+        $page = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+        $this->assertTrue($page->viewData('preparationPlan')['waiting']);
+        $this->getJson($page->viewData('preparationPlan')['poll_url'])->assertOk()->assertJsonPath('waiting', true)->assertJsonCount(0, 'months');
+        $this->getJson($url.'&snapshot_status=1')->assertOk()->assertExactJson(['state' => 'preparing']);
+        $this->getJson($url.'&_source_prepare=1')->assertStatus(409)->assertJsonPath('state', 'preparing');
+        $this->assertSame(0, $calls);
+        $ready = true;
+        $this->getJson($url.'&_finance_plan=1')->assertOk()->assertJsonCount(5, 'months')->assertJsonMissingPath('waiting');
+        $this->assertSame(2, $calls);
+    }
+
     public function test_multi_month_calculation_runs_in_monthly_requests_without_saving_final_reports(): void
     {
+        $this->mock(\App\Portals\Finance\FinanceSummarySourceChanges::class)->shouldReceive('reportReady')->andReturnTrue();
         $db = Mockery::mock(\Illuminate\Database\Connection::class);
         $db->shouldReceive('getDriverName')->andReturn('mysql');
         $workbooks = Mockery::mock(FinanceWorkbookService::class)->makePartial();
@@ -3071,6 +3218,7 @@ class FinancePortalTest extends TestCase
 
     public function test_calculation_plan_resumes_only_missing_parts_of_the_selected_channel(): void
     {
+        $this->mock(\App\Portals\Finance\FinanceSummarySourceChanges::class)->shouldReceive('reportReady')->andReturnTrue();
         $db = Mockery::mock(\Illuminate\Database\Connection::class);
         $db->shouldReceive('getDriverName')->andReturn('mysql');
         $workbooks = Mockery::mock(FinanceWorkbookService::class)->makePartial();

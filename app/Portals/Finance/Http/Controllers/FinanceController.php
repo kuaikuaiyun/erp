@@ -19,6 +19,7 @@ use App\Portals\Finance\FinancePayPalSettlementProjection;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
 use App\Portals\Finance\FinanceProductNames;
 use App\Portals\Finance\FinanceReportCache;
+use App\Portals\Finance\FinanceQueryDiagnostics;
 use App\Portals\Finance\FinanceSettlementEditor;
 use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
@@ -784,10 +785,9 @@ class FinanceController extends Controller
             : $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
         $perPage = (int) ($filters['per_page'] ?? 10);
         $accountCounts = fn () => (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
-        $exportAccounts = $xuzongReport
-            ? app(FinanceReportCache::class)->remember('xuzong-account-counts:v1:'.hash('sha256',
-                json_encode([$query->toSql(), $query->getBindings()], JSON_THROW_ON_ERROR)), ['xuzong1', 'xuzong2'], $accountCounts)
-            : $accountCounts();
+        $exportAccounts = app(FinanceReportCache::class)->remember('record-account-counts:v2:'.hash('sha256',
+            json_encode([$dataset, $xuzongReport, $query->toSql(), $query->getBindings()], JSON_THROW_ON_ERROR)),
+            [$definition['channel'] === 'paypal' ? 'paypal' : 'credit_card'], $accountCounts);
         $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
             ->paginate($perPage, $hydratePage ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
         if ($hydratePage && $records->isNotEmpty()) {
@@ -804,7 +804,10 @@ class FinanceController extends Controller
             ->orderBy('id')->get(['activity_account', 'account_name']);
         $accounts = $paymentAccounts->pluck('activity_account')->unique()->values();
         $accountLabels = $paymentAccounts->pluck('account_name', 'activity_account');
-        $conditionChoices = $this->conditionChoices($dataset, $xuzongReport);
+        $accountingCategories = $xuzongReport ? collect() : collect(app(FinanceReportCache::class)->remember(
+            'payment-category-options:v1', ['paypal'], fn () => $this->workbooks->database()->table('finance_payment_transactions')
+                ->whereNotNull('category')->distinct()->pluck('category')->all()));
+        $conditionChoices = $this->conditionChoices($dataset, $xuzongReport, $accountingCategories);
         if ($dataset === 'xuzong2-orders') {
             $accounts = collect($conditionChoices['account'])->pluck('value');
         }
@@ -891,7 +894,7 @@ class FinanceController extends Controller
             'accountingTransactions' => $dataset === 'paypal-orders' ? $this->workbooks->database()->table('finance_payment_transactions')->whereIn('finance_record_id', $records->pluck('id'))->get(['finance_record_id', 'category', 'direction', 'monthly_rate', 'cny_amount'])->keyBy('finance_record_id') : collect(),
             'filterFields' => FinanceCatalog::filterFieldLabels($dataset),
             'filterOperators' => ['equals', 'contains', 'not_equals', 'empty', 'not_empty', 'gt', 'gte', 'lt', 'lte'],
-            'categories' => $xuzongReport ? collect() : $types->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->distinct()->pluck('category'))->filter()->unique()->sort()->values(),
+            'categories' => $types->merge($accountingCategories)->filter()->unique()->sort()->values(),
         ]);
     }
 
@@ -1595,6 +1598,7 @@ class FinanceController extends Controller
             return $this->settlement($request, $report);
         }
         if (in_array($report, ['summary', 'losses'], true)) {
+            if ($waiting = $this->waitForReportInputs($request, $report)) return $waiting;
             if ($run = $request->query('_source_run')) {
                 $context = $this->context($request);
                 if ($context instanceof Response) return $context;
@@ -1620,7 +1624,7 @@ class FinanceController extends Controller
                 return $response->getStatusCode() === 200
                     ? response()->json(['state' => 'ready'])->header('Cache-Control', 'private, no-store') : $response;
             }
-            if ($preparation = $this->prepareReportRange($request, $report)) return $preparation;
+            if ($preparation = FinanceQueryDiagnostics::measure('report.prepare', fn () => $this->prepareReportRange($request, $report), ['report' => $report])) return $preparation;
         }
         if ($report === 'losses' || ($report === 'summary' && $request->query('view') !== 'transactions')) {
             return $this->settlementOverview($request, $report);
@@ -2191,6 +2195,9 @@ class FinanceController extends Controller
             && ! filled($filters['team'] ?? null) && ! filled($filters['region'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
         $canPaginate = $canPaginate && empty($filters['teams']) && empty($filters['regions']) && empty($filters['subscriptions']);
+        $businessQuery = ! $request->boolean('download') && ! $request->has('suggestion_field')
+            ? $service->confluxBusinessQuery($filters) : null;
+        $canPaginate = $canPaginate || $businessQuery !== null;
         $deferredTotalUrl = null;
         $requestedPage = max(1, (int) $request->query('page', 1));
         $hasConfluxStatements = ($filters['card_channel'] ?? null) === 'ye';
@@ -2199,9 +2206,9 @@ class FinanceController extends Controller
         $noDateRange = ! filled($filters['from'] ?? null) && ! filled($filters['to'] ?? null);
         $canDeferTotal = $noDateRange && ($totalOnly || $html);
         if ($canPaginate && ($hasConfluxStatements || $fixedCardChannel === 'worldpay')
-            && $canDeferTotal) {
+            && $canDeferTotal && $businessQuery === null) {
             $perPage = (int) ($filters['per_page'] ?? 10);
-            $query = $service->query($channel, $filters);
+            $query = $businessQuery ?? $service->query($channel, $filters);
             $totalScope = $this->settlementTotalScope($query, $filters);
             $reportCache = app(FinanceReportCache::class);
             $queryParams = $request->except('settlement_total');
@@ -2243,12 +2250,11 @@ class FinanceController extends Controller
                 $page = max(1, (int) $request->query('page', 1));
                 $deferPayPal = $canDeferTotal && filled($filters['order_status'] ?? null);
                 $paginationOptions = ['path' => $request->url(), 'query' => $request->except('settlement_total')];
-                $projected = ! $totalOnly
-                    ? app(FinancePayPalSettlementProjection::class)
-                        ->page($filters, ($page - 1) * $pageSize, $pageSize)
-                    : null;
+                $projected = app(FinancePayPalSettlementProjection::class)
+                    ->page($filters, ($page - 1) * $pageSize, $totalOnly ? 0 : $pageSize);
                 if ($projected !== null) {
                     [$rows, $total] = $projected;
+                    if ($totalOnly) return $this->settlementTotalResponse($total, $pageSize, $paginationOptions, $requestedPage);
                     $subscriptions = $rows;
                     $exactTotal = true;
                 } else {
@@ -2271,9 +2277,14 @@ class FinanceController extends Controller
                     $paginationOptions);
             }
         } elseif ($canPaginate) {
-            $query = $service->query($channel, $filters);
+            $query = $businessQuery ?? $service->query($channel, $filters);
             $total = app(FinanceReportCache::class)->remember($this->settlementTotalScope($query, $filters).':orders',
                 [$filters['card_channel'] ?? $channel], fn () => (clone $query)->count());
+            if ($totalOnly && $businessQuery !== null) {
+                [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
+                return $this->settlementTotalResponse($total + $statementTotal, (int) ($filters['per_page'] ?? 10),
+                    ['path' => $request->url(), 'query' => $request->except('settlement_total')], $requestedPage);
+            }
             if ($query->getQuery()->from === 'finance_transactions as finance_records') {
                 $perPage = (int) ($filters['per_page'] ?? 10);
                 $page = max(1, (int) $request->query('page', 1));
@@ -2438,7 +2449,7 @@ class FinanceController extends Controller
         unset($filters['per_page'], $filters['format']);
         $filters = array_filter($filters, fn ($value) => filled($value));
         ksort($filters);
-        return 'settlement-total:v1:'.hash('sha256', json_encode([$query->toSql(), $query->getBindings(), $filters], JSON_THROW_ON_ERROR));
+        return 'settlement-total:v2:'.hash('sha256', json_encode([$query->toSql(), $query->getBindings(), $filters], JSON_THROW_ON_ERROR));
     }
 
     private function settlementTotalResponse(int $total, int $perPage, array $paginationOptions, int $page): JsonResponse
@@ -3364,7 +3375,9 @@ class FinanceController extends Controller
         $monthlyRates = $filterOptions = $summaryAccountChannels = [];
         foreach ($comparisonMonths as $comparisonMonth) {
             $includeOptions = true;
-            $result = $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true);
+            $result = FinanceQueryDiagnostics::measure('report.month',
+                fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true),
+                ['report' => $report, 'month' => $comparisonMonth]);
             [$groups, $options, $rate] = $result;
             if ($report === 'summary') {
                 foreach ($groups as $group) $summaryAccountChannels[$group['name']] = $group['channel'];
@@ -3432,6 +3445,33 @@ class FinanceController extends Controller
         return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'monthlyRates' => $monthlyRates, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
     }
 
+    private function waitForReportInputs(Request $request, string $report): ?Response
+    {
+        $db = $this->workbooks->database();
+        if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) return null;
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        // Dependency publication belongs to the scheduled worker, including when a
+        // source write arrives after this initial check. HTTP never drains the outbox.
+        $request->attributes->set('finance.report_read_only', true);
+        if (FinanceQueryDiagnostics::measure('report.inputs_ready',
+            fn () => app(\App\Portals\Finance\FinanceSummarySourceChanges::class)->reportReady($db))) return null;
+        if ($request->boolean('_source_prepare')) {
+            return response()->json(['state' => 'preparing', 'message' => '数据正在更新，请重新查询。'], 409)
+                ->header('Cache-Control', 'private, no-store');
+        }
+        if ($request->boolean('snapshot_status')) {
+            return response()->json(['state' => 'preparing'])->header('Cache-Control', 'private, no-store');
+        }
+        $query = $request->except(['_source_ready', '_source_run', '_source_prepare', '_source_from', '_source_to']);
+        $plan = ['waiting' => true, 'months' => [],
+            'poll_url' => $request->url().'?'.http_build_query([...$query, '_finance_plan' => 1]),
+            'resume_url' => $request->fullUrl()];
+        if ($request->boolean('_finance_plan')) return response()->json($plan)->header('Cache-Control', 'private, no-store');
+        return response()->view('portals.finance.report-preparing', [...$context,
+            'title' => __('finance.menus.'.$report), 'preparationPlan' => $plan])->header('Cache-Control', 'private, no-store');
+    }
+
     private function prepareReportRange(Request $request, string $report): ?Response
     {
         if ($request->attributes->get('finance.source_preparing')) return null;
@@ -3448,7 +3488,8 @@ class FinanceController extends Controller
         if ($from > $to) return null; // The regular report validation supplies the error.
         $planOnly = $request->boolean('_finance_plan');
         $versions = app(\App\Portals\Finance\FinanceSummaryDataVersion::class);
-        $revision = [$versions->current('paypal'), $versions->current('credit_card')];
+        $revision = FinanceQueryDiagnostics::measure('report.versions',
+            fn () => [$versions->current('paypal'), $versions->current('credit_card')]);
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $query = $request->except(['_finance_plan', '_source_ready', '_source_prepare']);
@@ -3458,7 +3499,8 @@ class FinanceController extends Controller
             $run = $stamp.'.'.$nonce.'.'.hash_hmac('sha256', $stamp.'.'.$nonce.'.'.$context['user']->getKey(), (string) config('app.key'));
             $query['_source_run'] = $run;
             $request->attributes->set('finance.source_run', $run);
-            $revision = [$versions->current('paypal'), $versions->current('credit_card')];
+            $revision = FinanceQueryDiagnostics::measure('report.versions_retry',
+                fn () => [$versions->current('paypal'), $versions->current('credit_card')]);
         }
         ksort($query);
         $token = hash('sha256', json_encode([$report, $query, $revision], JSON_THROW_ON_ERROR));
@@ -3995,10 +4037,10 @@ class FinanceController extends Controller
         return $options;
     }
 
-    private function conditionChoices(string $dataset, bool $xuzongReport): array
+    private function conditionChoices(string $dataset, bool $xuzongReport, ?\Illuminate\Support\Collection $accountingCategories = null): array
     {
         if ($xuzongReport) {
-            return Cache::remember($this->filterCacheKey('xuzong-credit:imported-choices'), 60, function (): array {
+            return app(FinanceReportCache::class)->remember('xuzong-credit:imported-choices:v2', ['xuzong1', 'xuzong2'], function (): array {
                 $options = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
                     ->distinct()->toBase()->get(['account', 'currency']);
                 $choices = fn ($values) => collect($values)->filter()->uniqueStrict()->sort()->values()
@@ -4014,7 +4056,7 @@ class FinanceController extends Controller
         $definition = FinanceCatalog::dataset($dataset);
         $choices = [];
         $creditOptions = $dataset === 'xuzong2-orders'
-            ? Cache::remember($this->filterCacheKey($dataset.':order-options'), 60, fn () =>
+            ? app(FinanceReportCache::class)->remember($dataset.':order-options:v2', ['credit_card'], fn () =>
                 app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, withPayments: false)
                     ->distinct()->toBase()->get(['account', 'currency', 'status']))
             : null;
@@ -4032,13 +4074,13 @@ class FinanceController extends Controller
             $fields = [...$fields, 'raw_type', 'balance_impact'];
             $choices['category'] = $this->workbooks->database()->table('finance_transaction_types')
                 ->whereNotNull('category')->where('category', '!=', '')->pluck('category')
-                ->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->distinct()->pluck('category'))
+                ->merge($accountingCategories ?? $this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->distinct()->pluck('category'))
                 ->unique()->sort()->values()->map(fn ($value) => ['value' => $value, 'label' => FinanceCatalog::simplified($value)])->all();
             $choices['direction'] = collect(__('finance.accounting.directions'))
                 ->map(fn ($label, $value) => compact('value', 'label'))->values()->all();
         }
         $recordOptions = $creditOptions === null
-            ? Cache::remember($this->filterCacheKey($dataset.':record-options'), 60, function () use ($dataset, $fields): array {
+            ? app(FinanceReportCache::class)->remember($dataset.':record-options:v3', [$definition['channel'] === 'paypal' ? 'paypal' : 'credit_card'], function () use ($dataset, $fields): array {
                 $columns = array_map(fn ($field) => FinanceCatalog::filterColumn($dataset, $field).' as '.$field, $fields);
                 $options = $this->recordsQuery($dataset, [])->distinct()->toBase()->get($columns);
 

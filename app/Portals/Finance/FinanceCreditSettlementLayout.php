@@ -155,6 +155,9 @@ class FinanceCreditSettlementLayout
             $source = $values['source_page'];
             $domain = parse_url(str_contains($source, '://') ? $source : 'https://'.$source, PHP_URL_HOST) ?: '';
         }
+        if ($channel === 'ye') {
+            $domain = FinanceYeDomains::normalize($domain);
+        }
 
         return [...$payload, '平台订单号' => $values['reference'], '创建时间' => $values['initiated_at'] ?? $values['date'],
             '交易币种' => $values['currency'], '交易金额' => $values['gross'], '支付状态' => $values['status'],

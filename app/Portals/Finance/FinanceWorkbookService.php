@@ -422,6 +422,9 @@ class FinanceWorkbookService
             $currency = strtoupper($value('currency'));
             $status = $value('status');
             $domain = strtolower($value('domain'));
+            if ($definition['channel'] !== 'paypal' && (FinanceTransactions::flags($dataset, $payload, null) & FinanceTransactions::YE)) {
+                $domain = FinanceYeDomains::normalize($domain);
+            }
             $currencyMissingOnFailedBill = $currency === '' && in_array($dataset, [...FinanceCatalog::XUZONG_REPORT_IMPORTS, FinanceLogisticsCreditOrders::IMPORTED_DATASET], true)
                 && FinanceSettlementService::transactionStatusCategory($status) === 'failed';
             if (mb_strlen($rawType) > 191 || mb_strlen($status) > 100 || mb_strlen($domain) > 191

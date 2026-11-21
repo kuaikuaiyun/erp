@@ -1,6 +1,16 @@
 (function () {
     'use strict';
     async function run(plan, progress) {
+        var waitingSince = Date.now();
+        while (plan.waiting) {
+            progress('正在同步最新数据，完成后自动显示报表…');
+            if (Date.now() - waitingSince > 180000) throw new Error('数据更新仍在进行，请稍后重试。');
+            await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+            var poll = await fetch(plan.poll_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
+            if (!poll.ok || !(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
+            plan = await poll.json();
+            if (!Array.isArray(plan.months)) throw new Error('查询失败，请重试。');
+        }
         var next = 0;
         var completed = plan.months.filter(function (month) { return month.completed; }).length;
         var failure = null;

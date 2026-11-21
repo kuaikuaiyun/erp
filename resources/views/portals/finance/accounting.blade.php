@@ -29,8 +29,10 @@
 @php($usdScopes = \App\Portals\Finance\FinanceCreditUsdRates::SCOPES)
 <form method="post" action="{{ route('finance.accounting.save', 'credit-usd-rate') }}" class="finance-filter" id="finance-credit-usd-rate">@csrf
     <div class="form-group"><label for="credit-usd-scope">适用范围</label><select id="credit-usd-scope" name="usd_scope" class="form-control">@foreach($usdScopes as $value => $label)<option value="{{ $value }}" @selected(old('usd_scope', 'day') === $value)>{{ $label }}</option>@endforeach</select></div>
-    <div class="form-group" data-usd-scopes="day range"><label for="credit-usd-start">开始日期</label><input id="credit-usd-start" type="date" name="usd_start" class="form-control" value="{{ old('usd_start', now('Asia/Shanghai')->toDateString()) }}"></div>
-    <div class="form-group" data-usd-scopes="range"><label for="credit-usd-end">结束日期</label><input id="credit-usd-end" type="date" name="usd_end" class="form-control" value="{{ old('usd_end') }}"></div>
+    <div class="finance-date-pair finance-date-pair--flex" id="credit-usd-dates">
+        <div class="form-group" data-usd-scopes="day range"><label for="credit-usd-start">开始日期</label><input id="credit-usd-start" type="date" name="usd_start" class="form-control" value="{{ old('usd_start', now('Asia/Shanghai')->toDateString()) }}"></div>
+        <div class="form-group" data-usd-scopes="range"><label for="credit-usd-end">结束日期</label><input id="credit-usd-end" type="date" name="usd_end" class="form-control" value="{{ old('usd_end') }}"></div>
+    </div>
     <div class="form-group" data-usd-scopes="month"><label for="credit-usd-month">适用月份</label><input id="credit-usd-month" type="month" name="usd_month" class="form-control" value="{{ old('usd_month', now('Asia/Shanghai')->format('Y-m')) }}"></div>
     <div class="form-group"><label for="credit-usd-currency">原币币种</label><input id="credit-usd-currency" name="usd_currency" list="credit-usd-currencies" class="form-control" required maxlength="3" placeholder="如 GBP" value="{{ old('usd_currency') }}"><datalist id="credit-usd-currencies">@foreach($rateCurrencies->reject(fn ($currency) => $currency === 'USD') as $currency)<option value="{{ $currency }}"></option>@endforeach</datalist></div>
     <div class="form-group"><label for="credit-usd-value">1 单位原币折合美元</label><input id="credit-usd-value" name="usd_rate" class="form-control" type="number" step="0.00000001" min="0.00000001" value="{{ old('usd_rate') }}" required></div>
@@ -124,6 +126,7 @@
     const rates = @json($creditUsdRates);
     const fields = scope.form.querySelectorAll('[data-usd-scopes]');
     function showPeriodFields() {
+        document.getElementById('credit-usd-dates').hidden = !['day', 'range'].includes(scope.value);
         fields.forEach(field => {
             const visible = field.dataset.usdScopes.split(' ').includes(scope.value);
             const input = field.querySelector('input');

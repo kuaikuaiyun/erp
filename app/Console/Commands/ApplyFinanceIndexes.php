@@ -17,6 +17,7 @@ class ApplyFinanceIndexes extends Command
         '2026_11_18_000005_index_finance_paypal_payment_candidates',
         '2026_11_18_000006_index_finance_xuzong_merchant_numbers',
         '2026_11_18_000007_index_finance_payment_account_events',
+        '2026_11_21_000008_index_finance_menu_queries',
     ];
 
     protected $signature = 'finance:indexes:apply {--status : Only list pending optional finance indexes}';

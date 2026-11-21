@@ -43,6 +43,35 @@ test('does not add requests to other financial pages', async () => {
     assert.equal(calls.length, 0);
 });
 
+test('waits for the background sync before preparing source parts', async () => {
+    const calls = [];
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    const plans = [
+        { waiting: true, months: [], poll_url: '/poll' },
+        { waiting: true, months: [], poll_url: '/poll' },
+        { months: [{ month: '2026-11', url: '/part' }], resume_url: '/ready' },
+    ];
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        setTimeout: callback => callback(), fetch: async url => {
+            calls.push(url);
+            return { ok: true, headers: { get: () => 'application/json' },
+                json: async () => url === '/part' ? { state: 'ready' } : plans.shift() };
+        } });
+    assert.equal(await window.financePrepareReport(window.location.href), '/ready');
+    assert.deepEqual(calls.slice(1), ['/poll', '/poll', '/part']);
+});
+
+test('a failed background sync poll reports failure without computing source parts', async () => {
+    let calls = 0;
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        setTimeout: callback => callback(), fetch: async () => ({ ok: ++calls === 1,
+            headers: { get: () => 'application/json' },
+            json: async () => ({ waiting: true, months: [], poll_url: '/poll' }) }) });
+    await assert.rejects(window.financePrepareReport(window.location.href), /查询失败/);
+    assert.equal(calls, 2);
+});
+
 test('retry resumes at the failed part without repeating successful requests', async () => {
     const handlers = {};
     const calls = [];

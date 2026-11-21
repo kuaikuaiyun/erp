@@ -51,10 +51,20 @@ class FinancePayPalListStorage
         });
     }
 
-    public function page(string $generation, int $offset, int $limit): ?Collection
+    public function matchingQuery(string $generation, array $filters = []): \Illuminate\Database\Query\Builder
+    {
+        $query = $this->workbooks->database()->table('finance_paypal_list_rows')->where('generation', $generation);
+        if (filled($filters['order_status'] ?? null)) {
+            // A payment can have several status labels (for example paid + held).
+            $query->where('order_status', 'like', '%'.$filters['order_status'].'%');
+        }
+        return $query;
+    }
+
+    public function page(string $generation, int $offset, int $limit, array $filters = []): ?Collection
     {
         $db = $this->workbooks->database();
-        $headers = $db->table('finance_paypal_list_rows')->where('generation', $generation)
+        $headers = $this->matchingQuery($generation, $filters)
             ->orderBy('position')->offset($offset)->limit($limit)->get();
         if ($headers->isEmpty()) return collect();
         $paymentIds = $headers->where('has_payment', true)->pluck('record_id')->all();
