@@ -65,7 +65,14 @@ final class DomainStoreSaveDiagnostic
         $readyToCommit = false;
         try {
             $result = $connection->transaction(function () use ($callback, $trace, &$readyToCommit) {
-                $result = $callback();
+                try {
+                    $result = $callback();
+                } catch (Throwable $error) {
+                    // Capture before rollback handling or Laravel's exception
+                    // handler can replace the original business exception.
+                    $trace->exception($error, false, 'transaction_callback_exception');
+                    throw $error;
+                }
                 $readyToCommit = true;
                 $trace->phase('transaction_ready_to_commit');
 
@@ -78,6 +85,7 @@ final class DomainStoreSaveDiagnostic
                 ? ($level === 0 ? 'rolled_back' : 'nested_rollback')
                 : 'unconfirmed';
             $trace->write('warning', 'transaction_failed');
+            $trace->exception($error, false, 'transaction_exception');
             throw $error;
         }
         $trace->commitState = $level === 0 ? 'committed' : 'awaiting_outer_commit';
@@ -89,7 +97,7 @@ final class DomainStoreSaveDiagnostic
     public function state(): string { return $this->commitState; }
     public function writable(): bool { return $this->logWritable; }
 
-    public function exception(Throwable $error, bool $expected): void
+    public function exception(Throwable $error, bool $expected, string $event = 'exception'): void
     {
         $chain = [];
         do {
@@ -103,10 +111,58 @@ final class DomainStoreSaveDiagnostic
                 $entry['sql_state'] = isset($info[0]) && preg_match('/^[A-Z0-9]{5}$/', (string) $info[0]) ? $info[0] : null;
                 $entry['driver_code'] = isset($info[1]) && is_numeric($info[1]) ? (int) $info[1] : null;
             }
+            $fileLoad = $this->fileLoadFailure($error);
+            if ($fileLoad !== null) $entry['file_load'] = $fileLoad;
             $chain[] = $entry;
             $error = $error->getPrevious();
         } while ($error !== null && count($chain) < 4);
-        $this->write($expected ? 'notice' : 'error', $expected ? 'request_rejected' : 'exception', ['exceptions' => $chain]);
+        $this->write($expected ? 'notice' : 'error', $expected ? 'request_rejected' : $event, ['exceptions' => $chain]);
+    }
+
+    /**
+     * Only structured Composer load failures are extracted. Raw messages,
+     * include_path settings, SQL and arbitrary request values stay excluded.
+     */
+    private function fileLoadFailure(Throwable $error): ?array
+    {
+        if (! $error instanceof \ErrorException) return null;
+        $source = str_replace(chr(92), '/', $error->getFile());
+        $suffix = 'vendor/composer/ClassLoader.php';
+        if (! str_ends_with($source, '/'.$suffix)) return null;
+        $message = $error->getMessage();
+        $lower = strtolower($message);
+        $reason = match (true) {
+            str_contains($lower, 'open_basedir restriction') => 'open_basedir_restriction',
+            str_contains($lower, 'permission denied') => 'permission_denied',
+            str_contains($lower, 'no such file or directory') => 'file_not_found',
+            str_contains($lower, 'too many open files') => 'too_many_open_files',
+            str_contains($lower, 'input/output error') => 'io_error',
+            str_contains($lower, 'failed to open stream'), str_contains($lower, 'failed opening') => 'open_failed',
+            default => null,
+        };
+        if ($reason === null) return null;
+        $result = ['reason' => $reason];
+        $target = null;
+        if (preg_match('/\b(?:include|include_once|require|require_once)\(([^)\r\n]+)\)/', $message, $matches)) {
+            $target = trim($matches[1], " \"'");
+        } elseif (preg_match("/Failed opening ['\"]([^'\"]+)['\"] for inclusion/i", $message, $matches)) {
+            $target = $matches[1];
+        }
+        // open_basedir warnings use File(...) instead of include(path).
+        if ($target === null && preg_match('/\bFile\(([^)\r\n]+)\)/', $message, $matches)) $target = $matches[1];
+        if ($target === null) return $result;
+        $target = str_replace(chr(92), '/', $target);
+        $root = substr($source, 0, -strlen($suffix));
+        if (strlen($target) <= 2048
+            && str_starts_with($target, $root)
+            && str_ends_with(strtolower($target), '.php')
+            && ! preg_match('/[\x00-\x1f?#]/', $target)
+            && ! str_contains($target, '://')
+            && ! str_contains($target, '/../')) {
+            $result['target_file'] = $target;
+        }
+
+        return $result;
     }
 
     public function finish(int $status): void
