@@ -115,7 +115,7 @@ class XShoppyOrderSyncService
                 ? now()->subDays(30)
                 : now()->subDays(max(1, $initialDays)));
         $before = $isIncrementalSync
-            ? now()->addDays(3)
+            ? now()->addDays(30)
             : now()->addMinute();
         $created = 0;
         $updated = 0;

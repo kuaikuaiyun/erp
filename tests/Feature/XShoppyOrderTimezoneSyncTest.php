@@ -144,8 +144,10 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $this->assertSame('2026-11-06 02:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
     }
 
-    public function test_incremental_sync_queries_three_days_before_and_after_its_cursor(): void
+    public function test_incremental_sync_queries_thirty_days_before_and_after_now_in_beijing_time(): void
     {
+        $this->travelTo(\Carbon\Carbon::parse('2026-10-10 04:00:00', 'UTC'));
+
         $store = AssistantDomainStore::query()->create([
             'site_builder' => 'xshoppy',
             'shop_name' => 'Cursor Window Store',
@@ -164,9 +166,40 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         Http::assertSent(function ($request): bool {
             parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
 
-            return ($query['after'] ?? null) === '2026-11-07T02:31:52Z'
-                && ($query['before'] ?? null) === '2026-11-13T02:31:52Z';
+            return ($query['after'] ?? null) === '2026-09-10T12:00:00'
+                && ($query['before'] ?? null) === '2026-11-09T12:00:00';
         });
+    }
+
+    public function test_initial_full_and_all_history_sync_keep_their_original_time_ranges(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-10-10 04:00:00', 'UTC'));
+
+        foreach (['initial', 'full', 'all'] as $mode) {
+            $store = AssistantDomainStore::query()->create([
+                'site_builder' => 'xshopy',
+                'shop_name' => $mode,
+                'shop_login_url' => 'https://api-host.example/admin/',
+                'xshoppy_api_key' => 'key',
+                'xshoppy_password' => 'secret',
+            ]);
+            if ($mode !== 'initial') {
+                FashionLogisticsSyncState::query()->create([
+                    'assistant_domain_store_id' => $store->getKey(),
+                    'last_cursor_at' => '2026-10-09 04:00:00',
+                ]);
+            }
+            Http::fake(fn () => Http::response([], 200));
+
+            app(XShoppyOrderSyncService::class)->syncStore($store, 60, $mode !== 'initial', $mode === 'all');
+
+            Http::assertSent(function ($request) use ($mode): bool {
+                parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
+
+                return ($query['after'] ?? null) === ($mode === 'full' ? '2026-08-11T12:00:00' : '2000-01-01T08:00:00')
+                    && ($query['before'] ?? null) === '2026-10-10T12:01:00';
+            });
+        }
     }
 
     public function test_shopline_uses_the_same_cursor_window_and_stores_china_payment_time(): void
