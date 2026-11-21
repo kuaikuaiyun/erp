@@ -70,6 +70,7 @@ class AppLovinPerformanceReportController extends Controller
             'operator' => ['nullable', 'string', 'max:100'],
             'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
             'store_domain' => ['nullable', 'string', 'max:191'],
+            'account_number' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
             'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
@@ -369,6 +370,13 @@ class AppLovinPerformanceReportController extends Controller
             $selectedDomain = mb_strtolower(trim((string) $filters['store_domain']));
             $rows = $rows->filter(fn (array $row): bool => mb_strtolower(trim((string) $row['store_domain'])) === $selectedDomain)->values();
         }
+        if (($filters['account_number'] ?? '') !== '') {
+            $selectedAccountNumber = $this->normalizeAccountNumberSearch((string) $filters['account_number']);
+            $rows = $rows->filter(fn (array $row): bool => str_contains(
+                $this->normalizeAccountNumberSearch((string) $row['account_numbers']),
+                $selectedAccountNumber,
+            ))->values();
+        }
         if (($filters['consumption_range'] ?? '') === 'lt_5000') {
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] < 5000)->values();
         } elseif (($filters['consumption_range'] ?? '') === '5000_10000') {
@@ -456,6 +464,7 @@ class AppLovinPerformanceReportController extends Controller
             'dateRange' => $dateRange,
             'selectedDepartmentIds' => $selectedDepartmentIds,
             'selectedStoreDomain' => $filters['store_domain'] ?? '',
+            'selectedAccountNumber' => $filters['account_number'] ?? '',
             'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '',
             'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
@@ -468,6 +477,11 @@ class AppLovinPerformanceReportController extends Controller
                     ? 'operation.applovin-performance-reports.index'
                     : 'assistant.applovin-performance-reports.index'),
         ]);
+    }
+
+    private function normalizeAccountNumberSearch(string $value): string
+    {
+        return mb_strtolower((string) preg_replace('/[\s\p{Cf}]+/u', '', trim($value)));
     }
 
     /** @return array<string,string> */
