@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portals\Fashion\OperationProjectCatalog;
+use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -236,39 +237,37 @@ class MigrateFashionAdvertisingAccounts extends Command
     private function calculatedPerformanceRows(string $reportDate, int $operatorId, string $projectCode): array
     {
         $connection = config('admin.database.connection') ?: config('database.default');
-        $orderTable = (new FashionLogisticsOrder)->getTable();
         $owner = AdminUser::query()->find($operatorId);
         $ownerNames = collect([$owner?->name, $owner?->username])
-            ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
+            ->filter()->map(fn ($name): string => mb_strtolower(trim((string) $name)))->unique()->values();
         $project = OperationProjectCatalog::get($projectCode);
-
-        return DB::connection($connection)->table($orderTable.' as orders')
-            ->join('assistant_domain_stores as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
+        $storeIds = DB::connection($connection)->table('assistant_domain_stores')
             ->where(function ($binding) use ($operatorId, $ownerNames): void {
-                $binding->where('stores.owner_user_id', $operatorId);
-                if ($ownerNames !== []) {
-                    $binding->orWhereIn('stores.user_name', $ownerNames);
+                $binding->where('owner_user_id', $operatorId);
+                if ($ownerNames->isNotEmpty()) {
+                    $binding->orWhereIn(DB::raw('LOWER(TRIM(user_name))'), $ownerNames->all());
                 }
             })
-            ->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($project))
-            ->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END")
-            ->where(function ($paid): void {
-                $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
-                    ->orWhere('orders.payment_status', '230');
-            })
-            ->whereBetween('orders.order_created_at', [$reportDate.' 00:00:00', $reportDate.' 23:59:59'])
-            ->where(function ($paid): void {
-                $paid->whereNotNull('orders.paid_at')->orWhereIn('orders.status', ['processing', 'completed']);
-            })
-            ->select(['stores.id', 'stores.shop_name', 'stores.domain'])
-            ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue_usd')
-            ->groupBy('stores.id', 'stores.shop_name', 'stores.domain')
-            ->orderBy('stores.shop_name')
+            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
+            ->pluck('id');
+        $from = CarbonImmutable::parse($reportDate.' 00:00:00', '-08:00')
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $to = CarbonImmutable::parse($reportDate.' 23:59:59', '-08:00')
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+
+        return FashionLogisticsOrder::query()
+            ->whereIn('assistant_domain_store_id', $storeIds)
+            ->whereIn('source_platform', ['xshoppy', 'shopline'])
+            ->whereNotNull('paid_at_utc')
+            ->whereBetween('paid_at_utc', [$from, $to])
+            ->selectRaw('source_platform, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
+            ->groupBy('source_platform')
             ->get()
             ->map(static fn (object $row): array => [
-                'store_name' => trim((string) $row->shop_name) ?: trim((string) $row->domain),
-                'domain' => trim((string) $row->domain),
-                'revenue_usd' => round((float) $row->revenue_usd, 2),
+                'store_name' => mb_strtolower((string) $row->source_platform) === 'shopline' ? 'Shopline' : 'XShoppy',
+                'domain' => null,
+                'revenue_usd' => round((float) $row->revenue, 2),
                 'order_count' => (int) $row->order_count,
                 'screenshot_path' => null,
                 'remark' => '系统根据店铺已支付订单自动统计',

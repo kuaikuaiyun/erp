@@ -167,15 +167,7 @@ class FashionAdvertisingReviewController extends Controller
         $performanceCache = [];
         $reports->setCollection($reports->getCollection()->map(function (FashionAdvertisingReport $report) use (&$performanceCache, $project): FashionAdvertisingReport {
             if ($report->project_code !== 'fuzhuang') {
-                $spend = (float) $report->total_ad_spend_usd;
-                $report->setAttribute('fashion_order_count', (int) $report->total_order_count);
-                $report->setAttribute('fashion_revenue', (float) $report->total_revenue_usd);
-                $report->setAttribute('fashion_roi', $spend > 0 ? (float) $report->total_revenue_usd / $spend : null);
-                $report->setAttribute('fashion_platform_rows', $report->performanceEntries->map(fn ($entry): array => [
-                    'platform' => $entry->site_builder ?: '建站系统',
-                    'orders' => (int) $entry->order_count,
-                    'revenue' => round((float) $entry->revenue_usd, 2),
-                ])->values());
+                $this->loadPerformanceMetrics($report, $project);
 
                 return $report;
             }
