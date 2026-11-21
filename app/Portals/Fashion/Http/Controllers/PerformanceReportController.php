@@ -177,7 +177,10 @@ class PerformanceReportController extends Controller
             ->groupByRaw($reportDateSql.', '.$resolvedOwnerSql)
             ->get()->keyBy(fn ($item) => (int) $item->owner_user_id.'|'.$item->report_date);
         $scopeOperatorIds = $operatorDailyRevenue->pluck('owner_user_id')->map(fn ($id) => (int) $id)->unique()->values();
-        $operatorProfiles = AdminUser::query()->with('departments')->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
+        $projectDepartmentIds = $this->fashionDepartmentIds();
+        $operatorProfiles = AdminUser::query()->with([
+            'departments' => fn ($departments) => $departments->whereIn('admin_roles.id', $projectDepartmentIds),
+        ])->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
         $approvedReports = FashionAdvertisingReport::query()
             ->where('project_code', $this->project['code'])
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
@@ -329,7 +332,10 @@ class PerformanceReportController extends Controller
             ->groupByRaw($reportDateSql.', '.$resolvedOwnerSql)
             ->get()->keyBy(fn ($item) => (int) $item->owner_user_id.'|'.$item->report_date);
         $scopeOperatorIds = $operatorDailyRevenue->pluck('owner_user_id')->map(fn ($id) => (int) $id)->unique()->values();
-        $operatorProfiles = AdminUser::query()->with('departments')->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
+        $projectDepartmentIds = $this->fashionDepartmentIds();
+        $operatorProfiles = AdminUser::query()->with([
+            'departments' => fn ($departments) => $departments->whereIn('admin_roles.id', $projectDepartmentIds),
+        ])->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
         $approvedReports = FashionAdvertisingReport::query()
             ->where('project_code', $this->project['code'])
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
