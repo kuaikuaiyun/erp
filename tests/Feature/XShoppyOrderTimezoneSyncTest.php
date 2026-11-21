@@ -202,6 +202,60 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         }
     }
 
+    public function test_xshopy_sync_omits_status_filter_and_paginates_paid_orders_without_duplicates(): void
+    {
+        $store = AssistantDomainStore::query()->create([
+            'site_builder' => 'xshopy',
+            'shop_name' => 'Status Compatibility Store',
+            'shop_login_url' => 'https://api-host.example/admin/',
+            'xshoppy_api_key' => 'key',
+            'xshoppy_password' => 'secret',
+        ]);
+        FashionLogisticsSyncState::query()->create([
+            'assistant_domain_store_id' => $store->getKey(),
+            'last_cursor_at' => '2026-11-20 00:00:00',
+        ]);
+        Http::fake(function ($request) {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
+            // This API returns an empty successful body when status=all is sent.
+            if (array_key_exists('status', $query)) return Http::response('', 200);
+
+            if ((int) ($query['page'] ?? 0) === 1) {
+                return Http::response(array_map(fn (int $id): array => [
+                    'id' => 'page-one-'.$id,
+                    'status' => $id === 100 ? 'pending' : 'processing',
+                    'line_items' => [],
+                ], range(1, 100)), 200);
+            }
+
+            return Http::response([[
+                'id' => 'keraat261120232653441',
+                'status' => 'processing',
+                'date_created' => '2026-11-20 23:26:53',
+                'date_modified' => '2026-11-20 23:45:25',
+                'date_paid' => '2026-11-20 23:45:24',
+                'total' => '29.15',
+                'line_items' => [],
+            ]], 200);
+        });
+
+        $service = app(XShoppyOrderSyncService::class);
+        $first = $service->syncStore($store);
+        $this->assertSame(['created' => 100, 'updated' => 0, 'pages' => 2], $first);
+        $second = $service->syncStore($store);
+        $this->assertSame(['created' => 0, 'updated' => 100, 'pages' => 2], $second);
+        $this->assertSame(100, FashionLogisticsOrder::query()->count());
+        $this->assertFalse(FashionLogisticsOrder::query()->where('external_order_id', 'page-one-100')->exists());
+        $order = FashionLogisticsOrder::query()->where('external_order_id', 'keraat261120232653441')->sole();
+        $this->assertSame('2026-11-20 23:45:24', $order->paid_at?->format('Y-m-d H:i:s'));
+        Http::assertSentCount(4);
+        Http::assertNotSent(function ($request): bool {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
+
+            return array_key_exists('status', $query);
+        });
+    }
+
     public function test_shopline_uses_the_same_cursor_window_and_stores_china_payment_time(): void
     {
         $store = AssistantDomainStore::query()->create([

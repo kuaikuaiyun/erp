@@ -171,7 +171,6 @@ class XShoppyOrderSyncService
                     'before' => $before->copy()->setTimezone('Asia/Shanghai')->format('Y-m-d\TH:i:s'),
                     'page' => $page,
                     'per_page' => 100,
-                    'status' => 'all',
                 ]);
         } catch (ConnectionException $exception) {
             throw new RuntimeException('无法连接 XShoppy 订单接口：'.$exception->getMessage(), 0, $exception);
