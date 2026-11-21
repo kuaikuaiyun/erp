@@ -112,21 +112,26 @@ class AdvertisingSpendAnalysisController extends Controller
         $allRows = collect()
             ->when($selectedProject !== 'fashion', fn ($rows) => $rows->concat($shopifyRows))
             ->when($selectedProject !== 'shopify', fn ($rows) => $rows->concat($fashionRows))
+            ->map(fn (array $row): array => [
+                ...$row,
+                'agency_group_key' => $this->displayGroupKey((string) $row['agency']),
+                'media_group_key' => $this->displayGroupKey((string) $row['media']),
+            ])
             ->values();
 
-        $agencyOptions = $allRows->sortBy('agency')->mapWithKeys(fn (array $row): array => [$row['agency_key'] => $row['agency']]);
-        $mediaOptions = $allRows->sortBy('media')->mapWithKeys(fn (array $row): array => [$row['media_key'] => $row['media']]);
+        $agencyOptions = $allRows->sortBy('agency')->mapWithKeys(fn (array $row): array => [$row['agency_group_key'] => $row['agency']]);
+        $mediaOptions = $allRows->sortBy('media')->mapWithKeys(fn (array $row): array => [$row['media_group_key'] => $row['media']]);
         $selectedAgency = $this->resolveSelectedKey((string) ($validated['agency'] ?? ''), $agencyOptions);
         $selectedMedia = $this->resolveSelectedKey((string) ($validated['media'] ?? ''), $mediaOptions);
         $rows = $allRows->filter(function (array $row) use ($selectedAgency, $selectedMedia): bool {
-            if ($selectedAgency !== '' && $row['agency_key'] !== $selectedAgency) return false;
-            if ($selectedMedia !== '' && $row['media_key'] !== $selectedMedia) return false;
+            if ($selectedAgency !== '' && $row['agency_group_key'] !== $selectedAgency) return false;
+            if ($selectedMedia !== '' && $row['media_group_key'] !== $selectedMedia) return false;
             return true;
         })->values();
 
         $totalSpend = (float) $rows->sum('actual_spend');
         $summarize = static function ($items, string $field) use ($totalSpend) {
-            return $items->groupBy($field.'_key')
+            return $items->groupBy($field.'_group_key')
                 ->map(function ($group) use ($field, $totalSpend): array {
                     $actual = (float) $group->sum('actual_spend');
                     return [
@@ -139,7 +144,7 @@ class AdvertisingSpendAnalysisController extends Controller
         };
         $agencyRows = $summarize($rows, 'agency');
         $mediaRows = $summarize($rows, 'media');
-        $allDetailRows = $rows->groupBy(fn (array $row): string => $row['project'].'|'.$row['date'].'|'.$row['agency_key'].'|'.$row['media_key'])
+        $allDetailRows = $rows->groupBy(fn (array $row): string => $row['project'].'|'.$row['date'].'|'.$row['agency_group_key'].'|'.$row['media_group_key'])
             ->map(function ($group): array {
                 $first = $group->first();
                 return [
@@ -190,6 +195,11 @@ class AdvertisingSpendAnalysisController extends Controller
     private function dimensionKey(?int $id, string $name): string
     {
         return $id ? 'id:'.$id : 'name:'.mb_strtolower($this->normalizeDimension($name, ''));
+    }
+
+    private function displayGroupKey(string $name): string
+    {
+        return 'label:'.mb_strtolower($this->normalizeDimension($name, ''));
     }
 
     private function matchConfiguredAgency($agencies, string $agencyName, string $mediaName): ?AssistantAdvertisingAgency
