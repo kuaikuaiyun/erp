@@ -226,7 +226,12 @@ class AppLovinAccountStatisticsController extends Controller
         if ($context instanceof Response) return $context;
         abort_unless($this->project($request) === 'dashboard', 404);
 
-        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user'], 'dashboard');
+        $subscriptionDepartmentIds = $this->storeOwners->operationDepartments()
+            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $visibleDepartmentIds = array_values(array_intersect(
+            $this->visibleDepartmentIds($context['user'], 'dashboard'),
+            $subscriptionDepartmentIds,
+        ));
         $filters = $request->validate([
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($visibleDepartmentIds)],
