@@ -28,7 +28,7 @@
                     <label class="finance-activity-field finance-activity-field--format"><span>{{ __('finance.records.activity_format') }}</span><select name="export_format"><option value="xlsx">XLSX</option><option value="xls">XLS</option></select></label>
                     <button class="finance-activity-create" data-export-submit disabled aria-describedby="finance-report-selection-hint">{{ __('finance.records.activity_create') }}</button>
                 </div>
-                <div class="finance-activity-custom-dates" id="finance-report-custom-dates">
+                <div class="finance-activity-custom-dates finance-date-pair" id="finance-report-custom-dates">
                     <label>{{ __('finance.fields.from') }}<input type="date" name="from" value="{{ $filters['from'] ?? '' }}" required></label>
                     <label>{{ __('finance.fields.to') }}<input type="date" name="to" value="{{ $filters['to'] ?? '' }}" min="{{ $filters['from'] ?? '' }}" required></label>
                 </div>

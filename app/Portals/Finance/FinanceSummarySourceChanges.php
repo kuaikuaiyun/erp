@@ -23,10 +23,20 @@ class FinanceSummarySourceChanges
         return $attributes->get($key);
     }
 
+    /** Report requests inspect readiness; the scheduled worker imports and resolves changes. */
+    public function reportReady(Connection $db): bool
+    {
+        return ! self::available($db) || (! app(FinanceExternalChanges::class)->hasPending($db)
+            && ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists());
+    }
+
     /** Resolve a bounded batch before certifying cached inputs. Queue deletion cannot change its revision. */
     public function publish(Connection $db, int $limit = 1000): bool
     {
         if (! app(FinanceExternalChanges::class)->drain($db, $limit)) return false;
+        if (app('request')->attributes->get('finance.report_read_only')) {
+            return ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
+        }
         if (! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists()) return true;
         $ids = $db->table('finance_summary_changes')->where('scopes_resolved', false)->orderBy('id')->limit($limit)->pluck('id')->all();
         $db->transaction(function () use ($db, $ids): void {

@@ -164,6 +164,14 @@ class FinanceSummaryFacts
             if (filled($filters['summary_row_filters'][$filter] ?? null)) $query->where($column, $filters['summary_row_filters'][$filter]);
         }
         if ($aggregate) return $this->aggregate($query, $channel, $month, $native);
+        if (in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
+            $key = 'finance.summary-publication-page-index:'.$db->getName();
+            $attributes = app('request')->attributes;
+            if (! $attributes->has($key)) $attributes->set($key, $db->getSchemaBuilder()->hasIndex('finance_summary_facts', 'finance_summary_publication_id_idx'));
+            // MySQL 5.7 otherwise prefers scanning the primary key from the start
+            // of every publication, even when only the first 500 rows are needed.
+            if ($attributes->get($key)) $query->forceIndex('finance_summary_publication_id_idx');
+        }
         return \Illuminate\Support\LazyCollection::make(function () use ($query, $db, $channel, $month, $native): iterable {
             foreach ($query->orderBy('id')->lazyById(500)->chunk(500) as $batch) {
                 $amounts = $db->table('finance_summary_amounts')->whereIntegerInRaw('fact_id', $batch->pluck('id')->all())->get()->groupBy('fact_id');

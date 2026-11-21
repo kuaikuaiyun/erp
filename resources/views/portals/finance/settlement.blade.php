@@ -126,8 +126,10 @@
 @if($fixedCardChannel !== 'worldpay')
 @include('portals.finance.partials.filter-multiselect', ['id' => 'settlement-account', 'name' => 'accounts', 'label' => $channel === 'credit_card' ? '商户账户' : '支付账户', 'placeholder' => $channel === 'credit_card' ? '全部商户' : '全部账户', 'selected' => $filters['accounts'] ?? (filled($filters['account'] ?? '') ? [$filters['account']] : []), 'choices' => $filterAccounts->map(fn ($account) => ['value' => $account->activity_account, 'label' => $cardChannel === 'ye' && filled($account->card_merchant_key) ? $account->card_merchant_key : \App\Portals\Finance\FinanceCatalog::simplified($account->account_name)])])
 @endif
-<div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
-<div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
+<div class="finance-date-pair">
+    <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
+    <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
+</div>
 <div><label for="settlement-zone">时区</label><select id="settlement-zone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $filters['timezone']])</select></div>
 <div><label for="settlement-reference">交易ID</label><input id="settlement-reference" class="form-control" name="reference" value="{{ $filters['reference'] ?? '' }}"></div>
 @if($orderView)

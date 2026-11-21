@@ -55,8 +55,10 @@
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
 @if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ $loadedLossScope ?? request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
-<div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
-<div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+<div class="finance-date-pair finance-date-pair--wide">
+    <div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
+    <div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+</div>
 @php
     $selectedChannel = $filters['channel'] ?? '';
 @endphp

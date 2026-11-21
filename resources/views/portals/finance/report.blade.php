@@ -16,8 +16,10 @@
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
     <input type="hidden" name="view" value="transactions">
     <input type="hidden" name="per_page" value="{{ $paginator->perPage() }}">
-    <div class="form-group"><label for="transaction-month-from">开始月份（按通道时区）</label><input id="transaction-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
-    <div class="form-group"><label for="transaction-month-to">结束月份（按通道时区）</label><input id="transaction-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+    <div class="finance-date-pair finance-date-pair--wide">
+        <div class="form-group"><label for="transaction-month-from">开始月份（按通道时区）</label><input id="transaction-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
+        <div class="form-group"><label for="transaction-month-to">结束月份（按通道时区）</label><input id="transaction-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+    </div>
     @if($tab === 'combined')
         @include('portals.finance.partials.transaction-account-multiselect')
     @else

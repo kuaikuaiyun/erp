@@ -15,7 +15,7 @@ use Illuminate\Support\Collection;
 
 class FinanceSettlementService
 {
-    public const CREDIT_SUMMARY_VERSION = 2;
+    public const CREDIT_SUMMARY_VERSION = 3;
 
     public const PAYPAL_SUMMARY_VERSION = 3;
 
@@ -306,6 +306,7 @@ class FinanceSettlementService
             : $domainGroups->keyBy('domain');
         $uniqueDomains = $domainGroups->groupBy(fn ($store) => strtolower(trim($store->domain)))
             ->filter(fn ($stores) => $stores->count() === 1)->map(fn ($stores) => $stores->first());
+        $yeDomains = $domainGroups->keyBy(fn ($store) => FinanceYeDomains::normalize($store->domain));
         $brushStores = $channel === 'paypal' ? $domainGroups
             ->filter(fn ($group) => filled($group->shop_name ?? null))
             ->groupBy(fn ($group) => trim($group->shop_name))
@@ -313,7 +314,53 @@ class FinanceSettlementService
             ->map(fn ($groups) => $groups->first()) : collect();
         $locks = $this->workbooks->database()->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
 
-        return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'uniqueDomains', 'brushStores', 'locks');
+        return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'yeDomains', 'uniqueDomains', 'brushStores', 'locks');
+    }
+
+    /** Resolve derived ownership before pagination, without hydrating the entire ledger. */
+    public function confluxBusinessQuery(array $filters): ?\Illuminate\Database\Eloquent\Builder
+    {
+        if (($filters['card_channel'] ?? null) !== 'ye'
+            || ! collect($filters)->only(['team', 'teams', 'region', 'regions', 'domain'])->contains(fn ($value) => filled($value))
+            || collect($filters)->only(['subscription', 'subscriptions', 'conditions', 'card_wallet', 'card_exceptions', 'card_match', 'ledger_settlement_type'])->contains(fn ($value) => filled($value))) return null;
+
+        $query = $this->query('credit_card', $filters);
+        $context = $this->rowContext('credit_card');
+        $mysql = in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true);
+        // PHP business matching is case sensitive, including domain substring filters.
+        $domain = $mysql ? \Illuminate\Support\Facades\DB::raw('BINARY finance_records.domain') : 'finance_records.domain';
+        $dimensionsQuery = (clone $query)->toBase()->reorder()->selectRaw(($mysql ? 'BINARY ' : '').'finance_records.domain as domain')->distinct();
+        $dimensionScope = 'conflux-business-domains:v1:'.hash('sha256', json_encode([
+            $dimensionsQuery->toSql(), $dimensionsQuery->getBindings(),
+        ], JSON_THROW_ON_ERROR));
+        $dimensions = app(FinanceReportCache::class)->remember($dimensionScope, ['ye'], fn () => $dimensionsQuery->get()->pluck('domain')->all());
+        $known = $matching = [];
+        foreach ($dimensions as $value) {
+            $key = FinanceYeDomains::normalize($value);
+            $group = $context['yeDomains']->get($key);
+            if ($key === '' || $group === null || $group->team === null) continue;
+            $known[] = $value;
+            $row = ['channel' => 'credit_card', 'team' => $group->team, 'domain' => $key];
+            if ($this->matchesBusinessFilters($row, $filters) && FinanceFilterSelection::rowMatches($row,
+                \Illuminate\Support\Arr::only($filters, ['teams', 'regions']))) $matching[] = $value;
+        }
+        $supplements = fn ($sub) => $sub->select('finance_record_id')->from('finance_settlement_supplements')->whereNotNull('finance_record_id');
+        // Missing domains and manual overrides still use the canonical attribution rules.
+        $uncertain = (clone $query)->where(fn ($scope) => $scope->whereNull('finance_records.domain')
+            ->orWhereNotIn($domain, $known)->orWhereIn('finance_records.id', $supplements));
+        $scope = 'conflux-business-keys:v1:'.hash('sha256', json_encode([
+            $uncertain->toSql(), $uncertain->getBindings(), \Illuminate\Support\Arr::except($filters, ['per_page', 'format']), $matching,
+        ], JSON_THROW_ON_ERROR));
+        $ids = app(FinanceReportCache::class)->remember($scope, ['ye'], function () use ($uncertain, $filters, $context): array {
+            $ids = [];
+            foreach ($uncertain->reorder()->lazyById(500, 'finance_records.id', 'id')->chunk(500) as $batch) {
+                $records = new \Illuminate\Database\Eloquent\Collection($batch->all());
+                foreach ($this->rows('credit_card', $filters, $records, $context, businessMatchesOnly: true) as $row) $ids[] = $row['id'];
+            }
+            return $ids;
+        });
+        return $query->where(fn ($scope) => $scope->where(fn ($knownRows) => $knownRows->whereIn($domain, $matching)
+            ->whereNotIn('finance_records.id', $supplements))->orWhereIntegerInRaw('finance_records.id', $ids));
     }
 
     public function rowBatches(string $channel, array $filters, bool $businessMatchesOnly = false, bool $walletMatchesOnly = false): iterable
@@ -351,13 +398,13 @@ class FinanceSettlementService
         $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
         $supplements = $db->table('finance_settlement_supplements')->whereIntegerInRaw('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
         ['accountModels' => $accountModels, 'accounts' => $accounts, 'accountsById' => $accountsById,
-            'storesById' => $storesById, 'domains' => $domains, 'uniqueDomains' => $uniqueDomains, 'brushStores' => $brushStores, 'locks' => $locks] =
+            'storesById' => $storesById, 'domains' => $domains, 'yeDomains' => $yeDomains, 'uniqueDomains' => $uniqueDomains, 'brushStores' => $brushStores, 'locks' => $locks] =
             $context ?? $this->rowContext($channel);
         $worldpay = ($filters['card_channel'] ?? null) === 'worldpay';
         $ye = ($filters['card_channel'] ?? null) === 'ye';
         if ($businessMatchesOnly && filled($filters['team'] ?? null)) {
             // Conflux uses the settlement domain for ownership even when it has a linked order.
-            $records = $records->filter(function ($record) use ($supplements, $domains, $filters): bool {
+            $records = $records->filter(function ($record) use ($supplements, $domains, $yeDomains, $ye, $filters): bool {
                 $saved = isset($supplements[$record->id])
                     ? json_decode($supplements[$record->id]->payload, true, 512, JSON_THROW_ON_ERROR) : [];
                 $edited = $saved['_edited_fields'] ?? [];
@@ -369,8 +416,9 @@ class FinanceSettlementService
                     // A linked logistics order can supply a missing domain.
                     return true;
                 }
-                $domain = strtolower(trim((string) $domain));
-                $group = $domains->get($domain) ?? (str_starts_with($domain, 'www.') ? $domains->get(substr($domain, 4)) : null);
+                $domain = $ye ? FinanceYeDomains::normalize($domain) : strtolower(trim((string) $domain));
+                $group = $ye ? $yeDomains->get($domain)
+                    : ($domains->get($domain) ?? (str_starts_with($domain, 'www.') ? $domains->get(substr($domain, 4)) : null));
 
                 return ($group?->team ?? ($record->payload['团队'] ?? '')) === $filters['team'];
             });
@@ -457,7 +505,7 @@ class FinanceSettlementService
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
         $creditUsdRates = $businessMatchesOnly || $walletMatchesOnly ? [] : $usdRates->forOrders($confluxOrders);
-        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, &$confluxFees, $reportFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye, $businessMatchesOnly, $walletMatchesOnly): ?array {
+        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $yeDomains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, &$confluxFees, $reportFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye, $businessMatchesOnly, $walletMatchesOnly): ?array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -592,10 +640,14 @@ class FinanceSettlementService
                 }
             }
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
+            if ($isConflux) {
+                $domain = FinanceYeDomains::normalize($domain);
+                $row['domain'] = $domain;
+            }
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
             $group = $websiteStore ?? ($orderStore?->domain === $domain ? $orderStore : $domains->get($domain));
-            if ($group === null && $isConflux && str_starts_with($domain, 'www.')) {
-                $group = $domains->get(substr($domain, 4));
+            if ($isConflux) {
+                $group = $yeDomains->get($domain);
             }
             $ownership = $this->resolveOrderOwner($order, $orderStore, $group, $p);
             $ownerName = $worldpay && ! $ownership['usesOrderAssignment']
@@ -607,6 +659,7 @@ class FinanceSettlementService
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : $ownerName;
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : $team;
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
+            if ($isConflux) $row['domain'] = $domain;
             if ($conflux && (! $this->matchesBusinessFilters($row, $filters) || ! FinanceFilterSelection::rowMatches($row, $filters))) {
                 return null;
             }
@@ -781,6 +834,7 @@ class FinanceSettlementService
                     );
                 }
                 $row['card_layout'] = array_replace($row['card_layout'], $displayEdits);
+                if ($isConflux) $row['card_layout']['domain'] = $row['domain'];
                 $row['card_layout']['operation_region'] = self::normaliseRegionLabel((string) ($row['card_layout']['operation_region'] ?? ''));
             }
 
@@ -1027,7 +1081,7 @@ class FinanceSettlementService
     {
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $cacheChannels = $report === 'xuzong-credit' ? ['xuzong1', 'xuzong2'] : [FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? $channel];
-        return collect(app(FinanceReportCache::class)->remember('active-region-options:v2:'.$report, $cacheChannels, function () use ($report, $channel): array {
+        return collect(app(FinanceReportCache::class)->remember('active-region-options:v3:'.$report, $cacheChannels, function () use ($report, $channel): array {
             $regions = [];
             if ($report === 'xuzong-credit') {
                 $reportService = app(FinanceXuzongCreditReport::class);
@@ -1046,8 +1100,8 @@ class FinanceSettlementService
                             'region_supp.payload->domain as saved_domain', 'region_supp.payload->team as saved_team',
                             'region_supp.payload->_edited_fields->domain as edited_domain', 'region_supp.payload->_edited_fields->team as edited_team']);
                     foreach ($dimensions as $dimension) {
-                        $domain = strtolower(trim((string) ($dimension->edited_domain ?? $dimension->saved_domain ?? $dimension->domain)));
-                        $group = $context['domains']->get($domain) ?? (str_starts_with($domain, 'www.') ? $context['domains']->get(substr($domain, 4)) : null);
+                        $domain = FinanceYeDomains::normalize($dimension->edited_domain ?? $dimension->saved_domain ?? $dimension->domain);
+                        $group = $context['yeDomains']->get($domain);
                         $team = $dimension->edited_team ?? (filled($dimension->saved_team) ? $dimension->saved_team : ($group?->team ?? $dimension->source_team ?? ''));
                         if (($region = self::operationRegion((string) $team)) !== '') $regions[$region] = true;
                     }

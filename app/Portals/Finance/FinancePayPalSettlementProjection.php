@@ -71,14 +71,16 @@ class FinancePayPalSettlementProjection
     {
         $storage = app(FinancePayPalListStorage::class);
         if (! $storage->installed() || ($filters['timezone'] ?? 'Asia/Shanghai') !== 'Asia/Shanghai'
-            || collect($filters)->only(['account', 'accounts', 'reference', 'from', 'to', 'team', 'teams', 'region', 'regions', 'subscription', 'subscriptions', 'domain', 'order_status', 'conditions'])
+            || collect($filters)->only(['account', 'accounts', 'reference', 'from', 'to', 'team', 'teams', 'region', 'regions', 'subscription', 'subscriptions', 'domain', 'conditions'])
                 ->contains(fn ($value) => filled($value))) return null;
         $published = $this->workbooks->database()->table('finance_paypal_list_publications')->where('id', 1)->first();
         $revision = $this->sourceRevision();
         if (! $published || $revision === null || ! hash_equals((string) $published->source_revision, $revision)) return null;
-        $rows = $storage->page($published->generation, $offset, $limit);
+        $total = filled($filters['order_status'] ?? null)
+            ? $storage->matchingQuery($published->generation, $filters)->count() : (int) $published->row_count;
+        $rows = $storage->page($published->generation, $offset, $limit, $filters);
         if ($rows === null || $revision !== $this->sourceRevision()) return null;
-        return [$rows, (int) $published->row_count, $published->published_at];
+        return [$rows, $total, $published->published_at];
     }
 
     public function forget(): void
