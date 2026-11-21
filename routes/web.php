@@ -234,7 +234,7 @@ Route::post('/operation/ai-product-library/placement-evaluations', [OperationAiP
 Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'showStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.show');
 Route::put('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'updateStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.update');
 Route::delete('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'destroyStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.destroy');
-Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
+Route::get('/operation/reports', [OperationReportDashboardController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
 Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::class, 'index'])
     ->whereIn('type', ['advertising-recharge', 'account-opening', 'store-launch', 'advertising-account-authorization', 'account-store-transfer'])
@@ -347,7 +347,7 @@ Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLo
     ->name('assistant.applovin-spends.store-binding');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('assistant.applovin-spends.screenshot');
-Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');
+Route::get('/operation/reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation.reports.order-details');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
 Route::post('/operation/advertising-reports/import', [OperationReportController::class, 'advertisingImport'])->name('operation.advertising-reports.import');

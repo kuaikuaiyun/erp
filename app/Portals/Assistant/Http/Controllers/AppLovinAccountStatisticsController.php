@@ -271,7 +271,7 @@ class AppLovinAccountStatisticsController extends Controller
         }
         if ($selectedDepartmentIds !== []) $query->whereIn('operation_department_id', $selectedDepartmentIds);
 
-        return $query->orderBy('report_date')->orderBy('id')->get();
+        return $query->with('operationDepartment:id,name')->orderBy('report_date')->orderBy('id')->get();
     }
 
     /** @return Collection<int, array<string, mixed>> */
@@ -297,7 +297,13 @@ class AppLovinAccountStatisticsController extends Controller
                 })->values();
             $submittedAt = $report->submitted_at ?: $report->created_at;
             foreach ($ads as $ad) {
-                $activation[$ad['identity']] ??= ['date' => $report->report_date->format('Y-m-d'), 'time' => $submittedAt?->format('Y-m-d H:i:s'), 'department' => (string) $report->operation_department_name, 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name, 'account_name' => $ad['account_name'], 'account_number' => $ad['account_number'], 'store_domains' => []];
+                $activation[$ad['identity']] ??= ['date' => $report->report_date->format('Y-m-d'), 'time' => $submittedAt?->format('Y-m-d H:i:s'),
+                    // Department names stored on reports are historical snapshots.
+                    // Prefer the live department record so renamed departments do
+                    // not split one operator into multiple groups in this report.
+                    'department' => (string) ($report->operationDepartment?->name ?: $report->operation_department_name),
+                    'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name,
+                    'account_name' => $ad['account_name'], 'account_number' => $ad['account_number'], 'store_domains' => []];
                 if ($ad['domain'] !== '') {
                     $activation[$ad['identity']]['store_domains'][mb_strtolower($ad['domain'])] = $ad['domain'];
                 }

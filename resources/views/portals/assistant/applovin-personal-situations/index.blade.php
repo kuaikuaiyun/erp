@@ -8,6 +8,7 @@
 .aps-pagination .pagination{padding:4px;border:1px solid #dbe8f0;border-radius:12px;background:#fff;box-shadow:0 4px 12px rgba(40,91,123,.08)}.aps-pagination .pagination>li>a,.aps-pagination .pagination>li>span{min-width:34px;height:34px;border:0!important;border-radius:8px!important;font-weight:600}.aps-pagination .pagination>li:first-child>a,.aps-pagination .pagination>li:first-child>span,.aps-pagination .pagination>li:last-child>a,.aps-pagination .pagination>li:last-child>span{min-width:36px;background:#f1f8fc;color:#27779f}.aps-pagination .pagination>li>a:hover{background:#e3f4fc!important;color:#1674a3;box-shadow:inset 0 0 0 1px #b9ddeb}.aps-pagination .pagination>.active>span{background:linear-gradient(135deg,#3eacd9,#2381b2)!important;color:#fff!important;box-shadow:0 3px 8px rgba(35,129,178,.32)}.aps-pagination .pagination>.disabled>span{background:transparent!important;color:#c0ccd4!important}.aps-pagination .pagination>li>span[aria-hidden="true"]{background:transparent!important;color:#9aabb7!important}.aps-pagination-actions .aps-page-jump{width:52px;text-align:center;padding-left:4px;padding-right:4px}
 .aps-page-tools,.aps-pages{display:flex;align-items:center;gap:7px}.aps-page-size{display:flex;align-items:center;gap:6px;margin:0;color:#6c8292;font-size:12px;font-weight:400}.aps-page-size select{width:70px;height:34px;border:1px solid #d4e1e9;border-radius:7px;background:#fff;padding:4px 7px}.aps-page{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:34px;padding:0 11px;border:1px solid #d4e1e9;border-radius:7px;background:#fff;color:#397d9f;font-weight:600;box-shadow:0 2px 5px rgba(40,88,116,.05);transition:.15s}.aps-page:hover{border-color:#3994c3;background:#edf7fc;color:#1d719d}.aps-page.active{border-color:#318ac0;background:linear-gradient(135deg,#3b9bc9,#247dab);color:#fff;box-shadow:0 4px 10px rgba(47,137,185,.25)}.aps-page.disabled{pointer-events:none;background:#f1f5f7;color:#a7b5be;box-shadow:none}.aps-gap{color:#90a3af}@media(max-width:800px){.aps-page-tools{width:100%;justify-content:space-between}}
 .aps-stage-spend{display:block;margin-top:3px;color:#8095a4;font-size:12px;white-space:nowrap}
+.aps-filter .assistant-department-menu{width:520px}.aps-filter .assistant-department-columns{grid-template-columns:190px minmax(0,1fr);height:310px;min-height:310px}.aps-filter .assistant-department-roots{height:310px;overflow-y:auto}.aps-filter .assistant-department-children{height:310px;overflow:hidden}.aps-filter .assistant-department-panel{height:310px;max-height:none;padding:7px;overflow-y:auto}.aps-filter .assistant-department-panel label{width:100%;margin:0;padding:8px 10px;border-radius:4px}.aps-filter .assistant-department-panel label:hover{background:#f1f8fc}@media(max-width:767px){.aps-filter .assistant-department-menu{width:min(520px,90vw)}.aps-filter .assistant-department-columns{grid-template-columns:150px minmax(0,1fr)}}
 </style>
 @endpush
 
@@ -37,7 +38,7 @@
         <div class="table-responsive">
             <table class="table table-hover table-bordered aps-table">
                 <thead><tr>
-                    <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th><th>累计广告费($)</th>
+                    <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>达到 $5,000 ROI</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th><th>累计广告费($)</th>
                 </tr></thead>
                 <tbody>
                     @php($previousOperator = null)
@@ -54,6 +55,7 @@
                             <td>@if ($row['reach_2500_roi'] === null)<span class="aps-roi is-empty">—</span>@else<span class="aps-roi {{ $row['reach_2500_roi'] > 0 && $row['reach_2500_roi'] < 1.2 ? 'is-risk' : '' }}">{{ number_format($row['reach_2500_roi'], 2) }}</span>@endif</td>
                             <td>@if ($row['reach_5000_days'] === null)<span class="aps-muted">未达到</span>@else{{ $row['reach_5000_days'] }} 天<br><span class="aps-date">{{ $row['reach_5000_date'] }}</span>@endif</td>
                             <td>@if ($row['reach_5000_performance'] === null)—@else${{ number_format($row['reach_5000_performance'], 2) }}<span class="aps-stage-spend">广告费 ${{ number_format($row['reach_5000_spend'], 2) }}</span>@endif</td>
+                            <td>@if ($row['roi_2500_to_5000'] === null)<span class="aps-roi is-empty">—</span>@else<span class="aps-roi {{ $row['roi_2500_to_5000'] > 0 && $row['roi_2500_to_5000'] < 1.3 ? 'is-risk' : '' }}">{{ number_format($row['roi_2500_to_5000'], 2) }}</span>@endif</td>
                             <td>@if ($row['over_5000_days'] === null)<span class="aps-muted">未达到</span>@else{{ $row['over_5000_days'] }} 天<br><span class="aps-date">{{ $row['over_5000_date'] }}</span>@endif</td>
                             <td>@if ($row['over_5000_performance'] === null)—@else${{ number_format($row['over_5000_performance'], 2) }}<span class="aps-stage-spend">广告费 ${{ number_format($row['over_5000_spend'], 2) }}</span>@endif</td>
                             <td>@if ($row['roi_over_5000'] === null)<span class="aps-roi is-empty">—</span>@else<span class="aps-roi {{ $row['roi_over_5000'] > 0 && $row['roi_over_5000'] < 1.4 ? 'is-risk' : '' }}">{{ number_format($row['roi_over_5000'], 2) }}</span>@endif</td>
@@ -61,7 +63,7 @@
                         </tr>
                         @php($previousOperator = $row['operator_user_id'])
                     @empty
-                        <tr><td colspan="14" class="text-center text-muted" style="padding:38px">暂无可查看的 AppLovin 账户数据</td></tr>
+                        <tr><td colspan="15" class="text-center text-muted" style="padding:38px">暂无可查看的 AppLovin 账户数据</td></tr>
                     @endforelse
                 </tbody>
             </table>
