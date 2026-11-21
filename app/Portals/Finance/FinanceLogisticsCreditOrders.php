@@ -29,7 +29,7 @@ class FinanceLogisticsCreditOrders
     ): Builder
     {
         if ($xuzongReport && ! $includeSystemOrders) {
-            return FinanceRecord::query()->fromSub($this->storedOrders($ids, $searchReference, $indexOnly, $merchantNumbers), 'finance_records');
+            return FinanceRecord::query()->fromSub($this->storedOrders($ids, $searchReference, $indexOnly, $merchantNumbers, $withPayload), 'finance_records');
         }
 
         $db = app(FinanceWorkbookService::class)->database();
@@ -69,7 +69,9 @@ class FinanceLogisticsCreditOrders
             });
             if (! $includeReplaced) {
                 $source->whereNotIn('o.id', fn ($import) => $import
-                    ->selectRaw('CAST('.$grammar->wrap('imported.payload->_replaced_logistics_id').' AS SIGNED)')
+                    ->selectRaw('CAST('.(app(FinanceSourceStorage::class)->active('record')
+                        ? app(FinanceSourceStorage::class)->expression('record', 'imported', ['_replaced_logistics_id'])->getValue($grammar)
+                        : $grammar->wrap('imported.payload->_replaced_logistics_id')).' AS SIGNED)')
                     ->from('finance_records as imported')
                     ->where('imported.dataset', self::IMPORTED_DATASET)
                     ->whereNotNull('imported.payload->_replaced_logistics_id'));
@@ -134,12 +136,18 @@ class FinanceLogisticsCreditOrders
         return FinanceRecord::query()->fromSub($source, 'finance_records');
     }
 
-    private function storedOrders(?array $ids, ?string $searchReference, bool $indexOnly = false, ?array $merchantNumbers = null): QueryBuilder
+    private function storedOrders(?array $ids, ?string $searchReference, bool $indexOnly = false, ?array $merchantNumbers = null, bool $withPayload = true): QueryBuilder
     {
         $db = app(FinanceWorkbookService::class)->database();
         // Negative report keys avoid collisions with logistics IDs while supporting the same export selection.
-        $orders = $db->table('finance_records as f')->where('f.dataset', self::IMPORTED_DATASET);
+        $sourceColumns = app(FinanceSourceStorage::class)->active('record');
+        $structured = (! $withPayload || $sourceColumns) && app(FinanceTransactions::class)->ready();
+        $orders = $db->table(($structured ? 'finance_transactions' : 'finance_records').' as f')->where('f.dataset', self::IMPORTED_DATASET);
+        if ($structured) $orders->join('finance_card_transaction_details as source_refs', 'source_refs.record_id', '=', 'f.id');
         if ($merchantNumbers !== null) {
+            if ($structured) {
+                $orders->where(fn ($query) => $query->whereIn('source_refs.merchant_order', $merchantNumbers)->orWhereIn('source_refs.legacy_order', $merchantNumbers));
+            } else {
             $indexed = $db->getSchemaBuilder()->hasColumns('finance_records', [
                 'finance_xuzong_merchant_number', 'finance_xuzong_legacy_number',
             ]);
@@ -153,11 +161,20 @@ class FinanceLogisticsCreditOrders
                 $orders->where(fn ($query) => $query->whereIn('f.payload->商户订单号', $merchantNumbers)
                     ->orWhereIn('f.payload->_legacy_order_id', $merchantNumbers));
             }
+            }
         }
         if ($ids !== null) {
             $orders->whereIntegerInRaw('f.id', array_map('abs', array_filter($ids, fn ($id) => $id < 0)));
         }
         if ($searchReference !== null) {
+            if ($structured) {
+                $orders->where(function ($query) use ($searchReference): void {
+                    $query->where('f.reference', $searchReference);
+                    foreach (['platform_order', 'legacy_order', 'linked_platform_order', 'transaction_number', 'merchant_order', 'erp_order'] as $field) {
+                        $query->orWhere('source_refs.'.$field, $searchReference);
+                    }
+                });
+            } else {
             $orders->where(fn ($order) => $order->where('f.reference', $searchReference)
                 ->orWhere('f.payload->_edited_platform_order_id', $searchReference)
                 ->orWhere('f.payload->_legacy_order_id', $searchReference)
@@ -165,13 +182,18 @@ class FinanceLogisticsCreditOrders
                 ->orWhere('f.payload->交易流水号', $searchReference)
                 ->orWhere('f.payload->商户订单号', $searchReference)
                 ->orWhere('f.payload->通途订单', $searchReference));
+            }
         }
         if ($indexOnly) {
             return $orders->selectRaw('-CAST(f.id AS SIGNED) as id, f.account, f.occurred_at');
         }
         $orders->selectRaw('-CAST(f.id AS SIGNED) as id, f.dataset, f.account, f.reference, f.occurred_at,
-            f.currency, f.domain, f.raw_type, f.status, NULL as payment_transactions')->addSelect('f.payload');
-        $refundFlag = $db->getQueryGrammar()->wrap('f.payload->退款');
+            f.currency, f.domain, f.raw_type, f.status, NULL as payment_transactions');
+        if ($structured) $orders->addSelect('f.channel_flags');
+        elseif ($sourceColumns) $orders->addSelect('f.source_hash');
+        else $orders->addSelect('f.payload');
+        $refundFlag = $structured ? "CASE WHEN source_refs.is_refunded = 1 THEN '是' ELSE '' END"
+            : ($sourceColumns ? app(FinanceSourceStorage::class)->expression('record', 'f', ['退款'])->getValue($db->getQueryGrammar()) : $db->getQueryGrammar()->wrap('f.payload->退款'));
         $orders->selectRaw("CASE
             WHEN {$refundFlag} = '是' OR UPPER(TRIM(f.status)) IN ('退款', '已退款', 'REFUNDED', 'PARTIALLY_REFUNDED') THEN '退款'
             WHEN UPPER(TRIM(f.status)) IN ('SUCCESS', 'SUCCEEDED', 'COMPLETED', 'PAID', '成功', '已付款', 'S') THEN '成功'

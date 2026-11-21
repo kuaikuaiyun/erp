@@ -10,7 +10,6 @@ return new class extends Migration
     public function up(): void
     {
         $db = DB::connection(config('admin.database.connection') ?: config('database.default'));
-        \App\Portals\Finance\FinanceSummaryTriggers::assertCanInstall($db);
         $schema = $db->getSchemaBuilder();
         if (! $schema->hasTable(FinanceSummarySourceChanges::TABLE)) $schema->create(FinanceSummarySourceChanges::TABLE, function (Blueprint $table): void {
             $table->engine = 'InnoDB';
@@ -22,10 +21,9 @@ return new class extends Migration
         if (! $schema->hasColumn('finance_summary_changes', 'scopes_resolved')) $schema->table('finance_summary_changes', function (Blueprint $table): void {
             $table->boolean('scopes_resolved')->default(false)->index();
         });
-        FinanceSummarySourceChanges::install($db);
         // Prior publications could miss a refund posted in a later month.
         $db->table('finance_summary_periods')->increment('revision');
-        // Re-installing incomplete tracking must also invalidate files created
+        // Initializing source revisions also invalidates files created
         // before the gap. Use the outbox sequence without leaving a reset event
         // for an older worker to consume during deployment.
         $db->transaction(function () use ($db): void {
@@ -44,6 +42,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        // Keep revision evidence and guards: rolling back must not silently enable stale reuse.
+        // Preserve ordinary revision tables and financial data.
     }
 };

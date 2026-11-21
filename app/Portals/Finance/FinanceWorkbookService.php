@@ -35,7 +35,13 @@ class FinanceWorkbookService
 
     public function database(): Connection
     {
-        return DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        if (! in_array(FinanceRelationalGrammar::class, class_uses($connection->getQueryGrammar()), true)) {
+            if ($connection->getDriverName() === 'mariadb') $connection->setQueryGrammar(new FinanceMariaDbGrammar($connection));
+            elseif ($connection->getDriverName() === 'mysql') $connection->setQueryGrammar(new FinanceMySqlGrammar($connection));
+            elseif ($connection->getDriverName() === 'sqlite') $connection->setQueryGrammar(new FinanceSqliteGrammar($connection));
+        }
+        return $connection;
     }
 
     /** Read the same domain, usage name and team fields maintained by the assistant portal. */
@@ -562,11 +568,15 @@ class FinanceWorkbookService
             // Keep the SQL parameter count within the limits of each database driver.
             $batchSize = $this->database()->getDriverName() === 'mysql' ? 300 : 75;
             foreach (array_chunk($inserts, $batchSize) as $batch) {
-                $this->database()->table('finance_records')->insert(array_map(function (array $record): array {
+                if (app(FinanceSourceStorage::class)->installed()) app(FinanceSourceStorage::class)->insert('record', $batch);
+                else $this->database()->table('finance_records')->insert(array_map(function (array $record): array {
                     $record['payload'] = json_encode($record['payload'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 
                     return $record;
                 }, $batch));
+                if (app(FinanceTransactions::class)->installed()) {
+                    app(FinanceTransactions::class)->sync(FinanceRecord::query()->whereIn('fingerprint', array_column($batch, 'fingerprint'))->get());
+                }
             }
 
             return count($inserts) + $updated;

@@ -29,4 +29,12 @@ class FinanceRegionTest extends TestCase
         $this->assertSame(['雨果', '__empty__'], $filters['regions']);
         $this->assertSame('华南/华东', FinanceSettlementService::normaliseRegionLabel('华南/华东'));
     }
+
+    public function test_a_region_without_current_orders_does_not_expand_to_all_regions(): void
+    {
+        $filters = FinanceFilterSelection::availableRegions(['region' => '北京', 'regions' => ['北京']], ['厦门']);
+        $this->assertSame('北京', $filters['region']);
+        $this->assertSame(['北京'], $filters['regions']);
+        $this->assertFalse(FinanceFilterSelection::rowMatches(['team' => '厦门团队'], $filters));
+    }
 }

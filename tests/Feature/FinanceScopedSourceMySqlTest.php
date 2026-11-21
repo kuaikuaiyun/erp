@@ -16,9 +16,69 @@ use Tests\TestCase;
 /** Creates only an isolated disposable database on a loopback MySQL server. */
 class FinanceScopedSourceMySqlTest extends TestCase
 {
+    public function test_retiring_summary_caches_requires_structured_storage_and_preserves_transactions(): void
+    {
+        $id = $this->record('2026-11-03', 'KEEP-SOURCE');
+        $migration = require database_path('migrations/2026_11_21_000003_drop_retired_finance_summary_tables.php');
+        try {
+            $migration->up();
+            $this->fail('Missing structured storage must prevent cache retirement.');
+        } catch (\RuntimeException $error) {
+            $this->assertStringContainsString('结构化汇总', $error->getMessage());
+        }
+        $schema = $this->db->getSchemaBuilder();
+        $this->assertTrue($schema->hasTable('finance_summary_rows'));
+        (require database_path('migrations/2026_11_21_000002_create_finance_summary_facts.php'))->up();
+        if (! $schema->hasTable('finance_summary_buckets')) $schema->create('finance_summary_buckets', function (Blueprint $table): void {
+            $table->id(); $table->json('payload')->nullable();
+        });
+        $migration->up();
+        $migration->up();
+        $this->assertFalse($schema->hasTable('finance_summary_rows'));
+        $this->assertFalse($schema->hasTable('finance_summary_buckets'));
+        $this->assertTrue($this->db->table('finance_records')->where('id', $id)->exists());
+        $this->assertNull(app(\App\Portals\Finance\FinanceSummaryProjection::class)->stream('credit_card',
+            ['from' => '2026-11-01', 'to' => '2026-11-30', 'timezone' => '-04:00'], false));
+    }
+
     private ?string $databaseName = null;
     private ?string $cachePath = null;
     private Connection $db;
+
+    public function test_relational_sources_round_trip_events_nulls_types_and_unrecognized_fields(): void
+    {
+        (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+        $storage = app(\App\Portals\Finance\FinanceSourceStorage::class);
+        $documents = [
+            'record' => ['dataset' => 'xuzong-credit-imported-orders', 'document' => [
+                '交易金额' => '001.2300', '备注' => '', '域名' => null, '_linked_logistics_id' => 123,
+                '_xuzong_statement_import' => ['notice' => '待核对', 'events' => [
+                    'EVENT-A' => ['time' => '2026-11-03 12:00:00', 'amounts' => ['退款金额' => '3.4500', '退款费用' => null]],
+                ]],
+                '_worldpay_events' => ['R1|CASE-A|退款' => ['Case ID' => 'CASE-A', '异常结单金额' => '-2.3000']],
+                '_xuzong_refunds' => ['REF-A' => ['refund_id' => 'REF-A', 'amount' => '0', 'fee' => '0.1000']],
+                'unrecognized' => ['empty' => [], 'flag' => false, 'positive' => true, 'number' => 1.25, '零' => 0, 'literal/key' => '值'],
+            ]],
+            'payment' => ['document' => ['transaction_info' => ['transaction_id' => 'TXN', 'transaction_amount' => ['currency_code' => 'USD', 'value' => '12.3400']],
+                'cart_info' => ['item_details' => [['item_name' => '商品甲', 'item_quantity' => '2'], ['item_name' => '商品乙', 'item_quantity' => '1']]],
+                'payer_info' => ['email_address' => 'test@example.com'], 'new_api_field' => ['nullable' => null]]],
+            'statement' => ['document' => ['结算金额' => '-1.2300', '结算货币' => 'USD', '账单描述符' => 'wallet', '附加字段' => '原值']],
+        ];
+        foreach ($documents as $kind => $source) {
+            $storage->write($kind, [1 => $source]);
+            $loaded = $storage->load($kind, [1]);
+            $this->assertSame($storage::hash($source['document']), $storage::hash($loaded[1]), $kind);
+        }
+        $this->assertSame(2, $this->db->table('finance_paypal_transaction_items')->count());
+        $this->assertSame(1, $this->db->table('finance_xuzong_refund_events')->count());
+        $this->assertFalse($storage->active('record'));
+        $storage->write('record', [1 => ['dataset' => 'xuzong-credit-imported-orders', 'document' => ['交易金额' => '0']]]);
+        $this->assertSame(['交易金额' => '0'], $storage->load('record', [1])[1]);
+        $this->assertSame(0, $this->db->table('finance_xuzong_refund_events')->count());
+        foreach ($storage::definitions() as $definition) {
+            $this->assertNotContains('payload', $this->db->getSchemaBuilder()->getColumnListing($definition['table']));
+        }
+    }
 
     protected function setUp(): void
     {
@@ -34,12 +94,12 @@ class FinanceScopedSourceMySqlTest extends TestCase
             'database.default' => 'scope_test', 'admin.database.connection' => 'scope_test']);
         $this->db = DB::connection('scope_test');
         $this->cachePath = storage_path('framework/testing/scoped-source-'.bin2hex(random_bytes(6)));
-        config(['cache.stores.file.path' => $this->cachePath]);
+        config(['cache.stores.file.path' => $this->cachePath, 'finance.summaries.external_change_path' => $this->cachePath.'/external-changes']);
         app('cache')->forgetDriver('file');
         $this->createTables();
         foreach (['2026_11_13_000001_create_finance_summary_projections', '2026_11_13_000002_track_finance_summary_source_changes',
             '2026_11_13_000005_track_finance_statement_month_changes', '2026_11_20_000002_track_finance_live_source_updates',
-            '2026_11_20_000003_scope_finance_source_invalidations'] as $migration) {
+            '2026_11_20_000003_scope_finance_source_invalidations', '2026_11_21_000006_enable_finance_application_tracking'] as $migration) {
             (require database_path('migrations/'.$migration.'.php'))->up();
         }
         $this->assertTrue(FinanceSummarySourceChanges::available($this->db));
@@ -55,6 +115,82 @@ class FinanceScopedSourceMySqlTest extends TestCase
             }
             if ($this->cachePath !== null) File::deleteDirectory($this->cachePath);
         } finally { parent::tearDown(); }
+    }
+
+    public function test_structured_summary_preserves_missing_net_and_uses_numeric_sql_aggregation(): void
+    {
+        (require database_path('migrations/2026_11_21_000002_create_finance_summary_facts.php'))->up();
+        $id = $this->record('2026-11-03', 'FACT-NET');
+        $facts = app(\App\Portals\Finance\FinanceSummaryFacts::class);
+        $filters = (new \ReflectionMethod($facts, 'filters'))->invoke($facts, 'credit_card', '2026-11', '-04:00');
+        $version = (new \ReflectionMethod($facts, 'version'))->invoke($facts, 'credit_card', $filters);
+        $money = array_fill_keys(array_keys(\App\Portals\Finance\FinanceSettlementService::MONEY), null);
+        $base = $money + ['id' => $id, 'channel' => 'credit_card', 'payment_channel' => 'xuzong2', 'account' => 'A', 'account_key' => 'A',
+            'currency' => 'USD', 'team' => '郑州', 'subscription' => '订阅', 'month' => '2026-11', 'success' => true, 'failed' => false,
+            'gross' => '100', 'settlement' => '100', '_summary_amount_usd' => '100', '_summary_xuzong_detail' => true,
+            '_summary_settlement_currency' => 'USD'];
+        $rows = [array_replace($base, ['_summary_payable' => null]), array_replace($base, ['_summary_payable' => '90'])];
+        $publication = $this->db->table('finance_summary_publications')->insertGetId(['month' => '2026-11', 'channel' => 'credit_card',
+            'timezone' => '-04:00', 'revision' => 1, 'source_version' => $version, 'complete' => true, 'verified' => true]);
+        $position = 0;
+        $facts->insert($publication, $position, $rows);
+        (require database_path('migrations/2026_11_21_000003_drop_retired_finance_summary_tables.php'))->up();
+        $stream = app(\App\Portals\Finance\FinanceSummaryProjection::class)->stream('credit_card', $filters, false,
+            paymentChannels: ['xuzong2'], aggregateTransactions: true);
+        $summary = new \App\Portals\Finance\FinanceTransactionSummary;
+        $expected = $summary->summarize($rows, 'credit_card', usd: true);
+        $actual = $summary->summarize($stream, 'credit_card', usd: true);
+        $this->assertSame($expected, $actual);
+        $this->assertNull($summary->totalSummary($actual, 'credit_card', '2026-11')['payable']);
+        $this->assertSame(2, $this->db->table('finance_summary_facts')->count());
+        $this->assertNotContains('payload', $this->db->getSchemaBuilder()->getColumnListing('finance_summary_facts'));
+        $this->assertNotContains('payload', $this->db->getSchemaBuilder()->getColumnListing('finance_summary_amounts'));
+        $this->assertNull($facts->stream('credit_card', [...$filters, 'conditions' => [
+            ['field' => 'note', 'operator' => 'contains', 'value' => '备注'],
+        ]], false, null, ['xuzong2']));
+    }
+
+    public function test_structured_summary_restores_native_currency_without_copying_whole_rows(): void
+    {
+        (require database_path('migrations/2026_11_21_000002_create_finance_summary_facts.php'))->up();
+        $id = $this->record('2026-11-03', 'FACT-NATIVE');
+        $facts = app(\App\Portals\Finance\FinanceSummaryFacts::class);
+        $filters = (new \ReflectionMethod($facts, 'filters'))->invoke($facts, 'credit_card', '2026-11', 'Asia/Shanghai');
+        $version = (new \ReflectionMethod($facts, 'version'))->invoke($facts, 'credit_card', $filters);
+        $money = array_fill_keys(array_keys(\App\Portals\Finance\FinanceSettlementService::MONEY), null);
+        $row = array_replace($money, ['id' => $id, 'channel' => 'credit_card', 'payment_channel' => 'worldpay', 'account' => 'Worldpay',
+            'account_key' => 'Worldpay', 'currency' => 'EUR', 'team' => '深圳', 'subscription' => '', 'month' => '2026-11',
+            'success' => true, 'failed' => false, 'gross' => '80', 'settlement' => '100', 'fee' => '2.50',
+            '_summary_settlement_currency' => 'USD', '_summary_native_currency' => 'EUR', '_summary_native_values' => ['settlement' => '80', 'fee' => '2']]);
+        $publication = $this->db->table('finance_summary_publications')->insertGetId(['month' => '2026-11', 'channel' => 'credit_card',
+            'timezone' => 'Asia/Shanghai', 'revision' => 1, 'source_version' => $version, 'complete' => true, 'verified' => true]);
+        $position = 0; $facts->insert($publication, $position, [$row]);
+        foreach ([false, true] as $native) {
+            $summary = new \App\Portals\Finance\FinanceTransactionSummary;
+            $expectedRow = $native ? \App\Portals\Finance\FinanceSummarySourceCache::nativeRow($row) : $row;
+            $expected = $summary->summarize([$expectedRow], 'worldpay');
+            $actual = $summary->summarize($facts->stream('credit_card', $filters, $native, null, ['worldpay'], true), 'worldpay');
+            $this->assertSame($expected, $actual);
+        }
+        $this->assertSame(1, $this->db->table('finance_summary_facts')->count());
+        $this->assertSame(2, $this->db->table('finance_summary_amounts')->count());
+        $canonical = iterator_to_array($facts->stream('credit_card', $filters, false, null, ['worldpay']), false);
+        $restored = array_map(\App\Portals\Finance\FinanceSummarySourceCache::nativeRow(...), $canonical);
+        $this->assertSame($summary->summarize([\App\Portals\Finance\FinanceSummarySourceCache::nativeRow($row)], 'worldpay'),
+            $summary->summarize($restored, 'worldpay'));
+
+        // Equal numeric amounts need no extra amount row, but retain native currency.
+        $sameAmounts = array_replace($row, ['_summary_native_values' => []]);
+        $facts->insert($publication, $position, [$sameAmounts]);
+        foreach ([false, true] as $aggregate) {
+            $rows = iterator_to_array($facts->stream('credit_card', $filters, true, null, ['worldpay'], $aggregate), false);
+            $this->assertNotEmpty($rows);
+            foreach ($rows as $item) $this->assertSame('EUR', $item['_summary_settlement_currency']);
+        }
+        $this->assertSame(2, $position);
+        $this->assertSame(3, $this->db->table('finance_summary_amounts')->count());
+        $this->db->table('finance_summary_publications')->where('id', $publication)->update(['verified' => false]);
+        $this->assertNull($facts->stream('credit_card', $filters, true, null, ['worldpay'], true));
     }
 
     private function createTables(): void
@@ -122,30 +258,7 @@ class FinanceScopedSourceMySqlTest extends TestCase
         $this->assertSame($detailVersion, app(FinanceSummaryDataVersion::class)->forCache(['credit_card']));
     }
 
-    public function test_trigger_repair_restores_an_interrupted_deployment_and_invalidates_the_gap(): void
-    {
-        $id = $this->record('2026-11-03', 'TRIGGER-REPAIR');
-        $before = $this->version('credit_card', '2026-11-01', '2026-11-07');
-        $this->db->unprepared('DROP TRIGGER finance_scope_record_update');
-        $this->db->unprepared('DROP TRIGGER finance_summary_dependency_item_update');
-        app('request')->attributes->remove('finance.scoped-tracking:'.$this->db->getName().':'.$this->db->getDatabaseName());
-        $this->db->table('finance_records')->where('id', $id)->update(['payload' => '{"amount":"20"}']);
-        $this->artisan('finance:summaries:repair-triggers')->assertSuccessful();
-        $this->assertTrue(FinanceSummarySourceChanges::available($this->db));
-        $this->assertNotSame($before, $this->version('credit_card', '2026-11-01', '2026-11-07'));
-        $this->assertSame(1, $this->db->table('finance_records')->count());
-        $this->assertSame(['amount' => '20'], json_decode($this->db->table('finance_records')->where('id', $id)->value('payload'), true, 512, JSON_THROW_ON_ERROR));
-        $this->assertSame(0, $this->db->table('information_schema.TRIGGERS')->whereRaw('TRIGGER_SCHEMA = DATABASE()')
-            ->where('TRIGGER_NAME', 'like', 'finance_install_probe_%')->count());
-    }
 
-    public function test_trigger_repair_is_a_noop_when_tracking_is_complete(): void
-    {
-        $this->record('2026-11-03', 'ALREADY-COMPLETE');
-        $before = $this->version('credit_card', '2026-11-01', '2026-11-07');
-        $this->artisan('finance:summaries:repair-triggers')->assertSuccessful();
-        $this->assertSame($before, $this->version('credit_card', '2026-11-01', '2026-11-07'));
-    }
 
     public function test_detail_counts_refresh_on_real_edits_but_keep_other_channels_and_old_query_results(): void
     {
@@ -326,31 +439,7 @@ class FinanceScopedSourceMySqlTest extends TestCase
         $this->assertSame($ye, $versions->forRange('credit_card', [...$filters, 'summary_payment_channels' => ['ye']]));
     }
 
-    public function test_missing_tracking_disables_persistent_reuse_and_repair_invalidates_pre_gap_files(): void
-    {
-        $id = $this->record('2026-11-03', 'TRACKING-GAP');
-        $before = $this->version('credit_card', '2026-11-01', '2026-11-07');
-        $this->db->unprepared('DROP TRIGGER finance_scope_record_update');
-        $this->app->instance('request', \Illuminate\Http\Request::create('/finance/reports/summary'));
-        $this->assertNull(app(FinanceSummaryDataVersion::class)->forRange('credit_card', ['from' => '2026-11-01', 'to' => '2026-11-07']));
-        $this->db->table('finance_records')->where('id', $id)->update(['payload' => '{"amount":"50"}']);
-        (require database_path('migrations/2026_11_20_000003_scope_finance_source_invalidations.php'))->up();
-        $this->assertNotSame($before, $this->version('credit_card', '2026-11-01', '2026-11-07'));
-    }
 
-    public function test_an_old_worker_cannot_delete_unresolved_input_changes_during_deployment(): void
-    {
-        $this->record('2026-11-03', 'PENDING-CHANGE');
-        try {
-            $this->db->table('finance_summary_changes')->delete();
-            $this->fail('Unresolved source changes must survive an old worker acknowledgement.');
-        } catch (\Illuminate\Database\QueryException $error) {
-            $this->assertStringContainsString('must be resolved before acknowledgement', $error->getMessage());
-        }
-        $this->assertGreaterThan(0, $this->db->table('finance_summary_changes')->count());
-        app(FinanceSummaryDependencies::class)->resolve($this->db);
-        $this->assertSame(0, $this->db->table('finance_summary_changes')->count());
-    }
 
     public function test_deleting_an_account_keeps_invalidation_dates_after_its_records_are_removed(): void
     {
@@ -366,4 +455,171 @@ class FinanceScopedSourceMySqlTest extends TestCase
         app(FinanceSummaryDependencies::class)->resolve($this->db);
         $this->assertSame($after, app(FinanceSummaryDataVersion::class)->forRange('credit_card', $filters));
     }
+    public function test_application_tracking_works_without_installing_any_triggers_and_rolls_back_with_its_write(): void
+    {
+        $this->assertSame(0, $this->db->table('information_schema.TRIGGERS')->whereRaw('TRIGGER_SCHEMA = DATABASE()')->count());
+        $id = $this->record('2026-11-03', 'APP-TRACKED');
+        $version = $this->version('credit_card', '2026-11-03');
+        try {
+            $this->db->transaction(function () use ($id): void {
+                $this->db->table('finance_records')->where('id', $id)->update(['reference' => 'ROLLED-BACK']);
+                throw new \RuntimeException('test rollback');
+            });
+        } catch (\RuntimeException $error) {
+            $this->assertSame('test rollback', $error->getMessage());
+        }
+        $this->assertSame('APP-TRACKED', $this->db->table('finance_records')->where('id', $id)->value('reference'));
+        $this->assertSame($version, $this->version('credit_card', '2026-11-03'));
+        $this->db->table('finance_records')->where('id', $id)->update(['reference' => 'COMMITTED']);
+        $this->assertNotSame($version, $this->version('credit_card', '2026-11-03'));
+    }
+
+    public function test_external_saves_do_not_write_finance_sql_or_hold_extra_source_locks(): void
+    {
+        $this->record('2026-11-03', 'INDEPENDENT-SOURCE');
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'INDEPENDENT-SOURCE', 'paid_amount_usd' => '10']);
+        $versions = app(FinanceSummaryDataVersion::class);
+        $first = $versions->forCache(['credit_card']);
+        $notifications = app(\App\Portals\Finance\FinanceExternalChanges::class);
+        $this->db->enableQueryLog(); $this->db->flushQueryLog();
+        $this->db->transaction(function () use ($id): void {
+            $this->db->table('logistics_orders')->where('id', $id)->update(['paid_amount_usd' => '20']);
+            $this->assertSame(1, $this->db->transactionLevel());
+        });
+        foreach ($this->db->getQueryLog() as $entry) {
+            $this->assertStringNotContainsString('finance_', strtolower($entry['query']));
+            $this->assertStringNotContainsString('for update', strtolower($entry['query']));
+        }
+        $this->assertSame('20', $this->db->table('logistics_orders')->where('id', $id)->value('paid_amount_usd'));
+        $this->assertNotEmpty(glob($notifications->directory($this->db).'/change-*.json'));
+        $failQueue = true;
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Database\Events\QueryExecuted::class,
+            function ($event) use (&$failQueue): void {
+                if ($failQueue && $event->connection === $this->db && preg_match('/^insert into `finance_summary_changes`/i', $event->sql)) {
+                    throw new \RuntimeException('test: finance queue unavailable');
+                }
+            });
+        $this->assertNull($versions->forCache(['credit_card']), 'Do not reuse old results while the notification cannot be delivered.');
+        $this->assertSame('20', $this->db->table('logistics_orders')->where('id', $id)->value('paid_amount_usd'));
+        $this->assertNotEmpty(glob($notifications->directory($this->db).'/change-*.json'));
+        $failQueue = false;
+        $changed = $versions->forCache(['credit_card']);
+        $this->assertNotNull($changed); $this->assertNotSame($first, $changed);
+        $this->assertSame([], glob($notifications->directory($this->db).'/change-*.json'));
+        app(FinanceSummaryDependencies::class)->resolve($this->db);
+        $this->assertSame($changed, $versions->forCache(['credit_card']));
+    }
+
+    public function test_external_reference_changes_and_deletes_refresh_old_and_new_matches_only(): void
+    {
+        $this->record('2026-11-03', 'OLD-SOURCE-REF');
+        $this->record('2026-11-10', 'NEW-SOURCE-REF');
+        $this->record('2026-09-03', 'UNRELATED-SOURCE-REF');
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'OLD-SOURCE-REF']);
+        $old = $this->version('credit_card', '2026-11-03');
+        $new = $this->version('credit_card', '2026-11-10');
+        $history = $this->version('credit_card', '2026-09-03');
+        $this->db->table('logistics_orders')->where('id', $id)->update(['transaction_id' => 'NEW-SOURCE-REF']);
+        $this->assertNotSame($old, $this->version('credit_card', '2026-11-03'));
+        $changed = $this->version('credit_card', '2026-11-10');
+        $this->assertNotSame($new, $changed);
+        $this->assertSame($history, $this->version('credit_card', '2026-09-03'));
+        $this->db->table('logistics_orders')->where('id', $id)->delete();
+        $this->assertNotSame($changed, $this->version('credit_card', '2026-11-10'));
+        $this->assertSame($history, $this->version('credit_card', '2026-09-03'));
+    }
+
+    public function test_external_unchanged_values_do_not_rebuild_financial_caches(): void
+    {
+        $this->record('2026-11-03', 'SOURCE-UNCHANGED');
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'SOURCE-UNCHANGED', 'paid_amount_usd' => '10']);
+        $versions = app(FinanceSummaryDataVersion::class);
+        $before = $versions->forCache(['credit_card']);
+        $this->db->table('logistics_orders')->where('id', $id)->update(['paid_amount_usd' => '10', 'updated_at' => '2026-11-21 12:00:00']);
+        $this->assertSame([], glob(app(\App\Portals\Finance\FinanceExternalChanges::class)->directory($this->db).'/change-*.json'));
+        $this->assertSame($before, $versions->forCache(['credit_card']));
+    }
+
+    public function test_missing_finance_queue_cannot_prevent_an_external_business_save(): void
+    {
+        $this->record('2026-11-03', 'OFFLINE-FINANCE');
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'OFFLINE-FINANCE', 'paid_amount_usd' => '10']);
+        $before = app(FinanceSummaryDataVersion::class)->forCache(['credit_card']);
+        $this->db->getSchemaBuilder()->rename('finance_summary_changes', 'finance_queue_temporarily_offline');
+        try {
+            $this->db->transaction(fn () => $this->db->table('logistics_orders')->where('id', $id)->update(['paid_amount_usd' => '30']));
+            $this->assertSame('30', $this->db->table('logistics_orders')->where('id', $id)->value('paid_amount_usd'));
+        } finally { $this->db->getSchemaBuilder()->rename('finance_queue_temporarily_offline', 'finance_summary_changes'); }
+        $this->assertNotSame($before, app(FinanceSummaryDataVersion::class)->forCache(['credit_card']));
+    }
+
+    public function test_external_rollback_discards_its_notification_and_orphaned_commits_are_recovered(): void
+    {
+        $this->record('2026-11-03', 'ROLLED-BACK-SOURCE');
+        $id = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'ROLLED-BACK-SOURCE', 'paid_amount_usd' => '10']);
+        $versions = app(FinanceSummaryDataVersion::class);
+        $before = $versions->forCache(['credit_card']);
+        $notifications = app(\App\Portals\Finance\FinanceExternalChanges::class);
+        $this->db->beginTransaction();
+        $this->db->table('logistics_orders')->where('id', $id)->update(['paid_amount_usd' => '50']);
+        $this->assertNull($versions->forCache(['credit_card']), 'Do not reuse another transaction view for an uncommitted source.');
+        $this->db->rollBack();
+        $this->assertSame('10', $this->db->table('logistics_orders')->where('id', $id)->value('paid_amount_usd'));
+        $this->assertSame([], glob($notifications->directory($this->db).'/change-*.json'));
+        $this->assertSame($before, $versions->forCache(['credit_card']));
+        $ticket = $notifications->begin($this->db);
+        fclose($ticket['handle']); // Simulate an exited writer between its commit and notification callback.
+        $recovered = $versions->forCache(['credit_card']);
+        $this->assertNotSame($before, $recovered);
+        $this->assertSame([], glob($notifications->directory($this->db).'/change-*.json'));
+        app(FinanceSummaryDependencies::class)->resolve($this->db);
+        $this->assertSame($recovered, $versions->forCache(['credit_card']));
+    }
+
+    public function test_normal_migrations_and_tracking_work_without_trigger_or_super_privileges(): void
+    {
+        $username = 'codex_scope_'.bin2hex(random_bytes(6));
+        $password = bin2hex(random_bytes(24));
+        $admin = DB::connection('scope_admin');
+        $this->assertMatchesRegularExpression('/^codex_scope_[a-f0-9]{12}$/D', $username);
+        $identity = $admin->getPdo()->quote($username)."@'127.0.0.1'";
+        $admin->unprepared('CREATE USER '.$identity.' IDENTIFIED BY '.$admin->getPdo()->quote($password));
+        try {
+            $grantDatabase = str_replace('_', '\\_', $this->databaseName);
+            $admin->unprepared('GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP ON `'.$grantDatabase.'`.* TO '.$identity);
+            config(['database.connections.scope_restricted' => [...config('database.connections.scope_test'), 'host' => '127.0.0.1', 'username' => $username, 'password' => $password],
+                'admin.database.connection' => 'scope_restricted', 'database.default' => 'scope_restricted']);
+            $restricted = DB::connection('scope_restricted');
+            $grants = implode(' ', array_map(fn ($row) => implode(' ', (array) $row), $restricted->select('SHOW GRANTS FOR CURRENT_USER')));
+            $this->assertStringNotContainsString('TRIGGER', $grants);
+            $this->assertStringNotContainsString('SUPER', $grants);
+            (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+            (require database_path('migrations/2026_11_20_000003_scope_finance_source_invalidations.php'))->up();
+            (require database_path('migrations/2026_11_21_000006_enable_finance_application_tracking.php'))->up();
+            $id = $restricted->table('finance_records')->insertGetId(['dataset' => 'xuzong2-details', 'account' => 'A',
+                'reference' => 'RESTRICTED', 'occurred_at' => '2026-11-03 12:00:00', 'payload' => '{"amount":"10"}']);
+            $first = $this->version('credit_card', '2026-11-03');
+            $restricted->table('finance_records')->where('id', $id)->update(['payload' => '{"amount":"20"}']);
+            $this->assertNotSame($first, $this->version('credit_card', '2026-11-03'));
+            $restricted->getSchemaBuilder()->table('finance_records', function (Blueprint $table): void {
+                $table->boolean('finance_is_conflux_order')->virtualAs("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$._card_channel')) = 'ye', 0)");
+                $table->index(['finance_is_conflux_order', 'account', 'reference'], 'finance_conflux_order_match_idx');
+            });
+            (require database_path('migrations/2026_11_21_000007_retire_finance_source_json.php'))->up();
+            $this->assertFalse($restricted->getSchemaBuilder()->hasColumn('finance_records', 'payload'));
+            $record = \App\Models\FinanceRecord::findOrFail($id);
+            $this->assertSame('20', $record->payload['amount']);
+            $beforeEdit = $this->version('credit_card', '2026-11-03');
+            $record->update(['payload' => ['amount' => '30', 'CaseSensitive' => 'AbC']]);
+            $this->assertNotSame($beforeEdit, $this->version('credit_card', '2026-11-03'));
+            $this->assertSame(1, \App\Models\FinanceRecord::where('payload->CaseSensitive', 'AbC')->whereNull('payload->absent')->count());
+            $this->assertSame(0, \App\Models\FinanceRecord::where('payload->CaseSensitive', 'abc')->count());
+        } finally {
+            DB::disconnect('scope_restricted');
+            config(['admin.database.connection' => 'scope_test', 'database.default' => 'scope_test']);
+            $admin->unprepared('DROP USER '.$identity);
+        }
+    }
+
+
 }

@@ -17,10 +17,11 @@ class FinanceSettlementEditor
         if ($channel === 'credit_card' && $cardChannel !== null) {
             return array_diff_key(FinanceCreditSettlementLayout::displayColumns($cardChannel), array_flip([
                 'calendar_date', 'operation_region', 'worldpay_exception', 'payable', 'logistics', 'purchase',
+                ...($cardChannel === 'ye' ? ['product_name'] : []),
             ]));
         }
         return array_diff_key($this->settlements->columns($channel), array_flip($channel === 'paypal'
-            ? ['id', 'team', 'operation_region', 'logistics', 'purchase'] : ['id', 'logistics', 'purchase']));
+            ? ['id', 'team', 'operation_region', 'logistics', 'purchase', 'product_name'] : ['id', 'logistics', 'purchase']));
     }
 
     public function numericFields(string $channel, ?string $cardChannel = null): array

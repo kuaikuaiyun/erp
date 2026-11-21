@@ -82,7 +82,7 @@ class FinanceYeBillAdjustments
         return app(FinanceWorkbookService::class)->database()->transaction(function () use ($groups, $service, $settlementType, $actor, $account): int {
             $saved = 0;
             foreach ($groups as $group) {
-                $query = $service->query('credit_card', ['card_channel' => static::CHANNEL]);
+                $query = $service->query('credit_card', ['card_channel' => static::CHANNEL, '_legacy_source' => true]);
                 if ($account !== null) {
                     $query->where('account', $account);
                 }

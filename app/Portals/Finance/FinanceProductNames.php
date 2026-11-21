@@ -139,6 +139,20 @@ class FinanceProductNames
 
     public static function worldpayShortName(string $value): string
     {
+        return self::shortName($value);
+    }
+
+    public static function shortNameForOrder(?object $order, string $fallback = ''): string
+    {
+        $payload = $order->shopify_payload ?? [];
+        if (is_string($payload)) $payload = json_decode($payload, true) ?: [];
+        $items = $payload['lineItems']['nodes'] ?? $payload['line_items'] ?? [];
+        $titles = array_map(fn ($item) => $item['title'] ?? $item['name'] ?? '', $items);
+        return self::shortName(implode("\n", [$order->tongtu_product_name ?? '', $fallback, ...$titles]));
+    }
+
+    public static function shortName(string $value): string
+    {
         $patterns = [
             '冰丝内裤套装' => 'ice silk.*underwear set|ice silk.*boxer shorts',
             '保暖内衣套装' => 'thermal underwear|long johns',

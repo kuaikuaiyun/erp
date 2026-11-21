@@ -30,8 +30,16 @@ class FinancePayPalOrderCandidates
             return [];
         }
 
-        $details = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $payments->modelKeys())
-            ->get(['finance_record_id', 'raw_payload->payer_info->email_address as email', 'raw_payload->cart_info->item_details as items'])
+        $detailQuery = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $payments->modelKeys());
+        if (app(FinanceSourceStorage::class)->active('payment')) {
+            $details = app(FinanceSourceStorage::class)->hydrate('payment', $detailQuery->get(['id', 'finance_record_id']))
+                ->map(function ($detail) {
+                    $detail->email = $detail->source_fields['payer_info']['email_address'] ?? '';
+                    $detail->items = $detail->source_fields['cart_info']['item_details'] ?? [];
+                    return $detail;
+                });
+        } else $details = $detailQuery->get(['finance_record_id', 'raw_payload->payer_info->email_address as email', 'raw_payload->cart_info->item_details as items']);
+        $details = $details
             ->filter(fn ($detail) => filled($detail->email) && filled($detail->items))->keyBy('finance_record_id');
         if ($details->isEmpty()) {
             return [];
@@ -59,7 +67,7 @@ class FinancePayPalOrderCandidates
         foreach ($payments as $payment) {
             $detail = $details->get($payment->id);
             $amount = trim((string) ($payment->payload[$grossHeader] ?? ''));
-            $cart = json_decode($detail->items ?? '[]', true);
+            $cart = is_array($detail?->items) ? $detail->items : json_decode($detail->items ?? '[]', true);
             if ($detail === null || ! is_array($cart) || $cart === [] || ! preg_match('/^\d{1,18}(?:\.\d{1,8})?$/D', $amount)
                 || bccomp($amount, '0', 4) <= 0) {
                 continue;

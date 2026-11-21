@@ -112,20 +112,21 @@ class FinancePayPalSettlementOrders
         }
 
         $db = $this->workbooks->database();
-        $records = $db->table('finance_records')->whereIntegerInRaw('id', array_column($row['events'], 'id'))
-            ->get(['id', 'payload', 'created_at'])->keyBy('id');
+        $records = FinanceRecord::query()->whereIntegerInRaw('id', array_column($row['events'], 'id'))->get()->keyBy('id');
         $ids = array_column($row['events'], 'transaction_row_id');
-        $payloads = $ids === [] ? collect() : $db->table('finance_payment_transactions')
-            ->whereIntegerInRaw('id', $ids)->pluck('raw_payload', 'id');
+        $payloads = $ids === [] ? [] : (app(FinanceSourceStorage::class)->active('payment')
+            ? app(FinanceSourceStorage::class)->load('payment', $ids)
+            : $db->table('finance_payment_transactions')->whereIntegerInRaw('id', $ids)->pluck('raw_payload', 'id')->all());
         $headers = FinanceCatalog::dataset('paypal-orders')['headers'];
         foreach ($row['events'] as &$event) {
             $record = $records->get($event['id']);
-            $payload = json_decode($record->payload ?? '{}', true) ?? [];
+            $payload = $record?->payload ?? [];
             $normalized = [];
             foreach ($payload as $key => $value) {
                 $normalized[FinanceCatalog::simplified((string) $key)] = $value;
             }
-            $raw = json_decode($payloads[$event['transaction_row_id'] ?? 0] ?? '{}', true) ?? [];
+            $raw = $payloads[$event['transaction_row_id'] ?? 0] ?? [];
+            if (is_string($raw)) $raw = json_decode($raw, true) ?? [];
             $info = $raw['transaction_info'] ?? [];
             $event['invoice'] = $info['invoice_id'] ?? $event['invoice'] ?? $normalized['账单号码'] ?? '';
             $event['status_label'] = match ($event['status']) {
@@ -529,8 +530,13 @@ class FinancePayPalSettlementOrders
             $transactions->select('txn.id');
         }
         $transactions->addSelect('txn.finance_record_id', 'txn.payment_account_id', 'txn.transaction_id',
-            'txn.event_code', 'record.occurred_at', 'record.payload->'.FinancePayPalSourceEdits::KEY.'->payload as finance_source_edits');
-        if ($mysql) {
+            'txn.event_code', 'record.occurred_at');
+        $structuredRecords = app(FinanceSourceStorage::class)->active('record');
+        $structuredPayments = app(FinanceSourceStorage::class)->active('payment');
+        if (! $structuredRecords) $transactions->addSelect('record.payload->'.FinancePayPalSourceEdits::KEY.'->payload as finance_source_edits');
+        if ($structuredPayments) {
+            foreach (['related_id', 'related_type', 'invoice_id', 'amount', 'amount_currency', 'fee_amount', 'transaction_status', 'transaction_updated_date'] as $field) $transactions->addSelect('txn.'.$field);
+        } elseif ($mysql) {
             $source = $db->getQueryGrammar()->wrap('txn.raw_payload');
             $fields = ['paypal_reference_id', 'paypal_reference_id_type', 'invoice_id', 'transaction_amount',
                 'fee_amount', 'transaction_status', 'transaction_updated_date'];
@@ -542,9 +548,20 @@ class FinancePayPalSettlementOrders
         if ($recordId !== null) {
             $transactions->addSelect('event_type.category as configured_category');
         }
-        $transactionRows = \Illuminate\Support\LazyCollection::make(function () use ($transactions, $transactionIds): iterable {
+        $transactionRows = \Illuminate\Support\LazyCollection::make(function () use ($transactions, $transactionIds, $structuredRecords, $structuredPayments): iterable {
             foreach (array_chunk($transactionIds, 500) as $ids) {
-                yield from (clone $transactions)->whereIntegerInRaw('txn.id', $ids)->orderBy('txn.id')->get();
+                $batch = (clone $transactions)->whereIntegerInRaw('txn.id', $ids)->orderBy('txn.id')->get();
+                $edits = $structuredRecords ? app(FinanceSourceStorage::class)->load('record', $batch->pluck('finance_record_id')->all()) : [];
+                foreach ($batch as $txn) {
+                    if ($structuredRecords) $txn->finance_source_edits = $edits[$txn->finance_record_id][FinancePayPalSourceEdits::KEY]['payload'] ?? [];
+                    if ($structuredPayments) $txn->transaction_info = [
+                        'paypal_reference_id' => $txn->related_id, 'paypal_reference_id_type' => $txn->related_type, 'invoice_id' => $txn->invoice_id,
+                        'transaction_amount' => ['value' => FinanceSourceStorage::money($txn->amount), 'currency_code' => $txn->amount_currency],
+                        'fee_amount' => ['value' => FinanceSourceStorage::money($txn->fee_amount)],
+                        'transaction_status' => $txn->transaction_status, 'transaction_updated_date' => $txn->transaction_updated_date,
+                    ];
+                    yield $txn;
+                }
             }
         });
         foreach ($transactionRows as $txn) {
@@ -559,8 +576,9 @@ class FinancePayPalSettlementOrders
             if (! $known && ($recordId === null || $deleted)) {
                 continue;
             }
-            $info = json_decode((string) $txn->transaction_info, true) ?? [];
-            $info = FinancePayPalSourceEdits::transactionInfo($info, json_decode((string) $txn->finance_source_edits, true) ?? []);
+            $info = is_array($txn->transaction_info) ? $txn->transaction_info : (json_decode((string) $txn->transaction_info, true) ?? []);
+            $edits = is_array($txn->finance_source_edits) ? $txn->finance_source_edits : (json_decode((string) $txn->finance_source_edits, true) ?? []);
+            $info = FinancePayPalSourceEdits::transactionInfo($info, $edits);
             $relatedId = $info['paypal_reference_id'] ?? '';
             $relatedType = $relatedId !== '' ? ($info['paypal_reference_id_type'] ?? '') : '';
             if (str_starts_with($txn->event_code, 'T02') && (isset($withdrawals[$txn->payment_account_id][$txn->transaction_id])
@@ -697,7 +715,7 @@ class FinancePayPalSettlementOrders
             $result['manual_values'], $result['source_date'], $result['editor_values']);
         $result['payments'] = [$payment];
         foreach (['subscription', 'upsell'] as $field) {
-            if (blank($result[$field])) {
+            if (blank($result[$field]) && ! array_key_exists($field, $protected)) {
                 $result[$field] = '未匹配';
             }
         }
@@ -705,7 +723,10 @@ class FinancePayPalSettlementOrders
         $result['paypal_12'] = $root['related_id'] ?? $payment['paypal_12'];
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
 
-        return array_replace($result, $protected);
+        // These dimensions already include manual edits followed by canonical classification.
+        // Department and region are derived; legacy overrides cannot replace them here.
+        return array_replace($result, array_diff_key($protected,
+            array_flip(['domain', 'owner', 'team', 'operation_region', 'subscription', 'upsell'])));
     }
 
     private function paymentTeam(array $payment): string
@@ -1087,7 +1108,8 @@ class FinancePayPalSettlementOrders
         if ($includeDetails) {
             $result['events'] = $details;
         }
-        return array_replace($result, $protected);
+        return array_replace($result, array_diff_key($protected,
+            array_flip(['domain', 'owner', 'team', 'operation_region', 'subscription', 'upsell'])));
     }
 
     private function refundFromReleasedHold(array $root, array $events, Collection $holds, array $pairedDisputes,

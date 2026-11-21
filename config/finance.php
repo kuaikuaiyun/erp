@@ -8,6 +8,7 @@ return [
         'source_batch_size' => 2000,
         'source_request_concurrency' => 2,
         'source_cache_path' => env('FINANCE_SUMMARY_SOURCE_CACHE_PATH'),
+        'external_change_path' => env('FINANCE_SOURCE_CHANGE_PATH'),
     ],
     'relay' => [
         'ca_bundle' => env('FINANCE_RELAY_CA_BUNDLE'),

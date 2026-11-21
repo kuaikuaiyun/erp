@@ -212,14 +212,21 @@ class FinancePayPalSyncService
                                         ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
                                         'created_at' => $record->created_at, 'updated_at' => now(),
                                     ];
+                                    $storage = app(FinanceSourceStorage::class);
+                                    if ($storage->installed()) $transactionValues = $storage->prepare('payment', $transactionValues, $entry['raw']);
                                     // The editor may have corrected the transaction's displayed identity.
-                                    $linked = $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->first(['id']);
+                                    $linked = $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)
+                                        ->first($storage->installed() ? ['id', 'source_hash'] : ['id']);
                                     if ($linked) {
                                         $db->table('finance_payment_transactions')->where('id', $linked->id)->update($transactionValues);
                                     } else {
                                         $db->table('finance_payment_transactions')->updateOrInsert([
                                             'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
                                         ], $transactionValues);
+                                    }
+                                    if ($storage->installed() && ($linked?->source_hash !== $transactionValues['source_hash'])) {
+                                        $transactionId = $linked?->id ?? $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->value('id');
+                                        $storage->write('payment', [$transactionId => ['document' => $entry['raw']]]);
                                     }
                                     if ($record->raw_type) {
                                         app(FinanceWorkbookService::class)->registerType($record->raw_type);

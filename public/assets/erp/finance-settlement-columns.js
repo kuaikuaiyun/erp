@@ -41,10 +41,9 @@
     const missingDisplayFields = newDisplayFields.filter(field => !introducedDisplayFields.includes(field));
     let display = displayKeys.filter(field => selectedDisplay.includes(field) || missingDisplayFields.includes(field));
     let fields = withDefault(validKeys(saved.fields, exportKeys), exportKeys);
-    if (missingDisplayFields.includes('shop_difference_usd') && exportKeys.includes('shop_difference_usd')
-        && !fields.includes('shop_difference_usd')) {
-        fields.push('shop_difference_usd');
-    }
+    missingDisplayFields.forEach(field => {
+        if (exportKeys.includes(field) && !fields.includes(field)) fields.push(field);
+    });
     let templates = (Array.isArray(saved.templates) ? saved.templates : [])
         .filter(template => template && typeof template.name === 'string')
         .map(template => ({name: template.name, fields: validKeys(template.fields, exportKeys)}))

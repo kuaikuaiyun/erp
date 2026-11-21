@@ -28,6 +28,7 @@ class FinanceOnlineIndexMigrationTest extends TestCase
         $this->pdo = Mockery::mock(PDO::class);
         $this->schema = Mockery::mock(Builder::class);
         $this->schema->shouldReceive('hasColumn', 'hasIndex')->byDefault()->andReturn(false);
+        $this->schema->shouldReceive('hasColumn')->with('finance_records', 'payload')->byDefault()->andReturn(true);
         $this->db = Mockery::mock(Connection::class);
         $this->db->shouldReceive('getDriverName')->andReturn('mysql');
         $this->db->shouldReceive('getDatabaseName')->andReturn('finance_test');
@@ -183,5 +184,13 @@ class FinanceOnlineIndexMigrationTest extends TestCase
         app('migrator')->getRepository()->createRepository();
         $this->artisan('finance:indexes:apply')->expectsOutputToContain('本次未执行')->assertSuccessful();
         $this->assertSame([], app('migrator')->getRepository()->getRan());
+    }
+
+    public function test_retired_json_column_does_not_get_recreated_by_a_deferred_old_index(): void
+    {
+        $this->schema->shouldReceive('hasColumn')->with('finance_records', 'payload')->andReturn(false);
+        $this->lock(); $this->settings();
+        $this->pdo->shouldNotReceive('exec');
+        $this->migration()->up();
     }
 }

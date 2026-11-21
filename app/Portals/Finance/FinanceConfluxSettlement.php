@@ -267,8 +267,8 @@ class FinanceConfluxSettlement
             $sameReport = (clone $query)->where('report_hash', $report['hash']);
             $alreadyImported = $sameReport->exists();
             if ($alreadyImported && isset($report['settlement_type'])) {
-                $summary = (clone $sameReport)->where('kind', 'summary')->value('payload');
-                $previousType = json_decode($summary ?? '{}', true, 512, JSON_THROW_ON_ERROR)['_settlement_type'] ?? null;
+                $summary = (clone $sameReport)->where('kind', 'summary')->first();
+                $previousType = $summary ? (app(FinanceSourceStorage::class)->values('statement', $summary)['_settlement_type'] ?? null) : null;
                 if ($previousType !== null && $previousType !== $report['settlement_type']) {
                     throw ValidationException::withMessages(['file' => '这份账单已按「'.$previousType.'」导入，请核对所选结算类型。']);
                 }
@@ -277,7 +277,7 @@ class FinanceConfluxSettlement
                 app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
                 $stamp = now();
                 foreach (array_chunk($report['entries'], 80) as $entries) {
-                    $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
+                    $saved = array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
                         if (isset($report['settlement_type'])) {
                             $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
                             $payload['_settlement_type'] = $report['settlement_type'];
@@ -285,7 +285,9 @@ class FinanceConfluxSettlement
                         }
 
                         return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
-                    }, $entries));
+                    }, $entries);
+                    if (app(FinanceSourceStorage::class)->installed()) app(FinanceSourceStorage::class)->insert('statement', $saved);
+                    else $db->table(self::TABLE)->insert($saved);
                 }
             }
             $references = $sameReport->whereNotNull('reference')->distinct()->pluck('reference');
@@ -318,7 +320,7 @@ class FinanceConfluxSettlement
                 $items = $this->workbooks->database()->table(self::TABLE.' as entry')
                     ->where('entry.platform', 'ye')->where('entry.payment_account_id', $account->id)
                     ->whereIn('entry.reference', $unique)
-                    ->orderBy('entry.settlement_date')->orderBy('entry.id')->get(['entry.*'])->groupBy('reference');
+                    ->orderBy('entry.settlement_date')->orderBy('entry.id')->get(['entry.*'])->pipe(fn ($rows) => app(FinanceSourceStorage::class)->hydrate('statement', $rows))->groupBy('reference');
                 foreach ($items as $reference => $item) {
                     $entries->put($byReference->get($reference)->first()->id, $item);
                 }
@@ -355,7 +357,10 @@ class FinanceConfluxSettlement
     {
         $grammar = $query->getConnection()->getQueryGrammar();
         foreach ($columns as $column) {
-            $query->orWhereRaw('LOWER('.$grammar->wrap($column).') LIKE ?', ['%wallet%']);
+            $wrapped = str_starts_with($column, 'wallet_entry.payload->') && app(FinanceSourceStorage::class)->active('statement')
+                ? app(FinanceSourceStorage::class)->expression('statement', 'wallet_entry', [substr($column, strlen('wallet_entry.payload->'))])->getValue($grammar)
+                : $grammar->wrap($column);
+            $query->orWhereRaw('LOWER('.$wrapped.') LIKE ?', ['%wallet%']);
         }
     }
 
@@ -401,8 +406,8 @@ class FinanceConfluxSettlement
                         'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
                         'platform' => 'ye', 'report_hash' => $report->report_hash,
                     ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])
-                        ->select('id', 'kind', 'payload')->lazyById(1000);
-                    return $this->statementFees($bill, $report->settlement_date);
+                        ->select('id', 'kind')->when(! app(FinanceSourceStorage::class)->active('statement'), fn ($query) => $query->addSelect('payload'))->lazyById(1000);
+                    return $this->statementFees(app(FinanceSourceStorage::class)->stream('statement', $bill), $report->settlement_date);
                 });
                 continue;
             }
@@ -411,8 +416,8 @@ class FinanceConfluxSettlement
                     'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
                     'platform' => 'ye', 'report_hash' => $report->report_hash,
                 ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])
-                    ->select('id', 'kind', 'payload')->lazyById(1000);
-                $calculated = $this->statementFees($bill, $report->settlement_date);
+                    ->select('id', 'kind')->when(! app(FinanceSourceStorage::class)->active('statement'), fn ($query) => $query->addSelect('payload'))->lazyById(1000);
+                $calculated = $this->statementFees(app(FinanceSourceStorage::class)->stream('statement', $bill), $report->settlement_date);
                 $cachedEntries = array_sum(array_map('count', $reportFees->getArrayCopy()));
                 while ($reportFees->count() > 0 && ($reportFees->count() >= 64 || $cachedEntries + count($calculated) > 40000)) {
                     $oldest = array_key_first($reportFees->getArrayCopy());
@@ -447,7 +452,7 @@ class FinanceConfluxSettlement
         $days = [];
         $merchants = [];
         foreach ($bill as $entry) {
-            $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+            $payload = app(FinanceSourceStorage::class)->values('statement', $entry);
             $merchant = trim($payload['商户号'] ?? '');
             $descriptor = trim($payload['账单描述符'] ?? '');
             $tradeTime = $payload[$entry->kind === 'summary' ? '交易日期' : '交易时间'] ?? '';
@@ -568,7 +573,7 @@ class FinanceConfluxSettlement
         $amounts = [];
         foreach (self::AMOUNTS as $kind => [$field, $currencyField, $amountField]) {
             foreach ($byType->get($kind, []) as $entry) {
-                $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+                $payload = app(FinanceSourceStorage::class)->values('statement', $entry);
                 $currency = strtoupper($payload[$currencyField] ?? '');
                 $amount = $payload[$amountField] ?? '';
                 $currencies[$currency] = true;
@@ -611,7 +616,7 @@ class FinanceConfluxSettlement
             'exception_dates' => $exceptionDates->unique()->sort()->implode('、'),
             'dates' => $entries->pluck('settlement_date')->unique()->implode('、'),
             'settlement_types' => $entries->map(function ($entry): string {
-                $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+                $payload = app(FinanceSourceStorage::class)->values('statement', $entry);
 
                 return $payload['_settlement_type'] ?? '未标注';
             })->unique()->implode('、')];
@@ -675,7 +680,7 @@ class FinanceConfluxSettlement
             $total = '0';
             $currency = $settlementCurrency;
             foreach ($lines as $line) {
-                $payload = json_decode($line->payload, true, 512, JSON_THROW_ON_ERROR);
+                $payload = app(FinanceSourceStorage::class)->values('statement', $line);
                 $lineCurrency = strtoupper(trim((string) ($payload['结算货币'] ?? '')));
                 $amount = trim((string) ($payload['结算金额'] ?? ''));
                 if (! preg_match('/^[A-Z]{3}$/D', $lineCurrency)
@@ -701,7 +706,7 @@ class FinanceConfluxSettlement
         }
 
         return $entries->contains(function ($entry): bool {
-            $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+            $payload = app(FinanceSourceStorage::class)->values('statement', $entry);
 
             return stripos((string) ($payload['账单描述符'] ?? ''), 'wallet') !== false;
         });
@@ -741,7 +746,8 @@ class FinanceConfluxSettlement
             ->whereColumn('finance_records.account', 'merchant.activity_account')
             ->whereColumn('finance_records.reference', 'entry.reference');
         if (in_array($matches->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
-            $matches->forceIndex($this->hasOrderMatchIndex() ? 'finance_conflux_order_match_idx' : 'finance_records_dataset_account_ref_idx');
+            $matches->forceIndex(app(FinanceSourceStorage::class)->active('record') ? 'source_conflux_match_idx'
+                : ($this->hasOrderMatchIndex() ? 'finance_conflux_order_match_idx' : 'finance_records_dataset_account_ref_idx'));
         }
         $query = $this->workbooks->database()->table(self::TABLE.' as entry')
             ->join('finance_payment_accounts as merchant', 'merchant.id', '=', 'entry.payment_account_id')
@@ -831,7 +837,7 @@ class FinanceConfluxSettlement
                 ...$details['values'],
             ];
             foreach ($group as $item) {
-                $payload = json_decode($item->payload, true, 512, JSON_THROW_ON_ERROR);
+                $payload = app(FinanceSourceStorage::class)->values('statement', $item);
                 $layout['website_name'] ??= $payload['网站名称'] ?? $payload['账单描述符'] ?? null;
                 $layout['merchant_order'] ??= $payload['商户订单号'] ?? $payload['商户支付订单号'] ?? null;
                 $layout['status'] ??= $payload['交易状态'] ?? $payload['退款状态'] ?? null;
@@ -894,7 +900,7 @@ class FinanceConfluxSettlement
             $batch = $page->limit(500)->get();
             if ($batch->isEmpty()) return;
             $last = $batch->last();
-            yield from $batch;
+            yield from app(FinanceSourceStorage::class)->hydrate('statement', $batch);
         } while ($batch->count() === 500);
     }
 
@@ -902,7 +908,7 @@ class FinanceConfluxSettlement
     {
         $source = $query->getConnection();
         if (! in_array($source->getDriverName(), ['mysql', 'mariadb'], true)) {
-            yield from $query->cursor();
+            yield from app(FinanceSourceStorage::class)->stream('statement', $query->cursor());
             return;
         }
 
@@ -912,7 +918,7 @@ class FinanceConfluxSettlement
         $config['options'][\PDO::ATTR_PERSISTENT] = false;
         $reader = app('db.factory')->make($config, 'finance_statement_export');
         try {
-            yield from $reader->cursor($query->toSql(), $query->getBindings(), false);
+            yield from app(FinanceSourceStorage::class)->stream('statement', $reader->cursor($query->toSql(), $query->getBindings(), false));
         } finally {
             $reader->disconnect();
         }
@@ -922,7 +928,9 @@ class FinanceConfluxSettlement
     {
         $query = FinanceRecord::query()->from($table === 'finance_records' ? $table : 'finance_records as '.$table)
             ->when($account !== null, fn ($query) => $query->where($table.'.account', $account));
-        if ($this->hasOrderMatchIndex()) {
+        if (app(FinanceSourceStorage::class)->active('record')) {
+            $query->where($table.'.source_conflux_order', true);
+        } elseif ($this->hasOrderMatchIndex()) {
             $query->where($table.'.finance_is_conflux_order', true);
         } else {
             $query->where($table.'.dataset', 'xuzong2-details')->where($table.'.payload->_card_channel', 'ye');

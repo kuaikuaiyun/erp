@@ -8,6 +8,11 @@ use Throwable;
 /** Reuses canonical channel rows across report filters without changing financial calculations. */
 class FinanceSummarySourceCache
 {
+    private static function schemaVersion(string $channel): int
+    {
+        return FinanceSettlementService::summarySourceSchemaVersion($channel);
+    }
+
     private const ROW_FILTERS = ['account_key', 'owner', 'team', 'subscription', 'payment_method', 'payment_channel', 'currency'];
 
     public function __construct(private readonly FinanceSummaryDataVersion $versions) {}
@@ -42,7 +47,7 @@ class FinanceSummarySourceCache
         $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
         if ($channel === 'paypal') unset($filters['include_unmatched_fees']);
         ksort($filters);
-        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
+        $scope = hash('sha256', json_encode([self::schemaVersion($channel), $channel, $filters], JSON_THROW_ON_ERROR));
         $path = self::directory().'/'.$scope.'/v-'.$version.'.jsonl';
         return is_file($path) || $this->preparedParts($channel, $filters) !== null || $this->compatibleParts($channel, $filters) !== null;
     }
@@ -91,7 +96,7 @@ class FinanceSummarySourceCache
         if ($channel === 'paypal') {
             unset($filters['include_unmatched_fees']);
         }
-        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
+        $scope = hash('sha256', json_encode([self::schemaVersion($channel), $channel, $filters], JSON_THROW_ON_ERROR));
         $directory = self::directory().'/'.$scope;
         $path = $directory.'/v-'.$version.'.jsonl';
         if (is_file($path)) {
@@ -212,7 +217,7 @@ class FinanceSummarySourceCache
             ksort($chunk);
             $partVersion = $this->versions->forRange($channel, $chunk);
             if ($partVersion === null) return null;
-            $scope = hash('sha256', json_encode([4, $channel, $chunk], JSON_THROW_ON_ERROR));
+            $scope = hash('sha256', json_encode([self::schemaVersion($channel), $channel, $chunk], JSON_THROW_ON_ERROR));
             $path = self::directory().'/'.$scope.'/v-'.$partVersion.'.jsonl';
             if (! is_file($path)) return null;
             $parts[] = $path;
@@ -225,7 +230,7 @@ class FinanceSummarySourceCache
         ksort($filters);
         $version = $this->versions->forRange($channel, $filters);
         if ($version === null) return null;
-        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
+        $scope = hash('sha256', json_encode([self::schemaVersion($channel), $channel, $filters], JSON_THROW_ON_ERROR));
         $path = self::directory().'/'.$scope.'/v-'.$version.'.jsonl';
         return is_file($path) ? [$path] : $this->preparedParts($channel, $filters);
     }
