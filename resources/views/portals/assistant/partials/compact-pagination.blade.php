@@ -1,5 +1,5 @@
 @if($paginator->total() > 0)
-<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#f8fbfd;border-top:1px solid #dce7ee">
+<div class="compact-pagination" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#f8fbfd;border-top:1px solid #dce7ee">
     <span style="color:#687f91">显示 {{ $paginator->firstItem() }}-{{ $paginator->lastItem() }} 条，共 {{ $paginator->total() }} 条</span>
     @if($paginator->hasPages())
     <ul class="pagination pagination-sm" style="margin:0">

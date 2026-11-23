@@ -12,13 +12,14 @@
 .ad-screenshot{width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #d6e3eb;cursor:zoom-in}.ad-account{white-space:nowrap;color:#405f74}.ad-summary-table{min-width:1480px}
 .ad-summary-kpis{grid-template-columns:repeat(3,minmax(145px,1fr))}
 </style>
+<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261123-4">
 @endpush
 
 @section('content')
 <section class="content-header"><h1>广告费汇总 <small>统计 Shopify 订阅项目与服装项目审核通过的广告费提报</small></h1></section>
-<section class="content">
-    <div class="box ad-summary-filter"><div class="box-body">
-        <form method="get" action="{{ route('assistant.advertising-spend-summary.index') }}" class="ad-summary-toolbar" id="ad-summary-filter">
+<section class="content assistant-review-template">
+    <div class="box ad-summary-filter assistant-review-filter-card"><div class="box-body">
+        <form method="get" action="{{ route('assistant.advertising-spend-summary.index') }}" class="ad-summary-toolbar review-filter" id="ad-summary-filter">
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $dateTo }}" required></div>
             <div class="form-group"><label>项目类型</label><select class="form-control" name="project"><option value="">全部项目</option><option value="shopify" @selected($filters['project'] === 'shopify')>Shopify订阅项目</option><option value="fashion" @selected($filters['project'] === 'fashion')>服装项目</option></select></div>
@@ -27,16 +28,14 @@
             <div class="form-group"><label>运营</label><input class="form-control" type="text" name="operator" value="{{ $filters['operator'] }}" placeholder="输入运营姓名"></div>
             <div class="form-group"><label>账户名称</label><input class="form-control" type="text" name="account_name" value="{{ $filters['account_name'] }}" placeholder="输入账户名称"></div>
             <div class="form-group"><label>账户 ID</label><input class="form-control" type="text" name="account_number" value="{{ $filters['account_number'] }}" placeholder="输入账户ID"></div>
-            <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询汇总</button>
-            <a class="btn btn-default" href="{{ route('assistant.advertising-spend-summary.index') }}"><i class="fa fa-refresh"></i> 重置</a>
-            <div class="ad-range">{{ $dateFrom }} 至 {{ $dateTo }}</div>
+            <div class="assistant-review-filter-actions"><div class="ad-range">{{ $dateFrom }} 至 {{ $dateTo }}</div><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询汇总</button><a class="btn btn-default" href="{{ route('assistant.advertising-spend-summary.index') }}"><i class="fa fa-refresh"></i> 重置</a></div>
         </form>
     </div></div>
 
-    <div class="box ad-summary-box">
+    <div class="box ad-summary-box review-card">
         <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">逐条显示 Shopify 订阅项目与服装项目的广告明细；待审核和审核不通过的数据不参与统计。</p></div>
         <div class="box-body no-padding table-responsive">
-            <table class="table table-bordered table-hover ad-summary-table">
+            <table class="table table-bordered table-hover ad-summary-table review-table">
                 <thead><tr><th>项目类型</th><th>日期</th><th>运营名称</th><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>账面广告费($)</th><th>结算系数</th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图</th></tr></thead>
                 <tbody>
                 @forelse($rows as $row)
@@ -52,3 +51,7 @@
     </div>
 </section>
 @endsection
+
+@push('scripts')
+<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261123-3"></script>
+@endpush

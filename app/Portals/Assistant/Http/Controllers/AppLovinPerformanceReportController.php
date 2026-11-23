@@ -79,7 +79,13 @@ class AppLovinPerformanceReportController extends Controller
             'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
             'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
-            'ad_spend_sort' => ['nullable', Rule::in(['asc', 'desc'])],
+            'sort_by' => ['nullable', Rule::in([
+                'first_subscription_orders', 'subscription_rate', 'first_subscription_revenue',
+                'first_orders', 'first_revenue', 'ad_spend', 'roi', 'pre_takeover_consumption',
+                'global_total_consumption', 'total_consumption', 'deducted_consumption',
+                'historical_revenue', 'estimated_total_roi',
+            ])],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $timezone = (string) ($filters['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $today = now($timezone)->startOfDay();
@@ -371,6 +377,7 @@ class AppLovinPerformanceReportController extends Controller
                     'allocated_gift' => (float) $segmentMetrics['allocated_gift'],
                     'deducted_consumption' => $deductedConsumption,
                     'all_gift_deducted' => (bool) $segmentMetrics['all_gift_deducted'],
+                    'gift_calculations' => $segmentMetrics['calculations'],
                     'segment_keys' => $segmentMetrics['segment_keys'],
                     'historical_revenue' => $historicalRevenue,
                     'estimated_total_roi' => $deductedConsumption > 0 ? $historicalRevenue / $deductedConsumption : null,
@@ -416,10 +423,17 @@ class AppLovinPerformanceReportController extends Controller
         }
 
         $displayMode = (string) ($filters['display_mode'] ?? 'performance');
-        $adSpendSort = (string) ($filters['ad_spend_sort'] ?? 'desc');
-        $rows = $rows->sort(function (array $left, array $right) use ($adSpendSort): int {
-            $comparison = (float) $left['ad_spend'] <=> (float) $right['ad_spend'];
-            if ($adSpendSort === 'desc') {
+        $sortBy = (string) ($filters['sort_by'] ?? 'ad_spend');
+        $sortDirection = (string) ($filters['sort_direction'] ?? 'desc');
+        $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortDirection): int {
+            $leftValue = $left[$sortBy] ?? null;
+            $rightValue = $right[$sortBy] ?? null;
+            if ($leftValue === null || $rightValue === null) {
+                $comparison = $leftValue === $rightValue ? 0 : ($leftValue === null ? 1 : -1);
+            } else {
+                $comparison = (float) $leftValue <=> (float) $rightValue;
+            }
+            if ($sortDirection === 'desc' && $leftValue !== null && $rightValue !== null) {
                 $comparison *= -1;
             }
 
@@ -483,7 +497,8 @@ class AppLovinPerformanceReportController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
             'displayMode' => $displayMode,
-            'adSpendSort' => $adSpendSort,
+            'sortBy' => $sortBy,
+            'sortDirection' => $sortDirection,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'timezone' => $timezone,

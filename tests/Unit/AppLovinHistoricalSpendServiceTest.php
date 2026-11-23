@@ -60,5 +60,18 @@ class AppLovinHistoricalSpendServiceTest extends TestCase
             'start_date' => '2026-11-04',
             'end_date' => '2026-11-23',
         ], $service->segmentFor($ledger, '1343-777-812', 2, 'subscription', '2026-11-20'));
+
+        $metrics = $service->segmentMetricsForAccounts(
+            $ledger,
+            ['1343777812'],
+            2,
+            'subscription',
+            '2026-11-20',
+            ['1343777812'],
+        );
+        self::assertSame(4807.43, $metrics['allocated_gift']);
+        self::assertSame(3659.87, $metrics['deducted_consumption']);
+        self::assertSame(0.0, $metrics['calculations'][0]['gift_at_start']);
+        self::assertSame(4807.43, $metrics['calculations'][0]['gift_at_end']);
     }
 }

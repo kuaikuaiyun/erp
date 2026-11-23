@@ -151,7 +151,7 @@ class AppLovinHistoricalSpendService
     /**
      * @param  iterable<string>  $accountNumbers
      * @param  iterable<string>  $giftAccountNumbers
-     * @return array{before_consumption:float,segment_consumption:float,allocated_gift:float,deducted_consumption:float,all_gift_deducted:bool,segment_keys:list<string>}
+     * @return array{before_consumption:float,segment_consumption:float,allocated_gift:float,deducted_consumption:float,all_gift_deducted:bool,segment_keys:list<string>,calculations:list<array<string,mixed>>}
      */
     public function segmentMetricsForAccounts(
         Collection $ledger,
@@ -170,6 +170,7 @@ class AppLovinHistoricalSpendService
             'allocated_gift' => 0.0,
             'deducted_consumption' => 0.0,
             'segment_keys' => [],
+            'calculations' => [],
         ];
 
         foreach (collect($accountNumbers)->map(fn ($number): string => self::normalizeAccountNumber((string) $number))->filter()->unique() as $number) {
@@ -177,12 +178,27 @@ class AppLovinHistoricalSpendService
             $before = (float) $segment['before_consumption'];
             $consumption = (float) $segment['segment_consumption'];
             $hasGift = $giftNumbers->has($number);
+            $giftAtStart = $hasGift ? min(max($before - 5000, 0), 5000) : 0.0;
+            $giftAtEnd = $hasGift ? min(max($before + $consumption - 5000, 0), 5000) : 0.0;
             $allocatedGift = $this->allocatedGift($before, $consumption, $hasGift);
+            $deductedConsumption = round(max(0, $consumption - $allocatedGift), 2);
             $metrics['before_consumption'] += $before;
             $metrics['segment_consumption'] += $consumption;
             $metrics['allocated_gift'] += $allocatedGift;
-            $metrics['deducted_consumption'] += max(0, $consumption - $allocatedGift);
+            $metrics['deducted_consumption'] += $deductedConsumption;
             $metrics['segment_keys'][] = implode('|', [$number, $operatorUserId, $projectCode, $segment['start_date'] ?? '']);
+            $metrics['calculations'][] = [
+                'account_number' => $number,
+                'start_date' => $segment['start_date'],
+                'end_date' => $segment['end_date'],
+                'before_consumption' => round($before, 2),
+                'segment_consumption' => round($consumption, 2),
+                'has_gift' => $hasGift,
+                'gift_at_start' => round($giftAtStart, 2),
+                'gift_at_end' => round($giftAtEnd, 2),
+                'allocated_gift' => $allocatedGift,
+                'deducted_consumption' => $deductedConsumption,
+            ];
         }
 
         foreach (['before_consumption', 'segment_consumption', 'allocated_gift', 'deducted_consumption'] as $field) {
