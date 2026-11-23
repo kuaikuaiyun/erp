@@ -1,7 +1,11 @@
 <?php
 
 return [
-    'overviews' => ['background' => env('FINANCE_BACKGROUND_OVERVIEWS', true)],
+    'overviews' => [
+        'background' => env('FINANCE_BACKGROUND_OVERVIEWS', true),
+        'auto_start' => env('FINANCE_OVERVIEW_AUTO_START', true),
+        'php_binary' => env('FINANCE_OVERVIEW_PHP_BINARY'),
+    ],
     'diagnostics' => [
         'enabled' => env('FINANCE_QUERY_DIAGNOSTICS', true),
     ],

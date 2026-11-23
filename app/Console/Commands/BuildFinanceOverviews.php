@@ -26,7 +26,9 @@ class BuildFinanceOverviews extends Command
         $execution = (int) ini_get('max_execution_time');
         set_time_limit(900);
         try {
-            $stats = $jobs->run();
+            // A cold month can take longer than 45 seconds by itself. Continue
+            // draining the already queued work within the command's time budget.
+            $stats = $jobs->run(seconds: 600);
             $trace->event('overview.worker.summary', $stats, true);
             $this->line(json_encode($stats, JSON_UNESCAPED_UNICODE));
             return $stats['failed'] ? self::FAILURE : self::SUCCESS;

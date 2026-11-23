@@ -8,7 +8,7 @@ class AppLovinAccountStoreBinding extends Model
 {
     protected $table = 'applovin_account_store_bindings';
 
-    protected $fillable = ['account_key', 'assistant_domain_store_id', 'bound_by'];
+    protected $fillable = ['account_key', 'account_number', 'assistant_domain_store_id', 'bound_by'];
 
     public function __construct(array $attributes = [])
     {

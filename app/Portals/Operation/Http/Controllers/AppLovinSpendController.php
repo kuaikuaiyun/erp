@@ -128,8 +128,9 @@ class AppLovinSpendController extends Controller
                 $agency=(string)($first['agency']??''); $media=(string)($first['media_source']??''); $number=trim((string)($first['account_number']??''));
                 $names=$rows->pluck('account_name')->map(fn($name)=>trim((string)$name))->filter()->values();
                 $name=$names->filter(fn($candidate)=>$candidate!==$number&&!ctype_digit($candidate))->last() ?: $names->last() ?: $number;
+                $storeDomain = (string) ($rows->pluck('store_domain')->filter()->last() ?: '');
                 return ['account_key'=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number),'operator_user_id'=>(int)$first['operator_user_id'],'operation_department_id'=>$first['operation_department_id'],'operator_name' => $first['operator_name'], 'department' => $first['department'], 'agency' => $agency, 'media' => $media, 'account_name' => $name, 'account_number' => $number,
-                    'total' => (float) $rows->sum('actual_spend'), 'details' => $rows->values()];
+                    'store_domain' => $storeDomain, 'total' => (float) $rows->sum('actual_spend'), 'details' => $rows->values()];
             })->sortByDesc('total')->values();
     }
 
