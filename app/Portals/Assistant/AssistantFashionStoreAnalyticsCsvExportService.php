@@ -7,6 +7,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -59,6 +60,10 @@ class AssistantFashionStoreAnalyticsCsvExportService
         $from = CarbonImmutable::parse($filters['from_date'].' 00:00:00', $filters['timezone'])->utc();
         $to = CarbonImmutable::parse($filters['to_date'].' 00:00:00', $filters['timezone'])->addDay()->utc();
         $query = FashionLogisticsOrder::query()->whereIn('assistant_domain_store_id', $storeIds)->whereNotNull('paid_at_utc')
+            ->where(function (Builder $paid): void {
+                $paid->whereNotIn(DB::raw('LOWER(TRIM(source_platform))'), ['nbc', 'shopyy'])
+                    ->orWhere('payment_status', '230');
+            })
             ->where('paid_at_utc', '>=', $from)->where('paid_at_utc', '<', $to)
             ->selectRaw('assistant_domain_store_id, COUNT(*) orders_count, COALESCE(SUM(total_amount),0) total_sales, MAX(paid_at_utc) last_paid_at, MAX(source_synced_at) last_synced_at');
         if ($dates !== null) {

@@ -19,7 +19,7 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>{{ $reportProjectLabel }}运营报表 <small>对应项目 XShoppy、Shopline 店铺业绩与广告花费统计</small></h1></section>
+<section class="content-header"><h1>{{ $reportProjectLabel }}运营报表 <small>对应项目店铺业绩与广告花费统计</small></h1></section>
 <section class="content">
 @if($isDashboard)<div class="dashboard-mode-switch" role="group" aria-label="数据模式切换"><button type="button" class="{{ $isPersonalMode ? 'active' : '' }}" data-dashboard-mode="personal"><i class="fa fa-user"></i>个人模式<small>按人员查看盈亏与 ROI</small></button><button type="button" class="{{ !$isPersonalMode ? 'active' : '' }}" data-dashboard-mode="performance"><i class="fa fa-bar-chart"></i>业绩模式<small>查看运营部门业绩明细</small></button></div>@endif
 <div class="box fashion-report-filter"><div class="box-body"><form class="report-filter" method="get"><input type="hidden" name="project_code" value="{{ $reportProject['code'] }}">

@@ -11,7 +11,7 @@
 @php
 $sortUrl=function($field)use($filters,$reportProject){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['project_code'=>$reportProject['code'],'sort'=>$field,'direction'=>$direction]));};
 @endphp
-<section class="content-header"><h1>{{ $reportProjectLabel }}店铺分析 <small>统计对应项目 XShoppy、Shopline 店铺订单与营业额</small></h1></section>
+<section class="content-header"><h1>{{ $reportProjectLabel }}店铺分析 <small>统计对应项目店铺订单与营业额</small></h1></section>
 <section class="content">
 <div class="fashion-analytics-summary">
 <div class="fashion-kpi"><span>店铺数</span><strong>{{ number_format($summary['stores_count']) }}</strong></div>
@@ -23,7 +23,7 @@ $sortUrl=function($field)use($filters,$reportProject){$direction=$filters['sort'
 <div class="box fashion-filter"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><form method="get" action="{{ route('assistant.fashion-store-analytics.index') }}"><input type="hidden" name="project_code" value="{{ $reportProject['code'] }}"><div class="box-body fashion-filter-body fashion-filter-grid">
 <div class="form-group"><label>店铺名</label><input class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}" placeholder="请输入店铺名"></div>
 <div class="form-group"><label>域名</label><input class="form-control" name="domain" value="{{ $filters['domain'] }}" placeholder="请输入域名"></div>
-<div class="form-group"><label>建站平台</label><select class="form-control" name="platform"><option value="">全部</option><option value="xshoppy" @selected($filters['platform']==='xshoppy')>XShoppy</option><option value="shopline" @selected($filters['platform']==='shopline')>Shopline</option></select></div>
+<div class="form-group"><label>建站平台</label><select class="form-control" name="platform"><option value="">全部</option>@foreach($platformOptions as $value=>$label)<option value="{{ $value }}" @selected($filters['platform']===$value)>{{ $label }}</option>@endforeach</select></div>
 <div class="form-group"><label>团队</label><select class="form-control" name="team"><option value="">全部团队</option>@foreach($teamOptions as $team)<option value="{{ $team }}" @selected($filters['team']===$team)>{{ $team }}</option>@endforeach</select></div>
 <div class="form-group"><label>归属状态</label><select class="form-control" name="owner_assignment"><option value="">全部</option><option value="assigned" @selected($filters['owner_assignment']==='assigned')>已归属</option><option value="unassigned" @selected($filters['owner_assignment']==='unassigned')>未归属</option></select></div>
 <div class="form-group"><label>邮箱购买</label><select class="form-control" name="email_purchased"><option value="">全部</option><option value="1" @selected($filters['email_purchased']==='1')>已购买</option><option value="0" @selected($filters['email_purchased']==='0')>未购买</option></select></div>
