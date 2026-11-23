@@ -18,9 +18,13 @@ $indexRefresh = Schedule::command('finance:indexes:apply')->everyMinute()->witho
 $summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()
     ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));
 
+$overviewBuilder = Schedule::command('finance:overviews:build')->everyMinute()
+    ->sendOutputTo(storage_path('logs/finance-overviews-schedule.log'));
+
 if (! $financeScheduleOnly) {
     $balanceRefresh->runInBackground();
     $orderWorker->runInBackground();
     $indexRefresh->runInBackground();
     $summaryRefresh->runInBackground();
+    $overviewBuilder->runInBackground();
 }

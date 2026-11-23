@@ -3,6 +3,7 @@
 namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AssistantAdvertisingAgency;
 use App\Models\OperationReport;
 use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -50,19 +51,36 @@ class AdvertisingSpendAnalysisController extends Controller
             ->whereIn('operation_department_id', $visibleDepartmentIds)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->get(['id', 'report_date', 'advertising_rows']);
+        $assistantDepartmentIds = collect($visibleDepartmentIds)
+            ->flatMap(fn ($departmentId) => $this->assistantStoreOwners
+                ->assistantDepartmentIdsForOperationDepartment((int) $departmentId))
+            ->map(fn ($id) => (int) $id)->unique()->values();
+        $agencies = AssistantAdvertisingAgency::query()->with('advertisingMedia')
+            ->whereIn('assistant_department_id', $assistantDepartmentIds)->get()
+            ->keyBy(fn (AssistantAdvertisingAgency $agency) => (int) $agency->getKey());
 
-        $shopifyRows = $reports->flatMap(function (OperationReport $report): array {
-            return collect($report->advertising_rows ?: [])->map(function (array $advertising) use ($report): array {
+        $shopifyRows = $reports->flatMap(function (OperationReport $report) use ($agencies): array {
+            return collect($report->advertising_rows ?: [])->map(function (array $advertising) use ($report, $agencies): array {
                 $bookSpend = (float) ($advertising['book_spend'] ?? 0);
                 $coefficient = (float) ($advertising['settlement_coefficient'] ?? 0);
                 $handlingFee = (float) ($advertising['handling_fee'] ?? ($bookSpend * $coefficient));
+                $storedAgencyName = (string) ($advertising['agency'] ?? '');
+                $storedMediaName = (string) ($advertising['media_source'] ?? '');
+                $agencyId = (int) ($advertising['agency_id'] ?? 0);
+                $agency = $agencies->get($agencyId) ?: $this->matchConfiguredAgency($agencies, $storedAgencyName, $storedMediaName);
+                $agencyId = (int) ($agency?->getKey() ?? 0);
+                $mediaId = (int) ($advertising['media_id'] ?? $agency?->advertising_media_id ?? 0);
+                $agencyName = $this->normalizeDimension((string) ($agency?->name ?? $storedAgencyName), '未填写代理');
+                $mediaName = $this->normalizeDimension((string) ($agency?->advertisingMedia?->name ?? $storedMediaName), '其他');
 
                 return [
                     'project' => 'shopify',
                     'project_label' => 'Shopify订阅项目',
                     'date' => $report->report_date->format('Y-m-d'),
-                    'agency' => trim((string) ($advertising['agency'] ?? '')) ?: '未填写代理',
-                    'media' => trim((string) ($advertising['media_source'] ?? '')) ?: '其他',
+                    'agency_key' => $this->dimensionKey($agencyId, $agencyName),
+                    'media_key' => $this->dimensionKey($mediaId, $mediaName),
+                    'agency' => $agencyName,
+                    'media' => $mediaName,
                     'book_spend' => $bookSpend,
                     'actual_spend' => (float) ($advertising['actual_spend'] ?? ($bookSpend + $handlingFee)),
                 ];
@@ -73,34 +91,47 @@ class AdvertisingSpendAnalysisController extends Controller
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereHas('submitter.departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleDepartmentIds))
             ->with('adSpendEntries')->get();
-        $fashionRows = $fashionReports->flatMap(function (FashionAdvertisingReport $report): array {
-            return $report->adSpendEntries->map(fn ($entry): array => [
-                'project' => 'fashion', 'project_label' => '服装项目',
-                'date' => $report->report_date->format('Y-m-d'),
-                'agency' => trim((string) $entry->agency) ?: '未填写代理',
-                'media' => trim((string) $entry->media) ?: '其他',
-                'book_spend' => (float) $entry->book_spend_usd,
-                'actual_spend' => (float) $entry->actual_spend_usd,
-            ])->all();
+        $fashionRows = $fashionReports->flatMap(function (FashionAdvertisingReport $report) use ($agencies): array {
+            return $report->adSpendEntries->map(function ($entry) use ($report, $agencies): array {
+                $agency = $this->matchConfiguredAgency($agencies, (string) $entry->agency, (string) $entry->media);
+                $agencyName = $this->normalizeDimension((string) ($agency?->name ?? $entry->agency), '未填写代理');
+                $mediaName = $this->normalizeDimension((string) ($agency?->advertisingMedia?->name ?? $entry->media), '其他');
+
+                return [
+                    'project' => 'fashion', 'project_label' => '服装项目',
+                    'date' => $report->report_date->format('Y-m-d'),
+                    'agency_key' => $this->dimensionKey($agency?->getKey(), $agencyName),
+                    'media_key' => $this->dimensionKey($agency?->advertising_media_id, $mediaName),
+                    'agency' => $agencyName,
+                    'media' => $mediaName,
+                    'book_spend' => (float) $entry->book_spend_usd,
+                    'actual_spend' => (float) $entry->actual_spend_usd,
+                ];
+            })->all();
         })->values();
         $allRows = collect()
             ->when($selectedProject !== 'fashion', fn ($rows) => $rows->concat($shopifyRows))
             ->when($selectedProject !== 'shopify', fn ($rows) => $rows->concat($fashionRows))
+            ->map(fn (array $row): array => [
+                ...$row,
+                'agency_group_key' => $this->displayGroupKey((string) $row['agency']),
+                'media_group_key' => $this->displayGroupKey((string) $row['media']),
+            ])
             ->values();
 
-        $agencyOptions = $allRows->pluck('agency')->unique()->sort()->values();
-        $mediaOptions = $allRows->pluck('media')->unique()->sort()->values();
-        $selectedAgency = trim((string) ($validated['agency'] ?? ''));
-        $selectedMedia = trim((string) ($validated['media'] ?? ''));
+        $agencyOptions = $allRows->sortBy('agency')->mapWithKeys(fn (array $row): array => [$row['agency_group_key'] => $row['agency']]);
+        $mediaOptions = $allRows->sortBy('media')->mapWithKeys(fn (array $row): array => [$row['media_group_key'] => $row['media']]);
+        $selectedAgency = $this->resolveSelectedKey((string) ($validated['agency'] ?? ''), $agencyOptions);
+        $selectedMedia = $this->resolveSelectedKey((string) ($validated['media'] ?? ''), $mediaOptions);
         $rows = $allRows->filter(function (array $row) use ($selectedAgency, $selectedMedia): bool {
-            if ($selectedAgency !== '' && mb_strtolower($row['agency']) !== mb_strtolower($selectedAgency)) return false;
-            if ($selectedMedia !== '' && mb_strtolower($row['media']) !== mb_strtolower($selectedMedia)) return false;
+            if ($selectedAgency !== '' && $row['agency_group_key'] !== $selectedAgency) return false;
+            if ($selectedMedia !== '' && $row['media_group_key'] !== $selectedMedia) return false;
             return true;
         })->values();
 
         $totalSpend = (float) $rows->sum('actual_spend');
         $summarize = static function ($items, string $field) use ($totalSpend) {
-            return $items->groupBy(fn (array $row): string => mb_strtolower($row[$field]))
+            return $items->groupBy($field.'_group_key')
                 ->map(function ($group) use ($field, $totalSpend): array {
                     $actual = (float) $group->sum('actual_spend');
                     return [
@@ -113,7 +144,7 @@ class AdvertisingSpendAnalysisController extends Controller
         };
         $agencyRows = $summarize($rows, 'agency');
         $mediaRows = $summarize($rows, 'media');
-        $allDetailRows = $rows->groupBy(fn (array $row): string => $row['project'].'|'.$row['date'].'|'.mb_strtolower($row['agency']).'|'.mb_strtolower($row['media']))
+        $allDetailRows = $rows->groupBy(fn (array $row): string => $row['project'].'|'.$row['date'].'|'.$row['agency_group_key'].'|'.$row['media_group_key'])
             ->map(function ($group): array {
                 $first = $group->first();
                 return [
@@ -151,5 +182,54 @@ class AdvertisingSpendAnalysisController extends Controller
             'totalSpend' => $totalSpend,
             'totalBookSpend' => (float) $rows->sum('book_spend'),
         ]);
+    }
+
+    private function normalizeDimension(string $value, string $fallback): string
+    {
+        $value = preg_replace('/[\p{Z}\s\p{Cf}\p{Cc}]+/u', ' ', $value) ?? $value;
+        $value = trim($value);
+
+        return $value !== '' ? $value : $fallback;
+    }
+
+    private function dimensionKey(?int $id, string $name): string
+    {
+        return $id ? 'id:'.$id : 'name:'.mb_strtolower($this->normalizeDimension($name, ''));
+    }
+
+    private function displayGroupKey(string $name): string
+    {
+        return 'label:'.mb_strtolower($this->normalizeDimension($name, ''));
+    }
+
+    private function matchConfiguredAgency($agencies, string $agencyName, string $mediaName): ?AssistantAdvertisingAgency
+    {
+        $agencyKey = mb_strtolower($this->normalizeDimension($agencyName, ''));
+        $mediaKey = mb_strtolower($this->normalizeDimension($mediaName, ''));
+        $matches = $agencies->filter(fn (AssistantAdvertisingAgency $agency): bool =>
+            mb_strtolower($this->normalizeDimension((string) $agency->name, '')) === $agencyKey
+            && mb_strtolower($this->normalizeDimension((string) $agency->advertisingMedia?->name, '')) === $mediaKey
+        );
+        if ($matches->count() === 1) return $matches->first();
+
+        // Historical JSON only stored names. If its media name was entered incorrectly
+        // but the agency has one unambiguous current configuration, use that agency's
+        // configured media ID/name for reporting without rewriting the historical row.
+        $agencyMatches = $agencies->filter(fn (AssistantAdvertisingAgency $agency): bool =>
+            mb_strtolower($this->normalizeDimension((string) $agency->name, '')) === $agencyKey
+        );
+
+        return $agencyMatches->count() === 1 ? $agencyMatches->first() : null;
+    }
+
+    private function resolveSelectedKey(string $selected, $options): string
+    {
+        $selected = trim($selected);
+        if ($selected === '' || $options->has($selected)) return $selected;
+
+        $normalized = mb_strtolower($this->normalizeDimension($selected, ''));
+        $matched = $options->search(fn (string $name): bool => mb_strtolower($name) === $normalized);
+
+        return $matched === false ? '' : (string) $matched;
     }
 }

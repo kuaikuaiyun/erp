@@ -101,4 +101,4 @@ document.querySelectorAll('form').forEach(function (form) {
 </script>
 @endpush
 
-@push('scripts')<script src="{{ asset('assets/erp/finance-report-preparing.js') }}?v=3"></script>@endpush
+@push('scripts')<script src="{{ asset('assets/erp/finance-report-preparing.js') }}?v={{ substr(hash_file('sha256', public_path('assets/erp/finance-report-preparing.js')), 0, 12) }}"></script>@endpush

@@ -97,6 +97,7 @@ class FinanceXuzongCreditReport
 
     public function linkedOrders(Collection $records): Collection
     {
+        FinanceRecord::preloadSourceFields($records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET));
         $linked = $records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)
             ->mapWithKeys(fn ($record) => [$record->id => $record->payload['_linked_logistics_id'] ?? null])->filter();
         $orders = $this->settlements->liveCreditReportOrders($records->reject(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)->pluck('id')->filter(fn ($id) => $id > 0)->concat($linked)->unique());

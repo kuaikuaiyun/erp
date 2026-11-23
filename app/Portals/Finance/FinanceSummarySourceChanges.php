@@ -33,11 +33,12 @@ class FinanceSummarySourceChanges
     /** Resolve a bounded batch before certifying cached inputs. Queue deletion cannot change its revision. */
     public function publish(Connection $db, int $limit = 1000): bool
     {
-        if (! app(FinanceExternalChanges::class)->drain($db, $limit)) return false;
-        if (app('request')->attributes->get('finance.report_read_only')) {
-            return ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
+        if (FinanceExternalChanges::readOnly()) {
+            return $this->reportReady($db);
         }
-        if (! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists()) return true;
+        $filesReady = app(FinanceExternalChanges::class)->drain($db);
+        // Publish accepted batches even while more files remain, so every worker pass makes progress.
+        if (! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists()) return $filesReady;
         $ids = $db->table('finance_summary_changes')->where('scopes_resolved', false)->orderBy('id')->limit($limit)->pluck('id')->all();
         $db->transaction(function () use ($db, $ids): void {
             // Lock existing IDs only; a range lock would block new outbox inserts
@@ -84,7 +85,7 @@ class FinanceSummarySourceChanges
             }
             $db->table('finance_summary_changes')->whereIntegerInRaw('id', $changes->pluck('id')->all())->update(['scopes_resolved' => true]);
         }, 3);
-        return ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
+        return $filesReady && ! $db->table('finance_summary_changes')->where('scopes_resolved', false)->exists();
     }
 
     private function scopes(Connection $db, string $source, array $values): array
@@ -92,6 +93,7 @@ class FinanceSummarySourceChanges
         if (in_array($source, ['scope_user', 'scope_membership', 'scope_department'], true)) return [['paypal', '*'], ['credit_card', '*']];
         if ($source === 'scope_account_day') return [[$values['channel'], $values['source_date']]];
         $records = $db->table('finance_records')->whereIn('dataset', self::DATASETS);
+        $matchedRows = null;
         $extra = [];
         if ($source === 'finance') {
             $keys = array_values(array_unique(array_filter(array_map(fn ($key) => trim((string) ($values[$key] ?? '')),
@@ -137,11 +139,15 @@ class FinanceSummarySourceChanges
                 $extra[] = [$platform, $date->addDay()->subSecond()->utc()->toDateString()];
             }
         } else {
-            $match = app(FinanceSummaryDependencies::class)->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $db);
-            $records = $db->table('finance_records as f')->whereIn('f.dataset', self::DATASETS)->whereRaw($match);
-            if ($source === 'scope_credit_refund') $records->where('f.dataset', '<>', 'paypal-orders');
+            $dependencies = app(FinanceSummaryDependencies::class);
+            $matchedRows = $dependencies->sourceRecords($source, $values, $db);
+            if ($matchedRows === null) {
+                $match = $dependencies->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $db);
+                $records = $db->table('finance_records as f')->whereIn('f.dataset', self::DATASETS)->whereRaw($match);
+                if ($source === 'scope_credit_refund') $records->where('f.dataset', '<>', 'paypal-orders');
+            }
         }
-        $rows = $records->get(['id', 'dataset', 'occurred_at']);
+        $rows = $matchedRows ?? $records->get(['id', 'dataset', 'occurred_at']);
         if ($source === 'finance') $rows = $rows->concat($this->relatedBusinessRecords($db, $rows->pluck('id')->all(), $values));
         $paypalIds = $rows->where('dataset', 'paypal-orders')->pluck('id')->all();
         if ($paypalIds !== [] || ($source === 'finance' && $values['dataset'] === 'paypal-orders')) {

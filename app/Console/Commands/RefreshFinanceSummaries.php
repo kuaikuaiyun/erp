@@ -59,7 +59,17 @@ class RefreshFinanceSummaries extends Command
             $tracksRevisions = \App\Portals\Finance\FinanceSummarySourceChanges::available($db);
             $failed = false;
             if ($tracksRevisions) {
-                $dependencies->resolve($db);
+                $ready = false;
+                $deadline = hrtime(true) + 20 * 1e9;
+                for ($pass = 0; $pass < 10; $pass++) {
+                    if ($ready = $dependencies->resolve($db)) break;
+                    if (hrtime(true) >= $deadline) break;
+                }
+                if (! $ready) {
+                    $this->recordStage('来源通知或依赖变更尚未处理完，等待下轮重试');
+                    $trace?->event('worker.pending', ['reason' => 'source_changes']);
+                    return self::FAILURE;
+                }
             }
             $this->recordStage('检查变更月份的结算计算行');
             if ($tracksRevisions && ! $projection->usesSourceFiles()) {
@@ -90,6 +100,10 @@ class RefreshFinanceSummaries extends Command
                     report($exception);
                     $failed = true;
                 }
+            }
+            if (! $failed && $paypalRefreshed && ! app(\App\Portals\Finance\FinanceSummarySourceChanges::class)->reportReady($db)) {
+                $this->recordStage('执行期间又有来源变更，等待下轮处理');
+                return self::FAILURE;
             }
             if (! $failed && $paypalRefreshed) $this->recordStage('本轮执行完成');
             return ! $failed && $paypalRefreshed ? self::SUCCESS : self::FAILURE;

@@ -26,7 +26,7 @@ class FinancePayPalSettlementProjection
         if (! $storage->installed()) return true;
         $db = $this->workbooks->database();
         $revision = $this->sourceRevision();
-        if ($revision === null) return true;
+        if ($revision === null) return false;
         $published = $db->table('finance_paypal_list_publications')->where('id', 1)->first();
         if ($published && hash_equals((string) $published->source_revision, $revision)) return true;
 

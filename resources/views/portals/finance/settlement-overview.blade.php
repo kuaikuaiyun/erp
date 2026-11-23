@@ -51,6 +51,9 @@
 </style>
 @endpush
 @section('finance_content')
+@if(isset($overviewCalculatedAt))
+<p class="text-muted">本次查询计算时间：{{ $overviewCalculatedAt }}（北京时间）。重新查询可获取新的计算结果。</p>
+@endif
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif

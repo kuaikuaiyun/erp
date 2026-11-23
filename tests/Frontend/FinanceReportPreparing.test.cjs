@@ -5,6 +5,33 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync('public/assets/erp/finance-report-preparing.js', 'utf8');
 
+test('overview tasks poll their own run without starting monthly HTTP calculations', async () => {
+    const calls = [];
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };
+    const plans = [
+        { waiting: true, background: 'overview', state: 'pending', message: '排队中', months: [], poll_url: '/poll' },
+        { waiting: true, background: 'overview', state: 'running', message: '计算中', months: [], poll_url: '/poll' },
+        { waiting: false, months: [], resume_url: '/ready?_overview_run=abc' },
+    ];
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        setTimeout: callback => callback(), fetch: async url => {
+            calls.push(url);
+            return { ok: true, headers: { get: () => 'application/json' }, json: async () => plans.shift() };
+        } });
+    assert.equal(await window.financePrepareReport(window.location.href), '/ready?_overview_run=abc');
+    assert.deepEqual(calls.slice(1), ['/poll', '/poll']);
+});
+
+test('failed overview tasks expose the backend failure instead of polling indefinitely', async () => {
+    const window = { location: { href: 'http://caiwu.kky.com/finance/reports/summary' } };
+    let calls = 0;
+    vm.runInNewContext(source, { window, URL, document: { querySelector: () => null },
+        fetch: async () => { calls++; return { ok: true, headers: { get: () => 'application/json' },
+            json: async () => ({ waiting: true, background: 'overview', state: 'failed', message: '后台计算失败', months: [] }) }; } });
+    await assert.rejects(window.financePrepareReport(window.location.href), /后台计算失败/);
+    assert.equal(calls, 1);
+});
+
 function harness(fail = false) {
     const calls = [];
     const window = { location: { href: 'http://caiwu.kky.com/finance/reports/losses' } };

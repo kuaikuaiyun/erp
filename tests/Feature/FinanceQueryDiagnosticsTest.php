@@ -78,7 +78,8 @@ class FinanceQueryDiagnosticsTest extends TestCase
         DB::connection()->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
             $table->increments('id'); $table->string('source'); $table->text('payload'); $table->boolean('scopes_resolved');
         });
-        (new MonitorFinancePerformance)->handle($request, function () {
+        FinanceQueryDiagnostics::start($request);
+        (function () {
             $notifications = new FinanceExternalChanges;
             $ticket = $notifications->begin(DB::connection());
             $this->assertNotNull($ticket);
@@ -86,7 +87,8 @@ class FinanceQueryDiagnosticsTest extends TestCase
             $this->assertTrue($notifications->drain(DB::connection()));
             $this->assertSame([], glob($notifications->directory(DB::connection()).'/change-*.json'));
             return response('done');
-        });
+        })();
+        FinanceQueryDiagnostics::current()?->finish('worker.end');
         $this->assertSame(1, DB::table('finance_summary_changes')->count());
         $this->assertSame('private-order-data', json_decode(DB::table('finance_summary_changes')->value('payload'), true)['reference']);
         $records = $this->records();
@@ -98,6 +100,53 @@ class FinanceQueryDiagnosticsTest extends TestCase
         $this->assertSame(1, $summary['delivered']);
         $this->assertSame(0, $summary['cleanup_failed']);
         $this->assertStringNotContainsString('private-order-data', file_get_contents($this->logPath));
+    }
+
+    public function test_all_finance_menus_counts_and_exports_leave_notifications_to_the_worker(): void
+    {
+        DB::connection()->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
+            $table->increments('id'); $table->string('source'); $table->text('payload'); $table->boolean('scopes_resolved');
+        });
+        $notifications = app(FinanceExternalChanges::class);
+        $ticket = $notifications->begin(DB::connection());
+        $notifications->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
+        foreach (['/finance/records/paypal-orders', '/finance/reports/xuzong-credit',
+            '/finance/reports/ye-settlement?settlement_total=1', '/finance/reports/worldpay-settlement/export',
+            '/finance/settings/types'] as $path) {
+            $request = $this->request($path);
+            (new MonitorFinancePerformance)->handle($request, function () use ($notifications, $ticket) {
+                $this->assertFalse($notifications->drain(DB::connection()));
+                $this->assertFileExists($ticket['path']);
+                $this->assertSame(0, DB::table('finance_summary_changes')->count());
+                return response('reader');
+            });
+        }
+        // The same durable notification is imported by the next CLI worker, without losing the source change.
+        request()->attributes->remove('finance.report_read_only');
+        $this->assertTrue($notifications->drain(DB::connection()));
+        $this->assertSame(1, DB::table('finance_summary_changes')->count());
+    }
+
+    public function test_notification_totals_survive_the_detailed_log_budget(): void
+    {
+        $request = $this->request();
+        DB::connection()->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
+            $table->increments('id'); $table->string('source'); $table->text('payload'); $table->boolean('scopes_resolved');
+        });
+        $notifications = app(FinanceExternalChanges::class);
+        for ($i = 0; $i < 120; $i++) {
+            $ticket = $notifications->begin(DB::connection());
+            $notifications->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
+        }
+        FinanceQueryDiagnostics::start($request);
+        $this->assertTrue($notifications->drain(DB::connection()));
+        FinanceQueryDiagnostics::current()?->finish('worker.end');
+        $records = $this->records();
+        $summary = array_values(array_filter($records, fn ($row) => $row['event'] === 'notifications.summary'));
+        $this->assertCount(1, $summary);
+        $this->assertSame(120, $summary[0]['processed']);
+        $this->assertSame(3, $summary[0]['transactions']);
+        $this->assertGreaterThan(0, end($records)['suppressed_events']);
     }
 
     public function test_exception_is_recorded_and_still_propagates_to_the_application(): void

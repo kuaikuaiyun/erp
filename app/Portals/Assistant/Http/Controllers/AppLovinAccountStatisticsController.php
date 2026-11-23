@@ -238,10 +238,12 @@ class AppLovinAccountStatisticsController extends Controller
             'department_ids.*' => ['integer', 'distinct', Rule::in($visibleDepartmentIds)],
             'keyword' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
+            'performance_sort' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])
             ->map(fn ($id): int => (int) $id)->unique()->values()->all();
         $keyword = trim((string) ($filters['keyword'] ?? ''));
+        $performanceSort = (string) ($filters['performance_sort'] ?? 'desc');
         $reports = $this->appLovinPersonalReports($context['user'], $visibleDepartmentIds, $selectedDepartmentIds);
         $rows = $this->appLovinPersonalRows($reports)
             ->when($keyword !== '', fn (Collection $items) => $items->filter(function (array $row) use ($keyword): bool {
@@ -249,11 +251,23 @@ class AppLovinAccountStatisticsController extends Controller
                 return str_contains(mb_strtolower($row['operator_name']), $needle)
                     || str_contains(mb_strtolower($row['account_number']), $needle)
                     || str_contains(mb_strtolower($row['account_name']), $needle);
-            }))
-            ->sort(function (array $left, array $right): int {
-                return [$left['department'], $left['operator_name'], -(float) $left['total_spend'], $left['account_number'], $left['account_name']]
-                    <=> [$right['department'], $right['operator_name'], -(float) $right['total_spend'], $right['account_number'], $right['account_name']];
-            })->values();
+            }));
+        $operatorPerformance = $rows->groupBy(fn (array $row): int => (int) $row['operator_user_id'])
+            ->map(fn (Collection $operatorRows): float => (float) $operatorRows->sum('store_performance'));
+        $direction = $performanceSort === 'asc' ? 1 : -1;
+        $rows = $rows->sort(function (array $left, array $right) use ($operatorPerformance, $direction): int {
+            $leftOperator = (int) $left['operator_user_id'];
+            $rightOperator = (int) $right['operator_user_id'];
+            $operatorComparison = ((float) $operatorPerformance->get($leftOperator, 0)) <=> ((float) $operatorPerformance->get($rightOperator, 0));
+            if ($operatorComparison !== 0) return $operatorComparison * $direction;
+            if ($leftOperator !== $rightOperator) {
+                return [$left['department'], $left['operator_name'], $leftOperator] <=> [$right['department'], $right['operator_name'], $rightOperator];
+            }
+            $performanceComparison = ((float) $left['store_performance']) <=> ((float) $right['store_performance']);
+            if ($performanceComparison !== 0) return $performanceComparison * $direction;
+
+            return [$left['account_number'], $left['account_name']] <=> [$right['account_number'], $right['account_name']];
+        })->values();
         $perPage = (int) ($filters['per_page'] ?? 20);
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, [
@@ -263,7 +277,7 @@ class AppLovinAccountStatisticsController extends Controller
         return view('portals.assistant.applovin-personal-situations.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator,
             'departmentOptions' => Department::business()->whereIn('id', $visibleDepartmentIds)->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']),
-            'filters' => ['department_ids' => $selectedDepartmentIds, 'keyword' => $keyword, 'per_page' => $perPage],
+            'filters' => ['department_ids' => $selectedDepartmentIds, 'keyword' => $keyword, 'per_page' => $perPage, 'performance_sort' => $performanceSort],
             'totals' => ['accounts' => $rows->count(), 'reached_2500' => $rows->filter(fn (array $row): bool => $row['reach_2500_date'] !== null)->count(), 'spend' => (float) $rows->sum('total_spend')],
         ]);
     }
@@ -271,7 +285,7 @@ class AppLovinAccountStatisticsController extends Controller
     /** @return Collection<int, OperationReport> */
     private function appLovinPersonalReports(AdminUser $viewer, array $visibleDepartmentIds, array $selectedDepartmentIds): Collection
     {
-        $query = OperationReport::query();
+        $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $this->canSeeAll($viewer)) {
             $visibleDepartmentIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $visibleDepartmentIds);
         }
@@ -311,7 +325,10 @@ class AppLovinAccountStatisticsController extends Controller
                     'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name,
                     'account_name' => $ad['account_name'], 'account_number' => $ad['account_number'], 'store_domains' => []];
                 if ($ad['domain'] !== '') {
-                    $activation[$ad['identity']]['store_domains'][mb_strtolower($ad['domain'])] = $ad['domain'];
+                    // Personal situation follows the subscription report's current
+                    // account binding instead of listing every historical domain.
+                    // Reports are ordered by date/id, so the latest approved binding wins.
+                    $activation[$ad['identity']]['store_domains'] = [mb_strtolower($ad['domain']) => $ad['domain']];
                 }
             }
             if ($report->status !== OperationReport::STATUS_APPROVED) continue;
@@ -376,7 +393,7 @@ class AppLovinAccountStatisticsController extends Controller
                 || ($overRoi !== null && $overRoi > 0 && $overRoi < 1.4);
             // array_merge is intentional: the activation payload holds domains as an
             // array while the table needs a displayable string.
-            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
+            return array_merge($account, ['store_domains' => $storeDomains, 'store_performance' => $storePerformance, 'total_spend' => $cumulative, 'total_roi' => $cumulative > 0 ? $storePerformance / $cumulative : null, 'reach_2500_date' => $reachDate, 'reach_2500_days' => $reachDays, 'reach_5000_date' => $reach5000Date, 'reach_5000_days' => $reach5000Days, 'over_5000_date' => $over5000Date, 'over_5000_days' => $over5000Days, 'reach_2500_performance' => $reach2500Performance, 'reach_5000_performance' => $reach5000Performance, 'over_5000_performance' => $over5000Performance, 'reach_2500_spend' => $reach2500Spend, 'reach_5000_spend' => $reach5000Spend, 'over_5000_spend' => $over5000Spend, 'reach_2500_roi' => $reach2500Roi, 'roi_2500_to_5000' => $midRoi, 'roi_over_5000' => $overRoi, 'is_below_target' => $isBelowTarget]);
         })->values();
     }
 

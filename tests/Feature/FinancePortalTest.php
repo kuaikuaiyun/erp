@@ -47,6 +47,7 @@ class FinancePortalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config(['finance.overviews.background' => false]);
         $this->sourceNotificationTestPath = storage_path('framework/testing/finance-external-events-'.bin2hex(random_bytes(6)));
         config(['finance.summaries.external_change_path' => $this->sourceNotificationTestPath]);
         $this->withoutMiddleware(\App\Http\Middleware\EnforceDingTalkSession::class);
@@ -3138,6 +3139,58 @@ class FinancePortalTest extends TestCase
         $controller = app(\App\Portals\Finance\Http\Controllers\FinanceController::class);
         $ready = new \ReflectionMethod($controller, 'calculationMonthReady');
         $this->assertTrue($ready->invoke($controller, 'summary', '2026-11', ['view' => 'transactions', 'channel' => 'ye']));
+    }
+
+    public function test_scoped_overviews_build_from_cold_data_while_notifications_remain_pending(): void
+    {
+        $account = $this->financePayPalAccount('独立查询账户');
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '日期' => '2026-10-03', '交易 ID' => 'SCOPED-OCT', '淨額' => '9.50'],
+            3 => [...$this->recordRow(), '日期' => '2026-11-03', '交易 ID' => 'SCOPED-NOV', '淨額' => '8.50'],
+        ], $account->activity_account, 'UTC', 1);
+        $urls = [
+            'losses' => '/finance/reports/losses?month_from=2026-10&month_to=2026-11&channel=paypal&loss_scope=PayPal',
+            'summary' => '/finance/reports/summary?month_from=2026-10&month_to=2026-11&channel=paypal',
+        ];
+        $expected = [];
+        foreach ($urls as $report => $url) $expected[$report] = $this->get($url)->assertOk()->viewData('monthlyLossGroups');
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        config(['finance.overviews.background' => true]);
+        \Illuminate\Support\Facades\Cache::store('array')->flush();
+        $notifications = app(\App\Portals\Finance\FinanceExternalChanges::class);
+        $ticket = $notifications->begin(DB::connection());
+        $notifications->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
+        foreach ($urls as $report => $url) {
+            $first = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+            $plan = $first->viewData('preparationPlan');
+            $this->assertSame('overview', $plan['background']);
+            $this->getJson($plan['poll_url'])->assertOk()->assertJsonPath('waiting', true);
+            $this->artisan('finance:overviews:build')->assertSuccessful();
+            $this->getJson($plan['poll_url'])->assertOk()->assertJsonPath('waiting', false);
+            $page = $this->get($plan['resume_url'])->assertOk()->assertViewIs('portals.finance.settlement-overview');
+            $this->assertSame($expected[$report], $page->viewData('monthlyLossGroups'), $report);
+            $this->assertNotEmpty($page->viewData('overviewCalculatedAt'));
+            $this->assertFileExists($ticket['path']);
+            // A fresh query gets a fresh task; it never silently presents the last run as current.
+            $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+        }
+    }
+
+    public function test_scoped_overview_mode_keeps_other_menus_on_their_original_pages(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        config(['finance.overviews.background' => true]);
+        DB::table('finance_read_model_jobs')->insert(['job_key' => str_repeat('f', 64), 'kind' => 'region-options',
+            'payload' => '{}', 'state' => 'running', 'attempts' => 0]);
+        foreach (['paypal-settlement', 'ye-settlement', 'worldpay-settlement', 'xuzong-credit'] as $report) {
+            $response = $this->get('/finance/reports/'.$report)->assertOk();
+            $this->assertStringNotContainsString('data-finance-source-plan', $response->getContent(), $report);
+        }
+        $this->artisan('finance:overviews:build')->assertSuccessful();
+        $this->assertSame(1, DB::table('finance_read_model_jobs')->count());
+        $this->assertSame('running', DB::table('finance_read_model_jobs')->value('state'));
     }
 
     public function test_reports_wait_for_source_changes_before_starting_calculations(): void

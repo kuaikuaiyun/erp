@@ -16,6 +16,36 @@ use Tests\TestCase;
 /** Creates only an isolated disposable database on a loopback MySQL server. */
 class FinanceScopedSourceMySqlTest extends TestCase
 {
+    public function test_scoped_overview_reads_one_snapshot_while_source_updates_continue(): void
+    {
+        (require database_path('migrations/2026_11_21_000010_separate_finance_read_models.php'))->up();
+        config(['cache.default' => 'array', 'finance.overviews.background' => true]);
+        $id = $this->record('2026-11-03', 'BEFORE-CONCURRENT-WRITE', 'paypal-orders');
+        config(['database.connections.scope_overview_writer' => $this->db->getConfig()]);
+        $other = DB::connection('scope_overview_writer');
+        $controller = \Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $calls = 0;
+        $controller->shouldReceive('buildSettlementOverviewMonth')->twice()->andReturnUsing(function ($month, $report, $scope, $options, $reuse) use ($id, $other, &$calls) {
+            $this->assertSame('losses', $report);
+            $this->assertFalse($reuse);
+            $reference = $this->db->table('finance_records')->where('id', $id)->value('reference');
+            if (++$calls === 1) $other->getPdo()->exec("UPDATE finance_records SET reference = 'AFTER-CONCURRENT-WRITE' WHERE id = ".(int) $id);
+            return [[$reference], [], null];
+        });
+        $this->app->instance(\App\Portals\Finance\Http\Controllers\FinanceController::class, $controller);
+        $jobs = app(\App\Portals\Finance\FinanceOverviewJobs::class);
+        $request = \Illuminate\Http\Request::create('http://caiwu.example/finance/reports/losses');
+        try {
+            $first = $jobs->prepare($request, 'losses', 1, ['2026-10', '2026-11'], []);
+            $this->artisan('finance:overviews:build')->assertSuccessful();
+            $complete = $jobs->prepare(\Illuminate\Http\Request::create($first['plan']['resume_url']), 'losses', 1, ['2026-10', '2026-11'], []);
+            $this->assertFalse($complete['plan']['waiting']);
+            foreach ($complete['result']['months'] as $result) $this->assertSame(['BEFORE-CONCURRENT-WRITE'], $result[0]);
+            $this->assertSame('AFTER-CONCURRENT-WRITE', $this->db->table('finance_records')->where('id', $id)->value('reference'));
+        } finally {
+            DB::purge('scope_overview_writer');
+        }
+    }
     public function test_retiring_summary_caches_requires_structured_storage_and_preserves_transactions(): void
     {
         $id = $this->record('2026-11-03', 'KEEP-SOURCE');
@@ -44,6 +74,75 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $databaseName = null;
     private ?string $cachePath = null;
     private Connection $db;
+
+    public function test_indexed_dependency_lookup_preserves_legacy_matching_and_uses_reference_indexes(): void
+    {
+        (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+        (require database_path('migrations/2026_11_21_000009_index_finance_dependency_references.php'))->up();
+        $this->db->getSchemaBuilder()->table('finance_records', fn (Blueprint $table) => $table->index('reference'));
+        $fixtures = [
+            ['paypal-orders', 'PAY-TXN', ' BILL ', null, null],
+            ['xuzong2-details', 'CARD-TXN', null, 'MERCHANT', 'SHOPIFY'],
+            ['xuzong2-details', 'REF-ONLY', null, null, null],
+            ['xuzong2-details', 'FASHION-TXN', null, null, null],
+            ['xuzong2-details', '0', null, null, null],
+            ['xuzong2-details', 'LONG-A', null, str_repeat('L', 191).'A', null],
+            ['xuzong2-details', 'LONG-B', null, str_repeat('L', 191).'B', null],
+        ];
+        foreach ($fixtures as [$dataset, $reference, $bill, $merchant, $shopify]) {
+            $id = $this->record('2026-11-03', $reference, $dataset);
+            $this->db->table('finance_records')->where('id', $id)->update([
+                'source_bill' => $bill, 'source_merchant' => $merchant, 'source_shopify' => $shopify,
+            ]);
+        }
+        app(\App\Portals\Finance\FinanceSourceStorage::class)->setState('record', 'active');
+        $orderId = $this->db->table('logistics_orders')->insertGetId(['transaction_id' => 'CARD-TXN', 'bill_number' => 'BILL', 'shopify_order_number' => 'SHOPIFY']);
+        $this->db->table('logistics_order_payment_references')->insert(['logistics_order_id' => $orderId, 'reference_number' => 'REF-ONLY']);
+        $fashionId = $this->db->table('fashion_logistics_orders')->insertGetId(['transaction_id' => 'FASHION-TXN']);
+        $dependencies = app(FinanceSummaryDependencies::class);
+        foreach ([['order', ['id' => $orderId, 'transaction_id' => 'MERCHANT']],
+            ['order', ['id' => 999999, 'transaction_id' => 'REF-ONLY']],
+            ['reference', ['reference_number' => 'BILL']], ['reference', ['reference_number' => '0']],
+            ['reference', ['reference_number' => str_repeat('L', 191).'A']],
+            ['reference', ['reference_number' => '']], ['reference', ['reference_number' => null]],
+            ['item', ['logistics_order_id' => $orderId]], ['scope_credit_refund', ['logistics_order_id' => $orderId]],
+            ['fashion', ['transaction_id' => 'FASHION-TXN']], ['fashion_item', ['fashion_logistics_order_id' => $fashionId]]] as [$source, $values]) {
+            $legacy = $this->db->table('finance_records as f')->whereIn('f.dataset', FinanceSummarySourceChanges::DATASETS)
+                ->whereRaw($dependencies->match($source === 'scope_credit_refund' ? 'item' : $source, $values, $this->db))
+                ->when($source === 'scope_credit_refund', fn ($query) => $query->where('f.dataset', '<>', 'paypal-orders'))->pluck('id')->sort()->values()->all();
+            $fast = $dependencies->sourceRecords($source, $values, $this->db);
+            $this->assertNotNull($fast);
+            $this->assertSame($legacy, $fast->pluck('id')->sort()->values()->all(), $source.' '.json_encode($values));
+        }
+        foreach (['source_bill_trimmed' => ['BILL', 'finance_dependency_bill_idx'],
+            'source_merchant' => ['MERCHANT', 'finance_dependency_merchant_idx'],
+            'source_shopify' => ['SHOPIFY', 'finance_dependency_shopify_idx']] as $column => [$value, $index]) {
+            $plan = $this->db->selectOne('EXPLAIN SELECT id FROM finance_records WHERE '.$column.' = ?', [$value]);
+            $this->assertStringContainsString($index, (string) $plan->possible_keys);
+        }
+    }
+
+    public function test_worker_reports_pending_and_skips_projection_when_notification_delivery_fails(): void
+    {
+        $notifications = new class extends \App\Portals\Finance\FinanceExternalChanges {
+            protected function openNotification(string $path, string $mode, ?string &$error)
+            {
+                if (str_starts_with(basename($path), 'change-')) { $error = 'Permission denied'; return false; }
+                return parent::openNotification($path, $mode, $error);
+            }
+        };
+        $this->app->instance(\App\Portals\Finance\FinanceExternalChanges::class, $notifications);
+        $ticket = $notifications->begin($this->db);
+        $notifications->commit($this->db, $ticket, [['source' => 'scope_user', 'values' => []]]);
+        $paypal = \Mockery::mock(\App\Portals\Finance\FinancePayPalSettlementProjection::class);
+        $paypal->shouldNotReceive('refresh');
+        $this->app->instance(\App\Portals\Finance\FinancePayPalSettlementProjection::class, $paypal);
+        $this->artisan('finance:summaries:refresh')->assertExitCode(1);
+        $status = \Illuminate\Support\Facades\Cache::get('finance:summaries:worker-status');
+        $this->assertStringContainsString('等待下轮重试', $status['stage']);
+        $this->assertFileExists($ticket['path']);
+        $this->assertSame('committed', json_decode(file_get_contents($ticket['path']), true)['state']);
+    }
 
     public function test_relational_sources_round_trip_events_nulls_types_and_unrecognized_fields(): void
     {

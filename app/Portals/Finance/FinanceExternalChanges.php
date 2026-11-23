@@ -51,11 +51,15 @@ class FinanceExternalChanges
         $handle = null; $path = null;
         try {
             $directory = $this->directory($db);
+            $missing = []; $parent = $directory;
+            while (! is_dir($parent) && dirname($parent) !== $parent) { $missing[] = $parent; $parent = dirname($parent); }
             if (! is_dir($directory) && ! @mkdir($directory, 0700, true) && ! is_dir($directory)) throw new \RuntimeException('无法创建财务来源通知目录。');
+            foreach (array_reverse($missing) as $created) $this->inheritOwner($created, $parent);
             $path = $directory.'/change-'.Str::uuid().'.json';
             $handle = @fopen($path, 'x+b');
             if ($handle === false || ! flock($handle, LOCK_EX | LOCK_NB)) throw new \RuntimeException('无法持久保存财务来源通知。');
             @chmod($path, 0600);
+            $this->inheritOwner($path, $directory);
             $this->write($handle, ['state' => 'pending']);
             return ['path' => $path, 'handle' => $handle];
         } catch (Throwable $error) {
@@ -63,6 +67,15 @@ class FinanceExternalChanges
             self::failure($error);
             return null;
         }
+    }
+
+    /** Root-run maintenance must not leave private files unreadable by the directory's application owner. */
+    private function inheritOwner(string $path, string $directory): void
+    {
+        if (! function_exists('posix_geteuid') || posix_geteuid() !== 0) return;
+        $owner = fileowner($directory); $group = filegroup($directory);
+        if ($owner === false || $owner === 0 || $group === false) return;
+        if (! chown($path, $owner) || ! chgrp($path, $group)) throw new \RuntimeException('无法将财务来源通知归属到应用运行用户。');
     }
 
     private function write($handle, array $data, bool $sample = true, bool $durable = true): void
@@ -104,11 +117,58 @@ class FinanceExternalChanges
     {
         $directory = $this->directory($db); $parent = $directory;
         while (! is_dir($parent) && dirname($parent) !== $parent) $parent = dirname($parent);
-        return ['directory' => $directory, 'writable' => is_dir($parent) && is_writable($parent) && is_readable($parent),
-            'pending' => count(glob($directory.'/change-*.json') ?: [])];
+        $count = 0; $scanned = 0; $complete = true;
+        $writable = is_dir($parent) && is_writable($parent) && is_readable($parent);
+        try {
+            if (is_dir($directory) && is_readable($directory)) foreach ($this->paths($directory) as $path) {
+                if (++$scanned > $this->scanLimit()) { $complete = false; break; }
+                if ($this->isNotification($path)) $count++;
+            }
+        } catch (Throwable) { $complete = false; $writable = false; }
+        return ['directory' => $directory, 'writable' => $writable,
+            'pending' => $count, 'count_complete' => $complete];
     }
 
-    /** Only finance readers/workers import committed notifications into finance-owned tables. */
+    private function scanLimit(): int
+    {
+        return max(1, min(20000, (int) config('finance.summaries.notification_scan_limit', 2000)));
+    }
+
+    private function isNotification(string $path): bool
+    {
+        return (bool) preg_match('/^change-[a-f0-9-]{36}\.json$/D', basename($path));
+    }
+
+    /** Keep memory constant even when hundreds of thousands of files are queued. */
+    protected function paths(string $directory): \Generator
+    {
+        $handle = @opendir($directory);
+        if ($handle === false) throw new \RuntimeException('无法读取财务来源通知目录。');
+        try {
+            while (($name = readdir($handle)) !== false) {
+                if ($name !== '.' && $name !== '..') yield $directory.'/'.$name;
+            }
+        } finally { closedir($handle); }
+    }
+
+    protected function openNotification(string $path, string $mode, ?string &$error)
+    {
+        $error = null;
+        // Laravel's warning handler may consume the warning before error_get_last sees it.
+        set_error_handler(function (int $severity, string $message) use (&$error): bool {
+            $error = $message;
+            return true;
+        }, E_WARNING);
+        try { return fopen($path, $mode); }
+        finally { restore_error_handler(); }
+    }
+
+    public static function readOnly(): bool
+    {
+        return ! app()->runningInConsole() || (bool) app('request')->attributes->get('finance.report_read_only');
+    }
+
+    /** The scheduled worker imports committed notifications into finance-owned tables. */
     public function drain(Connection $db, int $limit = 1000): bool
     {
         return FinanceQueryDiagnostics::measure('notifications.drain', fn () => $this->drainNotifications($db, $limit), ['limit' => $limit]);
@@ -117,36 +177,41 @@ class FinanceExternalChanges
     private function drainNotifications(Connection $db, int $limit): bool
     {
         // Report readers never import notifications or wait for another consumer.
-        if (app('request')->attributes->get('finance.report_read_only') || $db->transactionLevel() > 0) return ! $this->hasPending($db);
+        if (self::readOnly() || $db->transactionLevel() > 0) return ! $this->hasPending($db);
         if ($this->draining) return false;
-        if (! $this->status($db)['writable']) {
+        $directory = $this->directory($db);
+        $parent = $directory;
+        while (! is_dir($parent) && dirname($parent) !== $parent) $parent = dirname($parent);
+        if (! is_readable($parent) || ! is_writable($parent)) {
             self::failure(new \RuntimeException('财务来源通知目录不可读写，已停止复用旧汇总；来源系统保存不受此错误阻止。'));
             return false;
         }
-        $directory = $this->directory($db);
         if (! is_dir($directory)) return true;
-        $consumer = @fopen($directory.'/.consumer.lock', 'c+b');
-        if ($consumer === false) { $this->fileFailure('consumer_lock', $directory.'/.consumer.lock', error_get_last()['message'] ?? null); return false; }
+        $consumer = $this->openNotification($directory.'/.consumer.lock', 'c+b', $error);
+        if ($consumer === false) { $this->fileFailure('consumer_lock', $directory.'/.consumer.lock', $error); return false; }
+        try { $this->inheritOwner($directory.'/.consumer.lock', $directory); }
+        catch (Throwable $error) { fclose($consumer); self::failure($error); return false; }
         if (! flock($consumer, LOCK_EX | LOCK_NB)) { fclose($consumer); return false; }
         $this->draining = true;
         $trace = FinanceQueryDiagnostics::current();
-        $stats = ['seen' => 0, 'processed' => 0, 'locked' => 0, 'delivered' => 0, 'already_delivered' => 0, 'cleanup_failed' => 0, 'transactions' => 0];
+        $stats = ['scanned' => 0, 'seen' => 0, 'processed' => 0, 'locked' => 0, 'open_failed' => 0,
+            'delivered' => 0, 'already_delivered' => 0, 'cleanup_failed' => 0, 'transactions' => 0, 'budget_exhausted' => false];
         $claimed = [];
         $batchBytes = 0;
-        $cleanups = 0;
+        $deadline = hrtime(true) + max(0.01, (float) config('finance.summaries.notification_seconds_per_run', 5)) * 1e9;
         $limit = max(1, $limit);
         $batchSize = max(1, min(100, (int) config('finance.summaries.notification_batch_size', 50)));
         try {
-            $paths = FinanceQueryDiagnostics::measure('notifications.scan', fn () => glob($directory.'/change-*.json') ?: [], ['directory' => $directory]);
-            $trace?->event('notifications.queue', ['directory' => $directory, 'file_count' => count($paths), 'limit' => $limit]);
-            foreach ($paths as $path) {
-                if (! preg_match('/^change-[a-f0-9-]{36}\.json$/D', basename($path))) continue;
+            $trace?->event('notifications.queue', ['directory' => $directory, 'scan_limit' => $this->scanLimit(), 'limit' => $limit]);
+            foreach ($this->paths($directory) as $path) {
+                if ($stats['scanned'] >= $this->scanLimit() || hrtime(true) >= $deadline) { $stats['budget_exhausted'] = true; break; }
+                $stats['scanned']++;
+                if (! $this->isNotification($path)) continue;
                 $stats['seen']++;
-                $handle = @fopen($path, 'r+b');
+                $handle = $this->openNotification($path, 'r+b', $error);
                 if ($handle === false) {
-                    $error = error_get_last()['message'] ?? null;
                     clearstatcache(true, $path);
-                    if (is_file($path)) { $this->fileFailure('open', $path, $error); return false; }
+                    if (is_file($path)) { $stats['open_failed']++; $this->fileFailure('open', $path, $error); }
                     continue;
                 }
                 if (! flock($handle, LOCK_EX | LOCK_NB)) { $stats['locked']++; fclose($handle); continue; }
@@ -157,7 +222,7 @@ class FinanceExternalChanges
                         $stats['already_delivered']++;
                         fclose($handle);
                         // Cleanup-only files never consume the delivery limit or starve later changes.
-                        if ($cleanups++ < 25 && ! $this->removeDelivered($path)) $stats['cleanup_failed']++;
+                        if (! $this->removeDelivered($path)) $stats['cleanup_failed']++;
                         continue;
                     }
                     // An unlocked partial/pending file requires conservative invalidation after a writer exit.
@@ -179,7 +244,7 @@ class FinanceExternalChanges
                 }
             }
             if ($claimed !== []) $this->deliverBatch($db, $claimed, $stats);
-            return ! $this->hasPending($db);
+            return $stats['open_failed'] === 0 && ! $stats['budget_exhausted'] && ! $this->hasPending($db);
         } catch (Throwable $error) {
             self::failure($error);
             return false;
@@ -187,7 +252,7 @@ class FinanceExternalChanges
             foreach ($claimed as $item) if (is_resource($item['handle'])) fclose($item['handle']);
             $this->draining = false;
             fclose($consumer);
-            $trace?->event('notifications.summary', $stats);
+            $trace?->event('notifications.summary', $stats, true);
         }
     }
 
@@ -248,6 +313,9 @@ class FinanceExternalChanges
         $parent = dirname($path);
         $context = ['operation' => $operation, 'file' => $path, 'system_error' => $error,
             'file_exists_after' => is_file($path), 'directory_writable' => is_writable($parent),
+            'file_readable' => is_readable($path), 'file_writable' => is_writable($path),
+            'file_mode' => ($mode = @fileperms($path)) === false ? null : substr(sprintf('%o', $mode), -4),
+            'file_owner' => @fileowner($path), 'file_group' => @filegroup($path),
             'directory_mode' => ($mode = @fileperms($parent)) === false ? null : substr(sprintf('%o', $mode), -4),
             'directory_owner' => @fileowner($parent), 'directory_group' => @filegroup($parent),
             'euid' => function_exists('posix_geteuid') ? posix_geteuid() : null, 'pid' => getmypid()];
@@ -262,20 +330,29 @@ class FinanceExternalChanges
     {
         $directory = $this->directory($db);
         if (is_dir($directory) && ! is_readable($directory)) return true;
-        foreach (glob($directory.'/change-*.json') ?: [] as $path) {
-            $handle = @fopen($path, 'rb');
-            if ($handle === false) {
-                clearstatcache(true, $path);
-                if (is_file($path)) return true;
-                continue;
+        if (! is_dir($directory)) return false;
+        $scanned = 0;
+        $limit = max(1, (int) config('finance.summaries.notification_read_scan_limit', 32));
+        try {
+            foreach ($this->paths($directory) as $path) {
+                // A partial inspection must never certify an old cached result as current.
+                if (++$scanned > $limit) return true;
+                if (! $this->isNotification($path)) continue;
+                $handle = @fopen($path, 'rb');
+                if ($handle === false) {
+                    clearstatcache(true, $path);
+                    if (is_file($path)) return true;
+                    continue;
+                }
+                try {
+                    // Writers and other consumers may still be changing this file; never certify stale inputs.
+                    if (! flock($handle, LOCK_SH | LOCK_NB)) return true;
+                    // Delivered acknowledgements are small. Never read a large event document in a page request.
+                    $json = stream_get_contents($handle, 256);
+                    if (! feof($handle) || (json_decode($json, true)['state'] ?? null) !== 'delivered') return true;
+                } finally { fclose($handle); }
             }
-            try {
-                // Writers and other consumers may still be changing this file; never certify stale inputs.
-                if (! flock($handle, LOCK_SH | LOCK_NB)) return true;
-                $data = json_decode(stream_get_contents($handle), true);
-                if (($data['state'] ?? null) !== 'delivered') return true;
-            } finally { fclose($handle); }
-        }
+        } catch (Throwable) { return true; }
         return false;
     }
 }

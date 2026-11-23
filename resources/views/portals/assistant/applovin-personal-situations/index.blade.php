@@ -22,9 +22,11 @@
     <div class="box aps-card aps-filter-box">
         <div class="box-body">
             <form method="get" class="aps-filter" id="aps-filter-form">
+                <input type="hidden" name="performance_sort" value="{{ $filters['performance_sort'] }}">
                 @include('portals.assistant.partials.operation-department-multi-filter', ['departments' => $departmentOptions, 'selectedIds' => $filters['department_ids'], 'inputName' => 'department_ids', 'label' => '运营部门'])
                 <div class="form-group"><label>人员 / 账户</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="搜索人员、账户名称或编号"></div>
                 <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button>
+                <a class="btn btn-info" href="{{ route('operation-dashboard.applovin-personal-situations.index', array_merge(request()->except(['page', 'performance_sort']), ['performance_sort' => $filters['performance_sort'] === 'desc' ? 'asc' : 'desc'])) }}"><i class="fa {{ $filters['performance_sort'] === 'desc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i> 店铺业绩{{ $filters['performance_sort'] === 'desc' ? '从高到低' : '从低到高' }}</a>
                 <a class="btn btn-default" href="{{ route('operation-dashboard.applovin-personal-situations.index') }}">重置</a>
             </form>
         </div>
@@ -40,7 +42,7 @@
         <div class="table-responsive">
             <table class="table table-hover table-bordered aps-table">
                 <thead><tr>
-                    <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>达到 $5,000 ROI</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th><th>累计广告费($)</th>
+                    <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>累计广告费($)</th><th>总 ROI</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>达到 $5,000 ROI</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th>
                 </tr></thead>
                 <tbody>
                     @php($operatorRowspans = collect($rows->items())->countBy(fn ($item) => (int) $item['operator_user_id']))
@@ -54,6 +56,8 @@
                             <td class="aps-number">{{ $row['account_number'] ?: '—' }}</td>
                             <td><span class="aps-domain">{{ $row['store_domains'] ?: '未绑定' }}</span></td>
                             <td class="aps-performance">${{ number_format($row['store_performance'], 2) }}</td>
+                            <td class="aps-number">${{ number_format($row['total_spend'], 2) }}</td>
+                            <td>@if ($row['total_roi'] === null)<span class="aps-roi is-empty">—</span>@else<span class="aps-roi">{{ number_format($row['total_roi'], 2) }}</span>@endif</td>
                             <td class="aps-date">{{ $row['date'] }}</td>
                             <td>@if ($row['reach_2500_days'] === null)<span class="aps-muted">未达到</span>@else{{ $row['reach_2500_days'] }} 天<br><span class="aps-date">{{ $row['reach_2500_date'] }}</span>@endif</td>
                             <td>@if ($row['reach_2500_performance'] === null)—@else${{ number_format($row['reach_2500_performance'], 2) }}<span class="aps-stage-spend">广告费 ${{ number_format($row['reach_2500_spend'], 2) }}</span>@endif</td>
@@ -64,11 +68,10 @@
                             <td>@if ($row['over_5000_days'] === null)<span class="aps-muted">未达到</span>@else{{ $row['over_5000_days'] }} 天<br><span class="aps-date">{{ $row['over_5000_date'] }}</span>@endif</td>
                             <td>@if ($row['over_5000_performance'] === null)—@else${{ number_format($row['over_5000_performance'], 2) }}<span class="aps-stage-spend">广告费 ${{ number_format($row['over_5000_spend'], 2) }}</span>@endif</td>
                             <td>@if ($row['roi_over_5000'] === null)<span class="aps-roi is-empty">—</span>@else<span class="aps-roi {{ $row['roi_over_5000'] > 0 && $row['roi_over_5000'] < 1.4 ? 'is-risk' : '' }}">{{ number_format($row['roi_over_5000'], 2) }}</span>@endif</td>
-                            <td class="aps-number">${{ number_format($row['total_spend'], 2) }}</td>
                         </tr>
                         @php($previousOperator = $row['operator_user_id'])
                     @empty
-                        <tr><td colspan="15" class="text-center text-muted" style="padding:38px">暂无可查看的 AppLovin 账户数据</td></tr>
+                        <tr><td colspan="16" class="text-center text-muted" style="padding:38px">暂无可查看的 AppLovin 账户数据</td></tr>
                     @endforelse
                 </tbody>
             </table>

@@ -57,7 +57,7 @@ class FinanceExternalChangesTest extends TestCase
         $this->assertTrue($this->notifications->drain(DB::connection(), 1));
         $this->assertSame(1, DB::table('finance_summary_changes')->count());
         $this->assertFileDoesNotExist($pending);
-        $this->assertGreaterThan(1000, count(glob($directory.'/change-*.json')));
+        $this->assertSame([], glob($directory.'/change-*.json'));
         $this->assertFalse($this->notifications->hasPending(DB::connection()));
         $this->assertTrue($this->notifications->drain(DB::connection(), 1));
         $this->assertSame(1, DB::table('finance_summary_changes')->count());
@@ -76,6 +76,66 @@ class FinanceExternalChangesTest extends TestCase
         $this->assertTrue($this->notifications->drain(DB::connection()));
         $this->assertSame(3, $commits);
         $this->assertSame(120, DB::table('finance_summary_changes')->count());
+    }
+
+    public function test_unreadable_file_does_not_starve_other_notifications_and_is_not_acknowledged(): void
+    {
+        $poison = $this->enqueue();
+        $good = $this->enqueue();
+        $db = DB::connection();
+        $directory = dirname($poison);
+        $notifications = new class($directory, $poison) extends FinanceExternalChanges {
+            public function __construct(private string $path, private string $poison) { parent::__construct(); }
+            public function directory(\Illuminate\Database\Connection $db): string { return $this->path; }
+            protected function openNotification(string $path, string $mode, ?string &$error)
+            {
+                if ($path === $this->poison) { $error = 'Permission denied'; return false; }
+                return parent::openNotification($path, $mode, $error);
+            }
+        };
+        $this->assertFalse($notifications->drain($db));
+        $this->assertFileExists($poison);
+        $this->assertFileDoesNotExist($good);
+        $this->assertSame(1, DB::table('finance_summary_changes')->count());
+        $this->assertSame('committed', json_decode(file_get_contents($poison), true)['state']);
+    }
+
+    public function test_large_directory_is_inspected_in_bounded_batches_and_never_certifies_a_partial_scan(): void
+    {
+        $db = DB::connection();
+        $directory = $this->notifications->directory($db);
+        File::ensureDirectoryExists($directory);
+        for ($i = 0; $i < 100; $i++) file_put_contents($directory.'/change-00000000-0000-0000-0000-'.sprintf('%012x', $i).'.json', '{"state":"delivered"}');
+        config(['finance.summaries.notification_scan_limit' => 10, 'finance.summaries.notification_read_scan_limit' => 5]);
+        $this->assertTrue($this->notifications->hasPending($db));
+        $status = $this->notifications->status($db);
+        $this->assertSame(10, $status['pending']);
+        $this->assertFalse($status['count_complete']);
+        $this->assertFalse($this->notifications->drain($db));
+        // The consumer lock also counts against the directory-entry scan budget.
+        $this->assertGreaterThanOrEqual(90, count(glob($directory.'/change-*.json')));
+        $this->assertLessThanOrEqual(91, count(glob($directory.'/change-*.json')));
+        for ($i = 0; $i < 12 && $this->notifications->hasPending($db); $i++) $this->notifications->drain($db);
+        $this->assertFalse($this->notifications->hasPending($db));
+        $this->assertSame(0, DB::table('finance_summary_changes')->count());
+    }
+
+    public function test_accepted_batches_publish_revisions_while_more_notification_files_are_pending(): void
+    {
+        $db = DB::connection();
+        $schema = $db->getSchemaBuilder();
+        $schema->create('finance_summary_source_revisions', function (Blueprint $table): void {
+            $table->string('channel'); $table->string('source_date'); $table->unsignedBigInteger('revision');
+            $table->unique(['channel', 'source_date']);
+        });
+        $schema->create('finance_summary_periods', function (Blueprint $table): void {
+            $table->id(); $table->string('month'); $table->string('channel'); $table->integer('revision'); $table->integer('published');
+        });
+        for ($i = 0; $i < 1001; $i++) $this->enqueue();
+        $this->assertFalse(app(FinanceSummarySourceChanges::class)->publish($db));
+        $this->assertSame(2, $db->table('finance_summary_source_revisions')->count());
+        $this->assertSame(1000, $db->table('finance_summary_changes')->where('scopes_resolved', true)->count());
+        $this->assertTrue($this->notifications->hasPending($db));
     }
 
     public function test_failed_batch_rolls_back_and_keeps_the_notification_for_retry(): void

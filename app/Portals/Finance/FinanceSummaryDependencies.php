@@ -4,20 +4,20 @@ namespace App\Portals\Finance;
 
 class FinanceSummaryDependencies
 {
-    public function resolve(\Illuminate\Database\Connection $db): void
+    public function resolve(\Illuminate\Database\Connection $db): bool
     {
         if ($db->getSchemaBuilder()->hasTable(FinanceSummarySourceChanges::TABLE)
             && $db->getSchemaBuilder()->hasColumn('finance_summary_changes', 'scopes_resolved')) {
             $limit = max(1, min(1000, (int) config('finance.summaries.dependency_changes_per_run', 100)));
-            app(FinanceSummarySourceChanges::class)->publish($db, $limit);
+            $ready = app(FinanceSummarySourceChanges::class)->publish($db, $limit);
             // Acknowledging a change does not invalidate an already updated source range.
             $ids = $db->table('finance_summary_changes')->where('scopes_resolved', true)->orderBy('id')->limit($limit)->pluck('id');
             $db->table('finance_summary_changes')->whereIntegerInRaw('id', $ids->all())->delete();
-            return;
+            return $ready;
         }
         $pending = $db->table('finance_summary_changes');
         $sample = (clone $pending)->orderBy('id')->limit(1001)->pluck('id');
-        if ($sample->isEmpty()) return;
+        if ($sample->isEmpty()) return true;
         if ($sample->count() > 1000) {
             $lastId = $pending->max('id');
             // A large import can produce thousands of expensive dependency lookups.
@@ -28,7 +28,7 @@ class FinanceSummaryDependencies
                 $db->table('finance_summary_periods')->when($creditOnly, fn ($query) => $query->where('channel', 'credit_card'))->increment('revision');
                 $db->table('finance_summary_changes')->where('id', '<=', $lastId)->delete();
             });
-            return;
+            return ! $pending->exists();
         }
 
         // Bound the expensive matching work and leave concurrently arriving
@@ -55,6 +55,67 @@ class FinanceSummaryDependencies
                 $db->table('finance_summary_changes')->whereIntegerInRaw('id', $changes->pluck('id')->all())->delete();
             });
         });
+        return ! $pending->exists();
+    }
+
+    /** Match individual source changes through indexed reference columns, preserving old/new order images. */
+    public function sourceRecords(string $source, array $values, \Illuminate\Database\Connection $db): ?\Illuminate\Support\Collection
+    {
+        if (! in_array($source, ['order', 'reference', 'item', 'scope_credit_refund', 'fashion', 'fashion_item'], true)
+            || ! app(FinanceSourceStorage::class)->active('record')) return null;
+        $attributes = app('request')->attributes;
+        $cacheKey = 'finance.dependency-reference-indexes:'.$db->getName().':'.$db->getDatabaseName();
+        if (! $attributes->has($cacheKey)) {
+            $schema = $db->getSchemaBuilder();
+            $attributes->set($cacheKey, $schema->hasColumn('finance_records', 'source_bill_trimmed')
+                && $schema->hasIndex('finance_records', 'finance_dependency_bill_idx')
+                && $schema->hasIndex('finance_records', 'finance_dependency_merchant_idx')
+                && $schema->hasIndex('finance_records', 'finance_dependency_shopify_idx'));
+        }
+        // Deployment can defer optional indexes while the database is busy. Retain the complete legacy match until ready.
+        if (! $attributes->get($cacheKey)) return null;
+        $general = []; $card = [];
+        if ($source === 'fashion' || $source === 'fashion_item') {
+            $key = $source === 'fashion' ? ($values['transaction_id'] ?? null)
+                : $db->table('fashion_logistics_orders')->where('id', $values['fashion_logistics_order_id'] ?? null)->value('transaction_id');
+            return $db->table('finance_records')->whereIn('dataset', FinanceSummarySourceChanges::DATASETS)
+                ->where('dataset', '<>', 'paypal-orders')->where('reference', $key)->whereRaw("NULLIF(?, '') IS NOT NULL", [$key])
+                ->get(['id', 'dataset', 'occurred_at']);
+        }
+        if ($source === 'reference') {
+            $general[] = $values['reference_number'] ?? null;
+        } else {
+            if ($source === 'order') {
+                foreach (['bill_number', 'transaction_id', 'payment_gateway_order_id'] as $field) $general[] = $values[$field] ?? null;
+                $card[] = $values['shopify_order_number'] ?? null;
+            }
+            $orderId = $source === 'order' ? ($values['id'] ?? null) : ($values['logistics_order_id'] ?? null);
+            $order = $db->table('logistics_orders')->where('id', $orderId)
+                ->first(['id', 'bill_number', 'transaction_id', 'payment_gateway_order_id', 'shopify_order_number']);
+            if ($order !== null) {
+                foreach (['bill_number', 'transaction_id', 'payment_gateway_order_id'] as $field) $general[] = $order->$field;
+                $card[] = $order->shopify_order_number;
+                $general = [...$general, ...$db->table('logistics_order_payment_references')->where('logistics_order_id', $order->id)->pluck('reference_number')->all()];
+            }
+        }
+        // Do not trim keys: only the PayPal bill column was trimmed by the original matcher.
+        $keys = fn (array $values) => array_values(array_unique(array_filter($values, fn ($key) => $key !== null && (string) $key !== '')));
+        $general = $keys($general);
+        $card = $keys([...$general, ...$card]);
+        $cardOnly = $source === 'scope_credit_refund';
+        $union = null;
+        foreach ([['reference', $general, 'all'], ['source_bill_trimmed', $general, 'paypal'],
+            ['reference', $card, 'card'], ['source_merchant', $card, 'card'], ['source_shopify', $card, 'card']] as [$column, $references, $channel]) {
+            if ($references === [] || ($cardOnly && $channel === 'paypal')) continue;
+            // Separate branches permit a reference index lookup instead of a scan over IF/OR expressions.
+            $query = $db->table('finance_records')->whereIn('dataset', FinanceSummarySourceChanges::DATASETS)->whereIn($column, $references)
+                ->when($channel === 'paypal', fn ($query) => $query->where('dataset', 'paypal-orders'))
+                ->when($channel === 'card' || $cardOnly, fn ($query) => $query->where('dataset', '<>', 'paypal-orders'))
+                ->select(['id', 'dataset', 'occurred_at']);
+            if ($union === null) $union = $query;
+            else $union->union($query);
+        }
+        return $union?->get() ?? collect();
     }
 
     public function match(string $source, array $values, \Illuminate\Database\Connection $db): string

@@ -1597,7 +1597,8 @@ class FinanceController extends Controller
         if (in_array($report, ['paypal-settlement', 'credit-settlement', ...array_keys(FinanceCreditSettlementLayout::REPORT_CHANNELS)], true)) {
             return $this->settlement($request, $report);
         }
-        if (in_array($report, ['summary', 'losses'], true)) {
+        if (in_array($report, ['summary', 'losses'], true)
+            && ! (config('finance.overviews.background', true) && ($report === 'losses' || $request->query('view') !== 'transactions'))) {
             if ($waiting = $this->waitForReportInputs($request, $report)) return $waiting;
             if ($run = $request->query('_source_run')) {
                 $context = $this->context($request);
@@ -3370,12 +3371,25 @@ class FinanceController extends Controller
         }
         $context['loadedLossScope'] = $loadedLossScope;
         ksort($scope);
+        $overviewResult = null;
+        if (config('finance.overviews.background', true)) {
+            $prepared = app(\App\Portals\Finance\FinanceOverviewJobs::class)->prepare($request, $report, (int) $context['user']->getKey(), $comparisonMonths, $scope);
+            $plan = $prepared['plan'];
+            if ($request->boolean('_finance_plan') || $request->boolean('_source_prepare') || $request->boolean('snapshot_status')
+                || ($plan['waiting'] && $request->expectsJson())) {
+                return response()->json($plan, ($plan['state'] ?? '') === 'unavailable' ? 503 : 200)->header('Cache-Control', 'private, no-store');
+            }
+            if ($plan['waiting']) return response()->view('portals.finance.report-preparing', [...$context,
+                'title' => __('finance.menus.'.$report), 'preparationPlan' => $plan])->header('Cache-Control', 'private, no-store');
+            $overviewResult = $prepared['result'];
+            $context['overviewCalculatedAt'] = $overviewResult['calculated_at'];
+        }
         $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
         if ($statusOnly) return response()->json(['state' => 'ready'])->header('Cache-Control', 'no-store');
         $monthlyRates = $filterOptions = $summaryAccountChannels = [];
         foreach ($comparisonMonths as $comparisonMonth) {
             $includeOptions = true;
-            $result = FinanceQueryDiagnostics::measure('report.month',
+            $result = $overviewResult['months'][$comparisonMonth] ?? FinanceQueryDiagnostics::measure('report.month',
                 fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: true),
                 ['report' => $report, 'month' => $comparisonMonth]);
             [$groups, $options, $rate] = $result;
@@ -3609,6 +3623,12 @@ class FinanceController extends Controller
                 $sourceFilters['summary_payment_channels'] = array_values($selected);
             }
             $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($sourceFilters);
+            if (request()->attributes->get('finance.overview_worker')) {
+                // This task owns its database snapshot. Read live source rows;
+                // neither notification readiness nor shared cache publication is required.
+                yield from $service->summaryRowStream($channel, $sourceFilters, $transactions);
+                continue;
+            }
             $projections = app(\App\Portals\Finance\FinanceSummaryProjection::class);
             $projection = $sourceFields ? null : ($losses ? $projections->lossStream($channel, $canonical, $selected)
                 : $projections->stream($channel, $canonical, false, paymentChannels: $selected));

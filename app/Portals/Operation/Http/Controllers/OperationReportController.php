@@ -469,7 +469,7 @@ class OperationReportController extends Controller
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
-            ?: ($validated['report_date'] ?? null);
+            ?: ($validated['report_date'] ?? Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE)->subDay()->format('Y-m-d'));
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $editingReport ? (int) $editingReport->operator_user_id : ($isBoss
             ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
@@ -771,6 +771,7 @@ class OperationReportController extends Controller
         $mediaSources = $this->advertisingMedia($advertisingAssistantDepartmentIds);
         $agencyOptions = AssistantAdvertisingAgency::enabledOptions($advertisingAssistantDepartmentIds);
         $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames($advertisingAssistantDepartmentIds);
+        $agencyMediaIds = AssistantAdvertisingAgency::enabledMediaIds($advertisingAssistantDepartmentIds);
         $agencyNames = AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds);
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
@@ -846,6 +847,8 @@ class OperationReportController extends Controller
                 if (! $store) throw ValidationException::withMessages(['ads.'.$index.'.assistant_domain_store_id' => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
             }
             $ads[] = [
+                'agency_id' => (int) $ad['agency'],
+                'media_id' => (int) ($agencyMediaIds[$ad['agency']] ?? 0),
                 'media_source' => $mediaSource,
                 'agency' => trim((string) ($agencyNames[$ad['agency']] ?? '')),
                 'account_name' => trim((string) ($ad['account_name'] ?? '')),

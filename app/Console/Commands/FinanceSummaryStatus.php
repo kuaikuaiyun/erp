@@ -23,7 +23,7 @@ class FinanceSummaryStatus extends Command
         $external = app(\App\Portals\Finance\FinanceExternalChanges::class)->status($db);
         $this->table(['检查项', '状态'], [
             ['财务写入追踪', $tracking ? '应用事务追踪：正常' : '未启用应用追踪'],
-            ['其他系统来源通知', $external['writable'] ? '提交后通知；待接收 '.$external['pending'].' 个' : '目录不可读写：需核对来源变更'],
+            ['其他系统来源通知', $external['writable'] ? '通知文件'.($external['count_complete'] ? ' ' : '至少 ').$external['pending'].' 个（含待清理回执）' : '目录不可读写：需核对来源变更'],
             ['来源通知目录', $external['directory']],
             ['按日期范围失效', $scoped ? '正常' : '未启用：执行普通表迁移'],
             ['源行文件目录', $writable ? '可写' : '不可写：计算完成后无法持久复用'],

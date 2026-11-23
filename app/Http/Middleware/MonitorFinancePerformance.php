@@ -17,6 +17,8 @@ class MonitorFinancePerformance
         if (! $request->is('finance', 'finance/*') && ! str_starts_with(strtolower($request->getHost()), 'caiwu.')) {
             return $next($request);
         }
+        // All finance menus, AJAX counts and exports leave notification consumption to the worker.
+        $request->attributes->set('finance.report_read_only', true);
         $diagnostic = config('finance.diagnostics.enabled', true)
             && ($request->is('finance/reports/losses') || $request->boolean('_finance_profile'))
             ? FinanceQueryDiagnostics::start($request) : null;

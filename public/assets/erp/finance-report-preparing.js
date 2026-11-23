@@ -3,8 +3,9 @@
     async function run(plan, progress) {
         var waitingSince = Date.now();
         while (plan.waiting) {
-            progress('正在同步最新数据，完成后自动显示报表…');
-            if (Date.now() - waitingSince > 180000) throw new Error('数据更新仍在进行，请稍后重试。');
+            if (plan.background === 'overview' && (plan.state === 'failed' || plan.state === 'unavailable')) throw new Error(plan.message);
+            progress(plan.background === 'overview' ? plan.message : '正在同步最新数据，完成后自动显示报表…');
+            if (Date.now() - waitingSince > (plan.background === 'overview' ? 1800000 : 180000)) throw new Error('后台仍在处理，请稍后重新查询。');
             await new Promise(function (resolve) { setTimeout(resolve, 2000); });
             var poll = await fetch(plan.poll_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
             if (!poll.ok || !(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
@@ -65,6 +66,15 @@
             retry.hidden = false;
         }
     }
-    retry.addEventListener('click', start);
+    retry.addEventListener('click', function () {
+        if (plan.background === 'overview') {
+            var fresh = new URL(plan.resume_url, window.location.href);
+            fresh.searchParams.delete('_overview_run');
+            fresh.searchParams.delete('_finance_plan');
+            window.location.replace(fresh.href);
+            return;
+        }
+        return start();
+    });
     start();
 }());

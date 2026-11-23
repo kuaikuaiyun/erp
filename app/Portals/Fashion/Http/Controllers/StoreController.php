@@ -35,20 +35,22 @@ class StoreController extends Controller
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $user = $context['user'];
+        $projectDepartmentIds = OperationProjectCatalog::departmentIds($this->project['code']);
+        $departmentRelation = fn ($departments) => $departments->whereIn('admin_roles.id', $projectDepartmentIds);
 
         $storeOperators = $user->isAdministrator()
             ? $this->storeOperators()
-            : AdminUser::query()->with('departments:id,name,parent_id')->whereKey($user->getKey())->get(['id', 'name', 'username']);
+            : AdminUser::query()->with(['departments' => $departmentRelation])->whereKey($user->getKey())->get(['id', 'name', 'username']);
         $operatorLookup = $storeOperators->flatMap(fn (AdminUser $operator) => collect([$operator->name, $operator->username])
             ->filter()->mapWithKeys(fn ($name) => [mb_strtolower(trim((string) $name)) => $operator]));
-        $query = $this->accessibleStores($user)->with('ownerUser.departments:id,name,parent_id');
+        $query = $this->accessibleStores($user)->with(['ownerUser.departments' => $departmentRelation]);
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         if ($keyword !== '') {
             $query->where(fn ($q) => $q->where('assistant_domain_stores.shop_name', 'like', "%{$keyword}%")->orWhere('assistant_domain_stores.domain', 'like', "%{$keyword}%"));
         }
         $this->applyPlatformFilter($query, (string) ($validated['platform'] ?? ''), 'assistant_domain_stores.site_builder');
         if (! empty($validated['department_id'])) {
-            $department = Department::business()->find((int) $validated['department_id']);
+            $department = Department::business()->whereIn('id', $projectDepartmentIds)->find((int) $validated['department_id']);
             $memberIds = $department?->departmentMembers()->pluck('admin_users.id')->map(fn ($id) => (int) $id)->all() ?? [];
             $memberNames = AdminUser::query()->whereIn('id', $memberIds)->get(['name', 'username'])
                 ->flatMap(fn (AdminUser $member) => [$member->name, $member->username])->filter()
@@ -79,6 +81,7 @@ class StoreController extends Controller
             ->filter()->map(fn (string $platform): string => $platform === 'xshopy' ? 'xshoppy' : $platform)
             ->unique()->sort()->values();
         $departmentOptions = Department::business()
+            ->whereIn('id', $projectDepartmentIds)
             ->whereHas('departmentMembers', fn (Builder $members) => $members->whereIn('admin_users.id', $storeOperators->pluck('id')))
             ->with('parent:id,name')->orderBy('sort')->orderBy('name')->get(['id', 'name', 'parent_id']);
 
@@ -183,12 +186,15 @@ class StoreController extends Controller
 
     private function storeOperators()
     {
+        $projectDepartmentIds = OperationProjectCatalog::departmentIds($this->project['code']);
         $storesQuery = AssistantDomainStore::query()
             ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
         $stores = $storesQuery->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->unique();
         $names = $stores->pluck('user_name')->filter()->unique();
-        $query = AdminUser::query()->with('departments:id,name,parent_id')->where(function ($q) use ($ids, $names): void {
+        $query = AdminUser::query()->with([
+            'departments' => fn ($departments) => $departments->whereIn('admin_roles.id', $projectDepartmentIds),
+        ])->where(function ($q) use ($ids, $names): void {
             if ($ids->isNotEmpty()) {
                 $q->whereIn('id', $ids);
             }
