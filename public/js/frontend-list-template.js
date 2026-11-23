@@ -137,7 +137,6 @@
                         if (input.checked && choice.value !== '') values.add(choice.value); else values.delete(choice.value);
                         refreshLabel();
                         if (config.backing) { if (editor.contains(config.backing)) fieldError(config.backing, ''); summary.setAttribute('aria-invalid', 'false'); }
-                        if (!multi) { details.open = false; summary.focus(); }
                     });
                     label.append(input, node('span', '', choice.label)); options.appendChild(label);
                 });
@@ -146,22 +145,29 @@
             clear.onclick = function () { values.clear(); if (search) search.value = ''; refreshLabel(); drawOptions(); };
             panel.append(options); if (config.allowClear !== false && !config.showAll) panel.append(clear);
             details.append(summary, panel); host.replaceChildren(details);
+            summary.addEventListener('click', function () { details.classList.remove('is-positioned'); });
             function positionPanel() {
                 if (!details.open || !dialog.contains(details)) return;
+                details.classList.remove('is-positioned');
                 var anchor = summary.getBoundingClientRect(), bounds = dialog.getBoundingClientRect();
                 var bottom = Math.min(innerHeight - 10, bounds.bottom - 8), top = Math.max(10, bounds.top + 8);
-                var below = bottom - anchor.bottom - 6, above = anchor.top - top - 6;
-                var height = Math.min(250, Math.max(below, above));
+                var below = Math.max(0, bottom - anchor.bottom - 6), above = Math.max(0, anchor.top - top - 6);
                 panel.style.position = 'fixed'; panel.style.width = Math.min(anchor.width, innerWidth - 24) + 'px';
                 panel.style.left = Math.max(12, Math.min(anchor.left, innerWidth - anchor.width - 12)) + 'px'; panel.style.right = 'auto';
-                panel.style.maxHeight = Math.max(80, height) + 'px'; panel.style.overflowY = 'auto';
-                panel.style.top = (below >= Math.min(250, panel.scrollHeight) || below >= above ? anchor.bottom + 6 : Math.max(top, anchor.top - Math.min(panel.scrollHeight, height) - 6)) + 'px';
+                panel.style.top = '0px'; panel.style.maxHeight = 'none'; options.style.maxHeight = '210px';
+                var naturalHeight = panel.getBoundingClientRect().height;
+                var opensBelow = below >= naturalHeight || (above < naturalHeight && below >= above);
+                var height = Math.max(1, Math.min(naturalHeight, opensBelow ? below : above));
+                panel.style.maxHeight = height + 'px'; panel.style.overflowY = 'auto';
+                options.style.maxHeight = Math.max(0, height - 22) + 'px';
+                panel.style.top = (opensBelow ? anchor.bottom + 6 : Math.max(top, anchor.top - height - 6)) + 'px';
+                details.classList.add('is-positioned');
             }
             details.addEventListener('toggle', function () {
                 if (details.open) {
                     root.querySelectorAll('.flt-picker').forEach(function (other) { if (other !== details) other.open = false; });
                     drawOptions(); positionPanel(); if (search) search.focus();
-                }
+                } else details.classList.remove('is-positioned');
             });
             drawOptions(); refreshLabel();
             return { details: details, summary: summary, position: positionPanel, values: values, clear: function () { values.clear(); if (search) search.value = ''; details.open = false; refreshLabel(); drawOptions(); } };

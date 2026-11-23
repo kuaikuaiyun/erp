@@ -707,6 +707,8 @@
 }
 .flt-dialog .flt-picker[open]>summary,.flt-dialog .flt-picker summary:focus-visible { border-color: #339dd3; outline: none; box-shadow: 0 0 0 3px #2499d119; }
 .flt-dialog .flt-picker-panel { z-index: 110; min-width: 0; }
+.flt-dialog .flt-picker>.flt-picker-panel { visibility: hidden; }
+.flt-dialog .flt-picker[open].is-positioned>.flt-picker-panel { visibility: visible; }
 .flt-dialog .flt-picker-options { margin: 0; }
 .flt-dialog .flt-picker-options label { display: flex; gap: 10px; align-items: center; cursor: pointer; padding: 9px; border-radius: 4px; margin: 0; font-weight: 400; }
 .flt-dialog .flt-picker-options input[type=radio] { display: inline-block; width: 15px; height: 15px; min-height: 0; padding: 0; margin: 0; accent-color: #1884bf; flex-shrink: 0; }
