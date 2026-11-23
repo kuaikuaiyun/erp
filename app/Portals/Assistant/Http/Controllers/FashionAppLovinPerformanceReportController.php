@@ -13,7 +13,9 @@ use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AppLovinHistoricalSpendService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\AssistantStoreOwnerAttributionService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Fashion\OperationProjectCatalog;
 use App\Services\DepartmentAuthorizationService;
@@ -30,8 +32,10 @@ class FashionAppLovinPerformanceReportController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly AssistantStoreOwnerAttributionService $ownerAttribution,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
         private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
+        private readonly AppLovinHistoricalSpendService $historicalSpend,
     ) {}
 
     public function index(Request $request): Response|View
@@ -155,6 +159,32 @@ class FashionAppLovinPerformanceReportController extends Controller
         $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->merge($accountBindings->values())->merge($bindingByIdentity->values())
             ->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain', 'site_builder'])->keyBy('id');
+        $ownerTimelines = $this->ownerAttribution->timelines($storeIds);
+        $performanceMetricsCache = [];
+        $performanceMetrics = function (int $storeId, string $platform, CarbonImmutable $from, CarbonImmutable $to, int $operatorId) use ($ownerTimelines, &$performanceMetricsCache): array {
+            $cacheKey = implode('|', [$storeId, $platform, $from->timestamp, $to->timestamp, $operatorId]);
+            if (isset($performanceMetricsCache[$cacheKey])) return $performanceMetricsCache[$cacheKey];
+
+            $orders = FashionLogisticsOrder::query()
+                ->where('assistant_domain_store_id', $storeId)
+                ->where('source_platform', $platform)
+                ->whereBetween('order_created_at', [$from, $to])
+                ->get(['id', 'order_created_at', 'total_amount']);
+            $hasOwnershipHistory = $ownerTimelines->get($storeId, collect())->isNotEmpty();
+            if ($hasOwnershipHistory) {
+                $orders = $orders->filter(function (FashionLogisticsOrder $order) use ($ownerTimelines, $storeId, $operatorId): bool {
+                    $orderedAt = $order->getRawOriginal('order_created_at') ?: $order->order_created_at;
+                    $assignment = $this->ownerAttribution->resolve($ownerTimelines, $storeId, $orderedAt);
+
+                    return $assignment['owner_user_id'] === $operatorId;
+                })->values();
+            }
+
+            return $performanceMetricsCache[$cacheKey] = [
+                'order_count' => $orders->count(),
+                'revenue' => (float) $orders->sum('total_amount'),
+            ];
+        };
         $accountSpendRecords = $accountSpendReports->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(function ($entry) use ($report): array {
             $accountKey = AppLovinSpendScreenshot::accountKey(
                 (int) $report->submitter_id,
@@ -174,6 +204,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ];
         }));
         $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        $globalSpendTotals = $this->historicalSpend->totalsByAccountNumber();
         $giftScreenshots = AppLovinSpendScreenshot::query()
             ->whereIn('operator_user_id', $accountSpendReports->pluck('submitter_id')->filter()->unique()->values())
             ->get()
@@ -182,7 +213,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 (string) $screenshot->account_number,
                 (string) $screenshot->account_key,
             ));
-        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity, $timezone): array {
+        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountIdentity, $bindingByIdentity, $timezone, $performanceMetrics): array {
             $groups = $report->adSpendEntries->map(function ($entry) use ($report, $stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
@@ -209,11 +240,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', $timezone)->utc();
                 $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', $timezone)->utc();
                 $platform = $store && mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
-                $revenue = (float) FashionLogisticsOrder::query()
-                    ->where('assistant_domain_store_id', $storeId)
-                    ->where('source_platform', $platform)
-                    ->whereBetween('order_created_at', [$from, $to])
-                    ->sum('total_amount');
+                $revenue = (float) $performanceMetrics($storeId, $platform, $from, $to, (int) $report->submitter_id)['revenue'];
                 $accounts = $entriesForStore->groupBy('account_identity')->map(fn ($rows): float => (float) $rows->sum('spend'));
                 $totalSpend = (float) $accounts->sum();
                 foreach ($accounts as $accountIdentityKey => $spend) {
@@ -226,7 +253,7 @@ class FashionAppLovinPerformanceReportController extends Controller
 
             return $totals;
         }, []);
-        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone, $departments): array {
+        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone, $departments, $performanceMetrics): array {
             $reportDepartment = $report->submitter?->departments?->first(fn ($department) => $departments->contains('id', $department->id));
             return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity) {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
@@ -242,16 +269,17 @@ class FashionAppLovinPerformanceReportController extends Controller
                 $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'identity:'.$identity);
 
                 return $entry;
-            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone, $reportDepartment): array {
+            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone, $reportDepartment, $performanceMetrics): array {
                 $storeId = (int) $entries->first()->resolved_store_id;
                 $store = $stores->get((int) $storeId);
                 $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', $timezone)->utc();
                 $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', $timezone)->utc();
                 $platform = $store && mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
-                $metrics = $storeId > 0 ? FashionLogisticsOrder::query()->where('assistant_domain_store_id', $storeId)->where('source_platform', $platform)
-                    ->whereBetween('order_created_at', [$from, $to])->selectRaw('COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')->first() : null;
-                $orders = (int) ($metrics?->order_count ?? 0);
-                $revenue = round((float) ($metrics?->revenue ?? 0), 2);
+                $metrics = $storeId > 0
+                    ? $performanceMetrics($storeId, $platform, $from, $to, (int) $report->submitter_id)
+                    : ['order_count' => 0, 'revenue' => 0.0];
+                $orders = (int) $metrics['order_count'];
+                $revenue = round((float) $metrics['revenue'], 2);
                 $spend = round((float) $entries->sum('actual_spend_usd'), 2);
 
                 return [
@@ -276,12 +304,13 @@ class FashionAppLovinPerformanceReportController extends Controller
         })->values();
 
         $rows = $dailyRows->groupBy(fn (array $row) => $row['operator_id'].'|'.$row['store_id'])
-            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
+            ->map(function ($group) use ($accountSpendTotals, $globalSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('orders');
                 $revenue = round((float) $group->sum('revenue'), 2);
                 $spend = round((float) $group->sum('ad_spend'), 2);
                 $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
+                $accountNumberValues = $group->pluck('account_numbers')->flatten()->filter()->unique()->values();
                 $giftEligibleKeys = $accountKeys->filter(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0) >= 5000);
                 $giftStatus = $giftEligibleKeys->isEmpty()
                     ? 'not_eligible'
@@ -299,8 +328,10 @@ class FashionAppLovinPerformanceReportController extends Controller
                 return [...$first, 'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'orders' => $orders, 'revenue' => $revenue, 'ad_spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null,
                     'account_numbers' => $group->pluck('account_numbers')->flatten()->filter()->unique()->implode('、'),
+                    'account_number_values' => $accountNumberValues->all(),
                     'account_keys' => $accountKeys->all(),
                     'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
+                    'global_total_consumption' => $this->historicalSpend->sumForAccountNumbers($globalSpendTotals, $accountNumberValues),
                     'deducted_consumption' => $deductedConsumption,
                     'historical_revenue' => $historicalRevenue,
                     'estimated_total_roi' => $deductedConsumption > 0 ? $historicalRevenue / $deductedConsumption : null,
@@ -353,6 +384,10 @@ class FashionAppLovinPerformanceReportController extends Controller
         $totals = ['stores' => $rows->pluck('store_id')->filter(fn ($id) => (int) $id > 0)->unique()->count(), 'orders' => (int) $rows->sum('orders'),
             'revenue' => round((float) $rows->sum('revenue'), 2), 'ad_spend' => round((float) $rows->sum('ad_spend'), 2),
             'total_consumption' => round((float) $totalAccountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2)];
+        $totals['global_total_consumption'] = $this->historicalSpend->sumForAccountNumbers(
+            $globalSpendTotals,
+            $rows->pluck('account_number_values')->flatten()->filter()->unique(),
+        );
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $totals['deducted_consumption'] = round((float) $totalAccountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
             $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
@@ -378,6 +413,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             'gift_status' => $row['gift_status'],
             'account_numbers' => $row['account_numbers'],
             'total_consumption' => $row['total_consumption'],
+            'global_total_consumption' => $row['global_total_consumption'],
             'deducted_consumption' => $row['deducted_consumption'],
             'historical_revenue' => $row['historical_revenue'],
             'estimated_total_roi' => $row['estimated_total_roi'],

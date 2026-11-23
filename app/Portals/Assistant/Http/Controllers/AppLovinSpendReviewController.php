@@ -61,7 +61,6 @@ class AppLovinSpendReviewController extends Controller
         if ($isDashboard || ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
-        $query->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
         $rows = $query->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => $report->operator_name, 'department_id' => (int) $report->operation_department_id, 'department' => $report->operation_department_name]));
@@ -78,7 +77,6 @@ class AppLovinSpendReviewController extends Controller
                 ? $fashionQuery->whereRaw('1=0')
                 : $fashionQuery->whereHas('submitter.departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleIds));
         }
-        $fashionQuery->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('submitter_name', 'like', '%'.$name.'%'));
         $restrictToVisibleDepartments = $isDashboard || ! $context['user']->isAdministrator();
         $fashionRows = $fashionQuery->get()
             ->flatMap(function (FashionAdvertisingReport $report) use ($restrictToVisibleDepartments, $visibleIds, $projectDepartmentIds) {
@@ -109,36 +107,83 @@ class AppLovinSpendReviewController extends Controller
             $rows = $rows->whereIn('department_id', $visibleIds)->values();
         }
         $availableDepartmentIds = $rows->pluck('department_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
-        if ($selectedDepartmentIds !== []) {
-            $rows = $rows->whereIn('department_id', $selectedDepartmentIds)->values();
-        }
         $accounts = $rows->groupBy(function (array $row): string {
-            $normalizedAgency = mb_strtolower(trim((string) ($row['agency'] ?? '')));
-            $normalizedNumber = preg_replace('/[\s\p{Cf}]+/u', '', mb_strtolower((string) ($row['account_number'] ?? ''))) ?? '';
+            $normalizedNumber = preg_replace('/[^0-9a-z]+/i', '', mb_strtolower(trim((string) ($row['account_number'] ?? '')))) ?? '';
+            if ($normalizedNumber !== '') {
+                return 'number|'.$normalizedNumber;
+            }
 
-            return implode('|', [(int) ($row['operator_user_id'] ?? 0), $normalizedAgency, $normalizedNumber]);
+            return implode('|', [
+                'legacy',
+                (int) ($row['operator_user_id'] ?? 0),
+                mb_strtolower(trim((string) ($row['agency'] ?? ''))),
+                mb_strtolower(trim((string) ($row['account_name'] ?? ''))),
+            ]);
         })
             ->map(function ($group): array {
-                $first = $group->first();
-                $agency = trim((string) ($first['agency'] ?? ''));
+                $ordered = $group->sortBy(fn (array $row): string => implode('|', [
+                    (string) ($row['date'] ?? ''),
+                    str_pad((string) ($row['report_id'] ?? 0), 20, '0', STR_PAD_LEFT),
+                    str_pad((string) ($row['operator_user_id'] ?? 0), 20, '0', STR_PAD_LEFT),
+                ]))->values();
+                $current = $ordered->last();
+                $agency = trim((string) ($current['agency'] ?? ''));
                 $media = 'AppLovin';
-                $number = trim((string) ($first['account_number'] ?? ''));
-                $names = $group->pluck('account_name')->map(fn ($name) => trim((string) $name))->filter()->values();
+                $number = trim((string) ($current['account_number'] ?? ''));
+                $names = $ordered->pluck('account_name')->map(fn ($name) => trim((string) $name))->filter()->values();
                 $name = $names->filter(fn ($candidate) => $candidate !== $number && ! ctype_digit($candidate))->last() ?: $names->last() ?: $number;
-                $keys = $group->map(fn (array $row) => AppLovinSpendScreenshot::accountKey(
+                $currentKey = AppLovinSpendScreenshot::accountKey(
+                    (int) ($current['operator_user_id'] ?? 0),
+                    (string) ($current['agency'] ?? ''),
+                    (string) ($current['media_source'] ?? ''),
+                    (string) ($current['account_name'] ?? ''),
+                    (string) ($current['account_number'] ?? '')
+                );
+                $keys = collect([$currentKey])->merge($ordered->map(fn (array $row) => AppLovinSpendScreenshot::accountKey(
                     (int) ($row['operator_user_id'] ?? 0),
                     (string) ($row['agency'] ?? ''),
                     (string) ($row['media_source'] ?? ''),
                     (string) ($row['account_name'] ?? ''),
                     (string) ($row['account_number'] ?? '')
-                ))->merge($names->unique()->map(fn ($candidate) => AppLovinSpendScreenshot::accountKey(
-                    (int) $first['operator_user_id'], $agency, $media, $candidate, $number
                 )))->unique()->values();
-                if ($keys->isEmpty()) {
-                    $keys = collect([AppLovinSpendScreenshot::accountKey((int) $first['operator_user_id'], $agency, $media, $name, $number)]);
+
+                $usageHistory = [];
+                foreach ($ordered as $row) {
+                    $operatorId = (int) ($row['operator_user_id'] ?? 0);
+                    $date = (string) ($row['date'] ?? '');
+                    $lastIndex = count($usageHistory) - 1;
+                    if ($lastIndex >= 0 && $usageHistory[$lastIndex]['operator_user_id'] === $operatorId) {
+                        $usageHistory[$lastIndex]['end_date'] = $date;
+                        $usageHistory[$lastIndex]['spend'] += (float) ($row['actual_spend'] ?? 0);
+                        continue;
+                    }
+                    $usageHistory[] = [
+                        'operator_user_id' => $operatorId,
+                        'operator_name' => (string) ($row['operator_name'] ?? ''),
+                        'department_id' => (int) ($row['department_id'] ?? 0),
+                        'department' => (string) ($row['department'] ?? ''),
+                        'start_date' => $date,
+                        'end_date' => $date,
+                        'spend' => (float) ($row['actual_spend'] ?? 0),
+                    ];
                 }
 
-                return ['account_key' => $keys->first(), 'account_keys' => $keys->values(), 'operator_user_id' => (int) $first['operator_user_id'], 'operator_name' => $first['operator_name'], 'department' => $first['department'], 'agency' => $agency, 'media' => $media, 'account_name' => $name, 'account_number' => $number, 'total' => (float) $group->sum('actual_spend'), 'details' => $group->values()];
+                return [
+                    'account_key' => $keys->first(),
+                    'account_keys' => $keys->values(),
+                    'operator_user_id' => (int) $current['operator_user_id'],
+                    'operator_user_ids' => $ordered->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all(),
+                    'operator_name' => (string) $current['operator_name'],
+                    'department' => (string) $current['department'],
+                    'department_ids' => $ordered->pluck('department_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all(),
+                    'agency' => $agency,
+                    'media' => $media,
+                    'account_name' => $name,
+                    'account_number' => $number,
+                    'total' => (float) $ordered->sum('actual_spend'),
+                    'usage_history' => $usageHistory,
+                    'details' => $ordered,
+                ];
             })->sortByDesc('total')->values();
         $allAccountKeys = $accounts->pluck('account_keys')->flatten()->unique()->values();
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
@@ -161,10 +206,18 @@ class AppLovinSpendReviewController extends Controller
         $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings): array {
             $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()->first();
             $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
-            $account['account_key'] = $binding?->account_key ?: $screenshot?->account_key ?: $account['account_key'];
 
             return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding];
         });
+        if ($selectedDepartmentIds !== []) {
+            $accounts = $accounts->filter(fn (array $account): bool => collect($account['department_ids'])
+                ->intersect($selectedDepartmentIds)->isNotEmpty())->values();
+        }
+        $operator = trim((string) ($filters['operator'] ?? ''));
+        if ($operator !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => collect($account['usage_history'])
+                ->contains(fn (array $usage): bool => mb_stripos($usage['operator_name'], $operator) !== false))->values();
+        }
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', 5000)->values();
         }
@@ -181,7 +234,7 @@ class AppLovinSpendReviewController extends Controller
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $filters['operator'] ?? '', 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',

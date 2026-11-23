@@ -44,6 +44,18 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
         Schema::create('logistics_tongtu_sku_mappings', function (Blueprint $table): void {
             $table->id();
         });
+        Schema::create('assistant_domain_store_owner_histories', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('assistant_domain_store_id');
+            $table->unsignedBigInteger('owner_user_id')->nullable();
+            $table->string('owner_name_snapshot')->nullable();
+            $table->unsignedBigInteger('operation_department_id')->nullable();
+            $table->string('operation_department_name_snapshot')->nullable();
+            $table->string('event')->default('assigned');
+            $table->dateTime('effective_from');
+            $table->dateTime('effective_to')->nullable();
+            $table->timestamps();
+        });
 
         DB::table('admin_users')->insert(['id' => 1, 'name' => 'Test Operator', 'username' => 'test-operator']);
         DB::table('assistant_domain_stores')->insert(['id' => 1, 'domain' => 'test.example', 'owner_user_id' => 1]);
@@ -86,6 +98,29 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
         $this->assertEquals(1, $totals['first_subscription_orders']);
         $this->assertEquals(10, $totals['first_subscription_revenue']);
         $this->assertEquals(1, $totals['first_total_orders']);
+    }
+
+    public function test_applovin_can_reassign_orders_using_store_owner_history(): void
+    {
+        $this->order(['subscription', 'subscription first order']);
+        DB::table('logistics_orders')->update(['assigned_owner_user_id' => 2, 'operator_name' => 'New Operator']);
+        DB::table('assistant_domain_store_owner_histories')->insert([
+            'assistant_domain_store_id' => 1,
+            'owner_user_id' => 1,
+            'event' => 'assigned',
+            'effective_from' => '2026-11-16 00:00:00',
+            'created_at' => '2026-11-16 00:00:00',
+            'updated_at' => '2026-11-16 00:00:00',
+        ]);
+
+        $totals = app(OperationReportMetricsService::class)->buildRangeForOperators(
+            '2026-11-15', '2026-11-15', [1], '-04:00',
+            requireBothSubscriptionTags: true,
+            attributeByStoreOwnerHistory: true,
+        )[1]['totals'];
+
+        self::assertEquals(1, $totals['first_total_orders']);
+        self::assertEquals(10, $totals['first_total_revenue']);
     }
 
     private function order(array|string $tags, string $type = '订阅首次购买', ?string $payload = ''): void

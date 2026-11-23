@@ -11,7 +11,9 @@ use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AppLovinHistoricalSpendService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\AssistantStoreOwnerAttributionService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Services\DepartmentAuthorizationService;
@@ -28,9 +30,11 @@ class AppLovinPerformanceReportController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly AssistantStoreOwnerAttributionService $ownerAttribution,
         private readonly OperationReportMetricsService $metrics,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
         private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
+        private readonly AppLovinHistoricalSpendService $historicalSpend,
     ) {}
 
     public function index(Request $request): Response|View
@@ -110,7 +114,7 @@ class AppLovinPerformanceReportController extends Controller
         $query->when($selectedDepartmentIds !== [], fn ($q) => $q->whereIn('operation_department_id', $selectedDepartmentIds))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
         // 历史累计只依赖账号、广告和指标字段，避免把整份历史日报的无关大字段全部载入内存。
-        $accountSpendReports = (clone $query)->get(['id', 'operator_user_id', 'advertising_rows', 'metric_rows']);
+        $accountSpendReports = (clone $query)->get(['id', 'report_date', 'operator_user_id', 'advertising_rows', 'metric_rows']);
         $query->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
@@ -121,7 +125,7 @@ class AppLovinPerformanceReportController extends Controller
             ->unique()
             ->sort()
             ->values();
-        $metricsCacheKey = 'assistant-applovin-performance:v2:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $metricsCacheKey = 'assistant-applovin-performance:v4:'.$this->ownerAttribution->cacheVersion().':'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($metricsCacheKey, now()->addMinutes(15), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
             $calculated = [];
             // 长时间范围会包含大量订单及商品明细，按运营分批读取，避免 90 天等范围一次性加载导致内存溢出。
@@ -132,6 +136,7 @@ class AppLovinPerformanceReportController extends Controller
                     $operatorIdBatch->values()->all(),
                     $timezone,
                     requireBothSubscriptionTags: true,
+                    attributeByStoreOwnerHistory: true,
                 );
                 gc_collect_cycles();
             }
@@ -164,6 +169,7 @@ class AppLovinPerformanceReportController extends Controller
                 ];
             }));
         $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        $globalSpendTotals = $this->historicalSpend->totalsByAccountNumber();
         unset($accountSpendRecords);
         gc_collect_cycles();
         $giftScreenshots = AppLovinSpendScreenshot::query()
@@ -174,7 +180,7 @@ class AppLovinPerformanceReportController extends Controller
                 (string) $screenshot->account_number,
                 (string) $screenshot->account_key,
             ));
-        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores): array {
+        $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores, $calculatedByOperator, $dateFrom, $dateTo): array {
             $storeAds = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad): bool => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
                 ->map(function (array $ad) use ($report, $bindings, $stores): ?array {
@@ -203,7 +209,15 @@ class AppLovinPerformanceReportController extends Controller
 
             foreach ($storeAds as $adsForStore) {
                 $domain = mb_strtolower(trim((string) $adsForStore->first()['domain']));
-                $revenue = collect($report->metric_rows ?: [])
+                $reportDate = $report->report_date->format('Y-m-d');
+                // For the selected range, always use freshly attributed order metrics. This
+                // makes an edited ownership boundary move the matching performance at once;
+                // older ranges keep their saved report snapshot to avoid loading all history.
+                $metricRows = $reportDate >= $dateFrom && $reportDate <= $dateTo
+                    ? collect($calculatedByOperator[(int) $report->operator_user_id]['rows'] ?? [])
+                        ->filter(fn (array $metric): bool => ($metric['date'] ?? '') === $reportDate)
+                    : collect($report->metric_rows ?: []);
+                $revenue = $metricRows
                     ->filter(fn (array $metric): bool => mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domain
                         && mb_strtolower(trim((string) ($metric['media_source'] ?? ''))) === 'applovin')
                     ->sum(fn (array $metric): float => (float) ($metric['first_total_revenue'] ?? 0));
@@ -301,7 +315,7 @@ class AppLovinPerformanceReportController extends Controller
 
         $rows = $dailyRows
             ->groupBy(fn (array $row) => implode('|', [$row['department_id'], $row['operator_user_id'], $row['store_id']]))
-            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
+            ->map(function ($group) use ($accountSpendTotals, $globalSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('first_orders');
                 $revenue = round((float) $group->sum('first_revenue'), 2);
@@ -314,6 +328,7 @@ class AppLovinPerformanceReportController extends Controller
                     ? 'not_eligible'
                     : ($giftEligibleKeys->contains(fn ($key) => $giftScreenshots->has($key)) ? 'available' : 'pending_upload');
                 $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
+                $accountNumberValues = $group->pluck('account_numbers')->flatten()->filter()->unique()->values();
                 $deductedConsumption = round((float) $accountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
                     $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
 
@@ -335,6 +350,7 @@ class AppLovinPerformanceReportController extends Controller
                     'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'account_names' => $group->pluck('account_names')->flatten()->filter()->unique()->implode('、'),
                     'account_numbers' => $group->pluck('account_numbers')->flatten()->filter()->unique()->implode('、'),
+                    'account_number_values' => $accountNumberValues->all(),
                     'account_keys' => $accountKeys->all(),
                     'agency_names' => $group->pluck('agency_names')->flatten()->filter()->unique()->implode('、'),
                     'first_orders' => $orders,
@@ -346,6 +362,7 @@ class AppLovinPerformanceReportController extends Controller
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
                     'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
+                    'global_total_consumption' => $this->historicalSpend->sumForAccountNumbers($globalSpendTotals, $accountNumberValues),
                     'deducted_consumption' => $deductedConsumption,
                     'historical_revenue' => $historicalRevenue,
                     'estimated_total_roi' => $deductedConsumption > 0 ? $historicalRevenue / $deductedConsumption : null,
@@ -418,6 +435,10 @@ class AppLovinPerformanceReportController extends Controller
         $totals['subscription_rate'] = $totals['orders'] > 0 ? $totals['subscription_orders'] / $totals['orders'] : null;
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $totals['total_consumption'] = round((float) $rows->pluck('account_keys')->flatten()->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2);
+        $totals['global_total_consumption'] = $this->historicalSpend->sumForAccountNumbers(
+            $globalSpendTotals,
+            $rows->pluck('account_number_values')->flatten()->filter()->unique(),
+        );
         $totalAccountKeys = $rows->pluck('account_keys')->flatten()->filter()->unique()->values();
         $totals['deducted_consumption'] = round((float) $totalAccountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
             $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
@@ -446,6 +467,7 @@ class AppLovinPerformanceReportController extends Controller
             'roi' => $row['roi'],
             'account_numbers' => $row['account_numbers'],
             'total_consumption' => $row['total_consumption'],
+            'global_total_consumption' => $row['global_total_consumption'],
             'deducted_consumption' => $row['deducted_consumption'],
             'historical_revenue' => $row['historical_revenue'],
             'estimated_total_roi' => $row['estimated_total_roi'],

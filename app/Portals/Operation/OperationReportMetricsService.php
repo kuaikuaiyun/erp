@@ -3,9 +3,11 @@
 namespace App\Portals\Operation;
 
 use App\Models\AdminUser;
+use App\Models\AssistantDomainStoreOwnerHistory;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsTongtuSkuMapping;
+use App\Portals\Assistant\AssistantStoreOwnerAttributionService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +17,10 @@ class OperationReportMetricsService
 
     /** 运营业绩按固定 UTC-4 统计，不跟随夏令时变化。 */
     public const REPORT_TIMEZONE = '-04:00';
+
+    public function __construct(private readonly AssistantStoreOwnerAttributionService $ownerAttribution)
+    {
+    }
 
     /** @return list<array{sku:string,product_name:string,missing_fields:list<string>,item_count:int,quantity:float,latest_order_at:?string}> */
     public function missingGuideSkuSummary(array $excludedStoreNames = []): array
@@ -311,7 +317,7 @@ class OperationReportMetricsService
     /** @param list<int> $operatorUserIds
      *  @return array<int,array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>}>
      */
-    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds, string $timezone = self::REPORT_TIMEZONE, bool $requireBothSubscriptionTags = false): array
+    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds, string $timezone = self::REPORT_TIMEZONE, bool $requireBothSubscriptionTags = false, bool $attributeByStoreOwnerHistory = false): array
     {
         $operatorUserIds = collect($operatorUserIds)->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
         if ($operatorUserIds === []) return [];
@@ -320,16 +326,30 @@ class OperationReportMetricsService
         $operatorUsers = AdminUser::query()->whereIn('id', $operatorUserIds)->get();
         $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
         $operatorSearchValues = $this->operatorSearchValues($operatorUsers);
+        $historyStoreIds = $attributeByStoreOwnerHistory
+            ? AssistantDomainStoreOwnerHistory::query()
+                ->whereIn('owner_user_id', $operatorUserIds)
+                ->pluck('assistant_domain_store_id')->map(fn ($id) => (int) $id)->unique()->values()
+            : collect();
+        $ownerTimelines = $attributeByStoreOwnerHistory
+            ? $this->ownerAttribution->timelines($historyStoreIds)
+            : collect();
         $orders = LogisticsOrder::query()->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
-            ->where(function ($query) use ($operatorUserIds, $operatorSearchValues): void {
-                $query->whereIn('assigned_owner_user_id', $operatorUserIds)
-                    ->orWhere(function ($legacy) use ($operatorUserIds, $operatorSearchValues): void {
-                        $legacy->whereNull('assigned_owner_user_id')
-                            ->where(function ($fallback) use ($operatorUserIds, $operatorSearchValues): void {
-                                $fallback->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
-                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
-                            });
+            ->where(function ($query) use ($operatorUserIds, $operatorSearchValues, $historyStoreIds): void {
+                if ($historyStoreIds->isNotEmpty()) {
+                    $query->whereIn('assistant_domain_store_id', $historyStoreIds);
+                }
+                $method = $historyStoreIds->isNotEmpty() ? 'orWhere' : 'where';
+                $query->{$method}(function ($assigned) use ($operatorUserIds, $operatorSearchValues): void {
+                    $assigned->whereIn('assigned_owner_user_id', $operatorUserIds)
+                        ->orWhere(function ($legacy) use ($operatorUserIds, $operatorSearchValues): void {
+                            $legacy->whereNull('assigned_owner_user_id')
+                                ->where(function ($fallback) use ($operatorUserIds, $operatorSearchValues): void {
+                                    $fallback->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
+                                    if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                                });
+                        });
                     });
             })
             ->orderBy('order_created_at')->get();
@@ -352,7 +372,14 @@ class OperationReportMetricsService
         }
         $groups = $missingGuide = $missingGuideSkus = $missingWeight = [];
         foreach ($orders as $order) {
-            $operatorId = $this->resolveOperatorId($order, $operatorIdentityMap, $operatorUserIds);
+            $storeId = (int) ($order->assistant_domain_store_id ?? 0);
+            if ($attributeByStoreOwnerHistory && $ownerTimelines->has($storeId)) {
+                $orderedAt = $order->getRawOriginal('order_created_at') ?: $order->order_created_at;
+                $operatorId = $this->ownerAttribution->resolve($ownerTimelines, $storeId, $orderedAt)['owner_user_id'];
+                if (! in_array($operatorId, $operatorUserIds, true)) $operatorId = null;
+            } else {
+                $operatorId = $this->resolveOperatorId($order, $operatorIdentityMap, $operatorUserIds);
+            }
             if ($operatorId === null) continue;
             $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
             $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
