@@ -37,7 +37,7 @@
         </nav>
     </section>
     <dialog class="flt-dialog" data-flt-dialog aria-labelledby="flt-dialog-title">
-        <form data-flt-editor data-loading="off" novalidate><header><div><span class="flt-eyebrow">{{ __('frontend_list_template.demo') }}</span><h3 id="flt-dialog-title"></h3></div><button type="button" class="flt-icon-close" data-flt-close aria-label="{{ __('frontend_list_template.close') }}">×</button></header>
+        <form data-flt-editor data-loading="off" novalidate><header><h3 id="flt-dialog-title"></h3><button type="button" class="flt-icon-close" data-flt-close aria-label="{{ __('frontend_list_template.close') }}">×</button></header>
             <div class="flt-dialog-content" data-flt-dialog-content></div>
             <footer><button type="button" class="flt-btn" data-flt-close>{{ __('frontend_list_template.cancel') }}</button><button type="submit" class="flt-btn flt-primary" data-flt-dialog-submit></button></footer>
         </form>

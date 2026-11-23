@@ -54,6 +54,8 @@ Route::prefix('asset-manager/departments')->name('asset-manager.departments.')->
     Route::get('/{department}', 'show')->whereNumber('department')->name('show');
     Route::put('/{department}', 'update')->whereNumber('department')->name('update');
     Route::get('/{department}/members', 'members')->whereNumber('department')->name('members');
+    Route::get('/{department}/candidates', 'candidates')->whereNumber('department')->name('candidates');
+    Route::post('/{department}/members', 'addMembers')->whereNumber('department')->middleware('throttle:10,1')->name('members.store');
 });
 
 Route::prefix('asset-manager/computer-department-bindings')->name('asset-manager.computer-department-bindings.')->controller(ComputerDepartmentBindingController::class)->group(function () {

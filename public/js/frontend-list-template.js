@@ -60,6 +60,14 @@
                 }
             }, 220);
         }
+        function extraFields(index) {
+            return {
+                business_type: messages.business_types[index % messages.business_types.length],
+                source_channel: messages.source_channels[index % messages.source_channels.length],
+                region: messages.regions[index % messages.regions.length],
+                priority: messages.priorities[index % messages.priorities.length]
+            };
+        }
         function seed() {
             return Array.from({ length: 120 }, function (_, index) {
                 var id = index + 1;
@@ -71,7 +79,8 @@
                     owner: messages.owners[(index * 5 + Math.floor(index / 6)) % messages.owners.length],
                     status: ['active', 'active', 'pending', 'active', 'disabled'][index % 5],
                     time: '2026-11-' + String(1 + index % 23).padStart(2, '0') + 'T' + String(9 + index % 9).padStart(2, '0') + ':' + String(index % 60).padStart(2, '0'),
-                    note: t('demo_note')
+                    note: t('demo_note'),
+                    ...extraFields(index)
                 };
             });
         }
@@ -160,6 +169,7 @@
                 ['company', 'department', 'owner'].forEach(function (key) { tr.appendChild(node('td', '', row[key])); });
                 var status = node('td'), badge = node('span', 'flt-status', messages.statuses[row.status]); badge.dataset.status = row.status; status.appendChild(badge); tr.appendChild(status);
                 tr.appendChild(node('td', 'flt-time', row.time.replace('T', ' ')));
+                ['business_type', 'source_channel', 'region', 'priority'].forEach(function (key) { tr.appendChild(node('td', '', row[key])); });
                 var actions = node('td');
                 ['view', 'edit', 'delete'].forEach(function (key) {
                     var button = node('button', 'flt-row-action', t(key)); button.type = 'button'; button.dataset.action = key; button.dataset.id = row.id; actions.appendChild(button);
@@ -343,7 +353,7 @@
             event.preventDefault(); if (busy || !['edit', 'delete', 'create', 'bulk_delete', 'import', 'export'].includes(action)) return;
             if (action === 'import') {
                 var file = editor.elements.demo_file;
-                if (!importFile) { fieldError(file, t('required_field', { field: t('file') })); contentFocus(); return; }
+                if (!importFile) { fieldError(file, t('required_field', { field: t('file') })); editor.querySelector('.flt-dropzone').focus(); return; }
                 close(); say(t('upload_done')); return;
             }
             if (action === 'export') { var scope = editor.querySelector('[name=export_scope]:checked:not(:disabled)'); if (!scope) return; close(); say(t('export_done')); return; }
@@ -358,6 +368,7 @@
                 var now = new Date();
                 var created = { id: nextId, code: 'DEMO-' + String(nextId).padStart(5, '0'), name: recordName,
                     time: now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + 'T' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') };
+                Object.assign(created, extraFields(nextId - 1));
                 ['company', 'department', 'owner', 'status', 'note'].forEach(function (key) { created[key] = editor.elements[key].value; });
                 nextId++; records.unshift(created); page = 1; say(t('created')); close(); apply(); return;
             }

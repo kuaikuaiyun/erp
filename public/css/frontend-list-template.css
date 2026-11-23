@@ -322,8 +322,9 @@
 }
 .flt table {
     width: 100%;
-    min-width: 1020px;
-    border-collapse: collapse;
+    min-width: 1940px;
+    border-collapse: separate;
+    border-spacing: 0;
     table-layout: fixed
 }
 .flt thead th {
@@ -362,12 +363,15 @@
     word-break: break-word
 }
 .flt tbody tr:nth-child(even) {
+    --flt-row-bg: #fcfdff;
     background: #fcfdff
 }
 .flt tbody tr:hover {
+    --flt-row-bg: #f3f9fd;
     background: #f3f9fd
 }
 .flt tbody tr[data-selected="1"] {
+    --flt-row-bg: #edf7fe;
     background: #edf7fe
 }
 .flt td.flt-name {
@@ -620,7 +624,7 @@
         grid-template-columns: repeat(3,minmax(0,1fr))
     }
     .flt-table-scroll table {
-        min-width: 1120px
+        min-width: 1940px
     }
 }
 @media(max-width:1000px) {
@@ -695,14 +699,43 @@
 .flt-dialog [aria-invalid=true] { border-color: #ce695a; box-shadow: 0 0 0 3px #c85e4c12; }
 .flt-dialog .flt-field-error { display: block; color: #bf5546; font-size: 12px; font-weight: 400; margin-top: 7px; line-height: 1.5; }
 .flt-transfer-hint { color: #758c9e; line-height: 1.8; padding: 12px 14px; background: #f3f8fc; border-radius: 6px; margin-bottom: 22px; }
-.flt-file-field { position: relative; }
-.flt-file-button { display: block; width: fit-content; margin-top: 10px; border: 1px dashed #b8cfe0; border-radius: 5px; padding: 10px 20px; color: #2587bc; background: #f8fbfe; }
-.flt-dialog .flt-file-field input { position: absolute; top: 23px; left: 0; width: 160px; height: 42px; opacity: 0; cursor: pointer; margin: 0; }
-.flt-file-field:focus-within .flt-file-button { outline: 2px solid #4e9ec9; outline-offset: 2px; }
-.flt-file-info { padding: 12px 14px; border: 1px solid #e1eaf1; border-radius: 6px; color: #8b9ca9; overflow-wrap: anywhere; }
+.flt-dialog .flt-file-info { padding: 12px 14px; border: 1px solid #e1eaf1; border-radius: 6px; color: #8b9ca9; overflow-wrap: anywhere; }
 .flt-file-info strong { color: #41677f; display: block; margin-bottom: 7px; font-size: 13px; font-weight: 500; }
 .flt-dialog .flt-export-choice { display: flex; gap: 10px; align-items: center; border: 1px solid #deE8f0; padding: 14px; border-radius: 6px; cursor: pointer; }
 .flt-dialog .flt-export-choice input { width: 15px; height: 15px; margin: 0; accent-color: #2188be; }
 .flt-export-choice:has(input:checked) { background: #f0f8fe; border-color: #97c4df; }
 .flt-export-choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 @media(prefers-reduced-motion:reduce) { .flt-spinner,.flt-btn.is-loading::before,.flt-pagination.is-loading .flt-btn::before { animation-duration: 1.8s; } }
+
+.flt-dialog header>h3 { margin: 0; }
+.flt-dialog input.flt-file-input[type=file] { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.flt-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 175px; border: 1px dashed #a9c4d9; border-radius: 7px; background: #f8fbfe; color: #486c86; cursor: pointer; padding: 24px 18px; margin-bottom: 13px; text-align: center; transition: background .15s, border-color .15s; }
+.flt-dropzone>i { font-size: 30px; color: #6a8ca5; }
+.flt-dropzone>strong { font-size: 14px; font-weight: 600; line-height: 1.6; }
+.flt-dropzone>span { font-size: 12px; line-height: 1.7; color: #7b96aa; }
+.flt-dropzone:hover,.flt-dropzone.is-dragover { border-color: #238fc8; background: #edf7ff; }
+.flt-dropzone.is-dragover>i { color: #2188be; }
+.flt-dropzone:focus-visible { outline: 2px solid #4b9ac7; outline-offset: 3px; }
+.flt-dialog-content>.flt-field-error { margin: -5px 0 12px; }
+.flt-file-input[aria-invalid=true]+.flt-dropzone { border-color: #ce695a; background: #fff9f7; }
+@media(max-width:600px) { .flt-dropzone { min-height: 160px; padding: 20px 12px; } .flt-dropzone>strong { font-size: 13px; } }
+
+/* Horizontal pins share row colors; corner headers sit above both pinned axes. */
+.flt-table-scroll { isolation: isolate; }
+.flt-table-scroll tbody td:first-child,
+.flt-table-scroll tbody td:last-child {
+    position: sticky;
+    z-index: 3;
+    background: var(--flt-row-bg, #fff);
+}
+.flt-table-scroll th:first-child,.flt-table-scroll td:first-child {
+    left: 0;
+    box-shadow: 5px 0 8px -6px #46678366;
+}
+.flt-table-scroll th:last-child,.flt-table-scroll td:last-child {
+    right: 0;
+    box-shadow: -5px 0 8px -6px #46678366;
+}
+.flt-table-scroll thead th { z-index: 4; }
+.flt-table-scroll thead th:first-child,.flt-table-scroll thead th:last-child { z-index: 6; }
+.flt-table-scroll td:last-child { white-space: nowrap; }

@@ -1,6 +1,16 @@
 <?php
 
 return [
+    'member_tool' => [
+        'current'=>'当前成员', 'candidates'=>'添加其他人员', 'other_departments'=>'其他已授权部门', 'existing_departments'=>'现有已授权部门',
+        'add'=>'批量添加所选人员', 'selected'=>'已选择 :count 人', 'select_all'=>'全选本页',
+        'selection_invalid'=>'所选人员不存在、已禁用或超出部门／企业授权范围，请刷新后重选。',
+        'leaf_only'=>'当前一级部门包含下级部门，请进入对应的末级部门添加普通成员。',
+        'readonly'=>'当前仅可查看部门成员。', 'hint'=>'只添加已有账号，默认岗位为成员；保留原有部门任职、企业归属及钉钉绑定。单次最多添加 100 人，可跨页勾选。',
+        'confirm'=>'确认将所选 :count 人作为成员添加到当前部门？', 'added'=>'已添加 :count 人到当前部门。',
+        'empty'=>'没有可添加的人员', 'limit'=>'单次最多选择 100 人。', 'remove'=>'取消选择',
+        'company'=>'归属企业', 'department'=>'所在部门', 'all_companies'=>'全部授权企业', 'all_departments'=>'全部可管理部门',
+    ],
     'employment_label' => '状态',
     'permission_search' => '搜索系统或页面名称', 'expand_all' => '全部展开', 'collapse_all' => '全部收起', 'permission_empty' => '没有匹配的页面权限',
     'export_scope_hint' => '导出同时受部门和企业授权限制；未归纳企业的账号可导出，已归属未授权或停用企业的账号不可导出。',
@@ -51,6 +61,6 @@ return [
     'previous' => '上一页', 'next' => '下一页', 'permissions' => '页面权限', 'inherit' => '继承部门授权', 'allow' => '允许', 'deny' => '拒绝',
     'permissions_hint' => '仅超级管理员可配置普通账号的页面权限；此操作同步影响总后台。',
     'install_required' => '请先创建编码为 asset-manager 的系统，再安装人事账号管理菜单。',
-    'attributes' => ['company_id'=>'归属企业','account_ids'=>'所选账号','file'=>'Excel 文件','token'=>'预览凭证','username' => '登录账号', 'name' => '姓名', 'password' => '密码', 'status' => '账号状态', 'employment_status' => '在职状态', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'memberships' => '部门任职', 'memberships.*.department_id' => '所属部门', 'memberships.*.position' => '部门岗位', 'permissions' => '页面权限', 'search' => '搜索内容', 'per_page' => '每页条数', 'page' => '页码', 'department_ids' => '筛选部门', 'department_ids.*' => '筛选部门'],
+    'attributes' => ['user_ids'=>'所选人员','user_ids.*'=>'人员编号','department_id'=>'部门','department'=>'部门','company_id'=>'归属企业','account_ids'=>'所选账号','file'=>'Excel 文件','token'=>'预览凭证','username' => '登录账号', 'name' => '姓名', 'password' => '密码', 'status' => '账号状态', 'employment_status' => '在职状态', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'memberships' => '部门任职', 'memberships.*.department_id' => '所属部门', 'memberships.*.position' => '部门岗位', 'permissions' => '页面权限', 'search' => '搜索内容', 'per_page' => '每页条数', 'page' => '页码', 'department_ids' => '筛选部门', 'department_ids.*' => '筛选部门'],
     'validation' => ['prohibited'=>':attribute不可修改。','min.array'=>':attribute至少选择 :min 项。','max.numeric'=>':attribute不能超过 :max。','max.file'=>':attribute不能超过 :max KB。','mimes'=>':attribute格式应为 :values。','file'=>':attribute必须为文件。','required' => ':attribute不能为空。', 'string' => ':attribute必须为文字。', 'integer' => ':attribute必须为有效编号。', 'array' => ':attribute必须为列表。', 'boolean' => ':attribute状态无效。', 'in' => ':attribute选项无效。', 'distinct' => ':attribute不能重复。', 'date_format' => ':attribute格式应为 :format。', 'max.string' => ':attribute最多 :max 字。', 'max.array' => ':attribute最多 :max 项。', 'min.string' => ':attribute至少 :min 位。', 'min.numeric' => ':attribute不能小于 :min。', 'confirmed' => '两次输入的密码不一致。', 'unique' => '该登录账号已存在。', 'present' => '请提交:attribute。'],
 ];

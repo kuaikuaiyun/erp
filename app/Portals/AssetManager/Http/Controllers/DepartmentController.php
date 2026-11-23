@@ -79,15 +79,32 @@ class DepartmentController extends Controller
         return response()->json(['message' => __('asset_accounts.department_saved')]);
     }
 
+    public function candidates(Request $request, int $department)
+    {
+        $c = $this->context($request, true);
+        return response()->json(app(\App\Portals\AssetManager\DepartmentMemberService::class)->candidates($c['user'], $department, $request->all()))->header('Cache-Control','no-store');
+    }
+
+    public function addMembers(Request $request, int $department)
+    {
+        $c = $this->context($request, true);
+        return response()->json(app(\App\Portals\AssetManager\DepartmentMemberService::class)->add($c['user'], $department, $request->all()))->header('Cache-Control','no-store');
+    }
+
     public function members(Request $request, int $department)
     {
         $c = $this->context($request);
         $record = $this->query($c['user'])->findOrFail($department);
         $request->validate(['page' => 'nullable|integer|min:1', 'search' => 'nullable|string|max:100'], __('asset_accounts.validation'), __('asset_accounts.attributes'));
-        $query = $record->departmentMembers()->with('company');
+        $allowed = $this->bindings->departmentIds($c['user']);
+        $query = $record->departmentMembers()->with(['company','departments'=>fn ($q)=>$q->whereIn('id',$allowed)]);
         if ($request->filled('search')) $query->where(fn ($q) => $q->where('name','like','%'.$request->input('search').'%')->orWhere('username','like','%'.$request->input('search').'%'));
         $rows = $query->orderBy('id')->paginate(20);
-        $rows->setCollection($rows->getCollection()->map(fn ($user) => ['id' => $user->id,'name' => $user->name,'username' => $user->username,'position' => $user->pivot->position,'company' => $user->company?->name,'status' => (int) $user->status]));
-        return response()->json($rows)->header('Cache-Control', 'no-store');
+        $rows->setCollection($rows->getCollection()->map(fn ($user) => ['id' => $user->id,'name' => $user->name,'username' => $user->username,'position' => $user->pivot->position,'company' => $user->company?->name,'status' => (int) $user->status, 'departments'=>$user->departments->where('id','!=',$department)->map(fn ($d)=>['id'=>$d->id,'name'=>$d->name])->values()->all()]));
+        $hasChildren = $record->children()->exists();
+        $writable = $this->authorization->managedDepartmentIds($c['user'])->contains($department);
+        $pivot = config('admin.database.role_users_table');
+        $counts = $record->departmentMembers()->selectRaw($pivot.'.position as member_position, COUNT(*) as member_count')->groupBy($pivot.'.position')->pluck('member_count','member_position');
+        return response()->json($rows->toArray() + ['department'=>['id'=>$record->id,'name'=>$record->name,'can_add'=>$writable && !$hasChildren,'has_children'=>$hasChildren,'writable'=>$writable,'counts'=>$counts]])->header('Cache-Control', 'no-store');
     }
 }

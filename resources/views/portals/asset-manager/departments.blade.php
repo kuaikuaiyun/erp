@@ -2,7 +2,7 @@
 @section('page_title', __('asset_accounts.department_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261123-1">
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-departments.css') }}?v=20261123-2">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-departments.css') }}?v=20261123-3">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_accounts.department_title') }} <small>{{ __('asset_accounts.department_subtitle') }}</small></h1></section>
@@ -32,5 +32,5 @@
 @endsection
 @push('scripts')
 <script>window.AssetDepartmentsConfig=@json(['base'=>url('/asset-manager/departments'),'text'=>__('asset_accounts')]);</script>
-<script src="{{ asset('assets/erp/asset-departments.js') }}?v=20261123-2"></script>
+<script src="{{ asset('assets/erp/asset-departments.js') }}?v=20261123-3"></script>
 @endpush
