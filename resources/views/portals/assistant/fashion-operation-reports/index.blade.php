@@ -37,12 +37,8 @@
 <div class="report-note"><i class="fa fa-info-circle"></i> 订单业绩来自运营绑定店铺的所有订单，不限制付款状态；广告费统计审核通过和审核不通过的服装广告费提报，待审核数据暂不计入。各媒体仅显示实际广告花费；总 ROI＝总业绩÷全部实际广告费。</div>
 <div class="report-note"><b>ROI 颜色：</b><span class="roi-tier roi-excellent">＞1.8 优秀</span> <span class="roi-tier roi-good">1.6～1.8 不错</span> <span class="roi-tier roi-warning">1.4～1.6 警戒</span> <span class="roi-tier roi-poor">1.2～1.4 较差</span> <span class="roi-tier roi-danger">＜1.2 高危</span></div>
 @php
-    $orderSortActive = ($filters['sort_by'] ?? '') === 'order_count';
-    $revenueSortActive = ($filters['sort_by'] ?? '') === 'revenue';
-    $orderSortDirection = $orderSortActive && ($filters['sort_order'] ?? 'desc') === 'desc' ? 'asc' : 'desc';
-    $revenueSortDirection = $revenueSortActive && ($filters['sort_order'] ?? 'desc') === 'desc' ? 'asc' : 'desc';
-    $orderSortUrl = route($fashionReportIndexRoute, array_merge(request()->except('page'), ['sort_by' => 'order_count', 'sort_order' => $orderSortDirection]));
-    $revenueSortUrl = route($fashionReportIndexRoute, array_merge(request()->except('page'), ['sort_by' => 'revenue', 'sort_order' => $revenueSortDirection]));
+    $fashionSortBy = $filters['sort_by'] ?? '';
+    $fashionSortDirection = $filters['sort_order'] ?? 'desc';
 @endphp
 @if($isPersonalMode)
 <div class="report-note"><i class="fa fa-user"></i> 个人模式统计 {{ $filters['date_from'] }} 至 {{ $filters['date_to'] }}，按每天计算：<b>当天营业额 ÷ {{ number_format((float)$filters['profit_coefficient'], 2) }} − 当天广告费</b>。筛选区间内连续亏损达到 7 天或 14 天时姓名标红。</div>
@@ -51,7 +47,7 @@
 <div class="modal fade" id="personalReportDetailModal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" id="personalReportDetailTitle">个人每日数据</h4></div><div class="modal-body table-responsive" id="personalReportDetailBody"></div></div></div></div>
 <div class="modal fade" id="continuousLossModal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-exclamation-triangle text-red"></i> 亏损人员</h4></div><div class="modal-body table-responsive" id="continuousLossBody"></div></div></div></div>
 @else
-<div class="box fashion-report-box"><div class="box-header with-border"><h3 class="box-title">运营统计明细 <small>{{ $filters['date_from'] }} 至 {{ $filters['date_to'] }} · {{ $timezoneOptions[$filters['timezone']] }}</small></h3></div><div class="table-responsive"><table class="table table-bordered fashion-report-table performance-fashion-report-table"><thead><tr><th>运营部门</th><th>人名</th><th>入职天数</th><th>订单量 <a class="report-sort-button {{ $orderSortActive ? 'active' : '' }}" href="{{ $orderSortUrl }}" title="按订单量{{ $orderSortDirection === 'desc' ? '从高到低' : '从低到高' }}排序"><i class="fa {{ $orderSortActive && ($filters['sort_order'] ?? 'desc') === 'asc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i></a></th><th>总业绩($) <a class="report-sort-button {{ $revenueSortActive ? 'active' : '' }}" href="{{ $revenueSortUrl }}" title="按总业绩{{ $revenueSortDirection === 'desc' ? '从高到低' : '从低到高' }}排序"><i class="fa {{ $revenueSortActive && ($filters['sort_order'] ?? 'desc') === 'asc' ? 'fa-sort-amount-asc' : 'fa-sort-amount-desc' }}"></i></a></th><th>客单价($)</th><th>各媒体 / 广告费</th><th>广告费($)</th><th>总 ROI</th><th>操作</th><th>广告费提报</th></tr></thead><tbody>
+<div class="box fashion-report-box"><div class="box-header with-border"><h3 class="box-title">运营统计明细 <small>{{ $filters['date_from'] }} 至 {{ $filters['date_to'] }} · {{ $timezoneOptions[$filters['timezone']] }}</small></h3></div><div class="table-responsive"><table class="table table-bordered fashion-report-table performance-fashion-report-table"><thead><tr><th>运营部门</th><th>人名</th><th>入职天数</th><th>@include('portals.assistant.partials.report-numeric-sort-link',['sortKey'=>'order_count','label'=>'订单量','sortBy'=>$fashionSortBy,'sortDirection'=>$fashionSortDirection,'sortDirectionParam'=>'sort_order'])</th><th>@include('portals.assistant.partials.report-numeric-sort-link',['sortKey'=>'revenue','label'=>'总业绩($)','sortBy'=>$fashionSortBy,'sortDirection'=>$fashionSortDirection,'sortDirectionParam'=>'sort_order'])</th><th>客单价($)</th><th>各媒体 / 广告费</th><th>广告费($)</th><th>总 ROI</th><th>操作</th><th>广告费提报</th></tr></thead><tbody>
 @forelse($rows as $row)
 <tr class="report-main-row {{ ($filters['display_mode']??'performance')==='team' ? 'team-band-'.($teamBands[$loop->index]??0) : '' }}"><td>{{ $row['department'] }}</td><td><b>{{ $row['operator'] }}</b>@if($row['is_resigned'])<span class="employment-resigned">离职</span>@endif @if(($filters['display_mode']??'performance')==='team')<span class="team-position {{ $row['team_position']==='manager'?'manager':'' }}">{{ $row['team_position']==='manager'?'负责人':($row['team_position']==='deputy'?'副主管':'组员') }}</span>@endif</td><td>{{ $row['hire_days']!==null?$row['hire_days'].' 天':'—' }}</td><td class="text-right"><b>{{ $row['order_count'] }}</b></td><td class="text-right"><b>${{ number_format($row['revenue'],2) }}</b></td><td class="text-right">{{ $row['aov']!==null?number_format($row['aov'],2):'—' }}</td><td><div class="media-list">@forelse($row['media'] as $media)<div class="media-item"><b>{{ $media['name'] }}</b><span>${{ number_format($media['spend'],2) }}</span></div>@empty<span class="text-muted">暂无已审核的广告费</span>@endforelse</div></td><td class="text-right">${{ number_format($row['ad_spend'],2) }}</td><td class="text-center roi"><span class="roi-tier {{ $row['roi_class'] }}">{{ $row['roi']!==null?number_format($row['roi'],2):'—' }}</span></td><td class="text-center"><button type="button" class="btn btn-info btn-xs detail-toggle" data-toggle="collapse" data-target="#fashion-operation-detail-{{ $loop->index }}"><i class="fa fa-eye"></i> 查看明细</button></td><td class="text-center"><span class="submission-status {{ $row['submission_status'] }}">{{ $row['submission_label'] }}</span></td></tr>
 <tr class="collapse report-detail-row" id="fashion-operation-detail-{{ $loop->index }}"><td colspan="11"><div class="report-detail-card"><div class="report-detail-meta"><b>{{ $row['operator'] }}</b>　入职日期：{{ $row['hired_at']?:'—' }}　绑定店铺：{{ count($row['stores']) }} 家</div><div class="report-detail-stores">@foreach($row['stores'] as $store)<div class="report-detail-store"><b>{{ $store['name'] }}</b><span class="label label-info">{{ $store['site_builder'] }}</span><small>{{ $store['domain']?:'—' }}</small><strong>{{ $store['orders'] }} 单 · ${{ number_format($store['revenue'],2) }}</strong></div>@endforeach</div></div></td></tr>
@@ -82,6 +78,7 @@ $(function(){
     }
 });
 </script>
+@unless($isPersonalMode)
 @php
     $imageReportTitle = $reportProjectLabel.'运营报表';
     $imageSourceTitle = $fashionReportIndexRoute === 'operation-dashboard.fashion-operation-reports.index' ? '业绩看板' : '助理系统';
@@ -168,6 +165,7 @@ $(function(){
     });
 })();
 </script>
+@endunless
 @if($isPersonalMode)
 <script>
 (function($){
