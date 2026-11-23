@@ -51,20 +51,56 @@
 </style>
 @endpush
 @section('finance_content')
+@php
+    $overviewWaiting = isset($preparationPlan);
+    $selectedChannel = $filters['channel'] ?? '';
+@endphp
 @if(isset($overviewCalculatedAt))
 <p class="text-muted">本次查询计算时间：{{ $overviewCalculatedAt }}（北京时间）。重新查询可获取新的计算结果。</p>
 @endif
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
-<div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
-@if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ $loadedLossScope ?? request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
-<div class="finance-date-pair finance-date-pair--wide">
-    <div><label for="overview-month-from">开始月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
-    <div><label for="overview-month-to">结束月份（{{ $report === 'summary' ? '按通道时区' : '北京时间' }}）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
-</div>
+@if($report === 'losses' && ! $overviewWaiting)
 @php
-    $selectedChannel = $filters['channel'] ?? '';
+    $comparison = $monthlyLossGroups ?? [$filters['month'] => $groups];
+    $allPanels = collect($comparison)->flatten(1)->unique(fn ($group) => $group['name'].'|'.$group['channel'])->values();
+    $panelScope = fn ($group) => $group['scope'] ?? (match($group['channel']) { 'paypal' => 'PayPal', 'combined' => 'Shopify', 'xuzong' => '徐总信用卡', default => \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] });
+    $panelCategory = fn ($group) => $group['category'] ?? (explode(' / ', $group['name'], 2)[1] ?? '总计');
+    $availableScopes = $allPanels->map($panelScope)->unique();
+    $scopes = collect(['Shopify', ...array_values(\App\Portals\Finance\FinanceTransactionSummary::VIEWS)])->merge($availableScopes)->unique()->values();
+    $preferredScope = match ($selectedChannel) {
+        'paypal' => 'PayPal', 'xuzong', 'xuzong1', 'xuzong2' => '徐总信用卡',
+        'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'credit_card' => '合计', default => 'Shopify',
+    };
+    $selectedScope = $loadedLossScope ?? (in_array(request('loss_scope'), $scopes->all(), true) ? request('loss_scope')
+        : ($availableScopes->contains($preferredScope) ? $preferredScope : ($availableScopes->first() ?? $preferredScope)));
+    $scopePanels = $allPanels->filter(fn ($group) => $panelScope($group) === $selectedScope);
+    $categoriesByScope = $scopes->mapWithKeys(function ($scope) use ($allPanels, $panelScope, $panelCategory) {
+        $base = ['总计', '订阅', '无订阅', '加购', '订阅复购1次', '订阅复购2次'];
+        if (in_array($scope, ['Shopify', 'PayPal', '合计'], true)) { $base[] = '刷单'; }
+        $categories = collect($base)->merge($allPanels->filter(fn ($panel) => $panelScope($panel) === $scope)->map($panelCategory))
+            ->reject(fn ($category) => $category === '未分类' || (! in_array($scope, ['Shopify', 'PayPal', '合计'], true) && $category === '刷单'))->unique()->values();
+        return [$scope => $categories];
+    });
+    $categories = $categoriesByScope[$selectedScope];
+    $selectedCategory = in_array(request('loss_category'), $categories->all(), true) ? request('loss_category') : ($categories->first() ?? '总计');
+    $panels = $scopePanels->filter(fn ($group) => $panelCategory($group) === $selectedCategory);
+    $switchFilters = [...request()->except(['loss_scope', 'loss_category', 'download', 'page', '_overview_refresh', '_overview_run']),
+        'month_from' => $filters['month_from'], 'month_to' => $filters['month_to']];
+    if (isset($overviewRun) && $loadedLossScope !== null) $switchFilters['_overview_run'] = $overviewRun;
+    $scopeSwitchFilters = \Illuminate\Support\Arr::except($switchFilters, ['_overview_run']);
 @endphp
+@endif
+<div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" data-finance-overview-form>@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
+@if(isset($overviewRun) || $overviewWaiting)<input type="hidden" name="_overview_refresh" value="1">@endif
+@if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ $selectedScope ?? $loadedLossScope ?? request('loss_scope', '') }}"><input type="hidden" name="loss_category" value="{{ $selectedCategory ?? request('loss_category', '总计') }}">@endif
+@foreach(['layer', 'owner', 'payment_method'] as $field)
+    @if(request()->filled($field))<input type="hidden" name="{{ $field }}" value="{{ $filters[$field] }}">@endif
+@endforeach
+<div class="finance-date-pair finance-date-pair--wide">
+    <div><label for="overview-month-from">开始月份（按通道时区）</label><input id="overview-month-from" type="month" name="month_from" value="{{ $filters['month_from'] }}" class="form-control" required></div>
+    <div><label for="overview-month-to">结束月份（按通道时区）</label><input id="overview-month-to" type="month" name="month_to" value="{{ $filters['month_to'] }}" class="form-control" required></div>
+</div>
 <div><label for="overview-channel">支付通道</label><select id="overview-channel" name="channel" class="form-control" data-overview-channel>
 <option value="">全部</option>
 @foreach(['paypal'=>'PayPal','xuzong'=>'徐总支付','ye'=>'叶总支付','worldpay'=>'Worldpay','credit_card'=>'信用卡合计'] as $key => $label)
@@ -98,52 +134,26 @@
             form.querySelector('[name="loss_category"]').value = '总计';
         }
         clearDependentFilters();
-        form.requestSubmit();
     });
-    source.addEventListener('change', function () {
-        clearDependentFilters();
-        form.requestSubmit();
-    });
-    form.addEventListener('change', function (event) {
-        if (event.target.matches('[data-overview-auto-submit]')) form.requestSubmit();
-    });
+    source.addEventListener('change', clearDependentFilters);
 })();
 </script>
 @foreach(['account' => '支付账户', 'team' => '团队', 'subscription' => '订阅类型'] as $field => $label)
 @php
     $selectedValue = (string) ($field === 'account' ? ($filters['account_choice'] ?? $filters[$field] ?? '') : ($filters[$field] ?? ''));
 @endphp
-<div><label for="overview-{{ $field }}">{{ $label }}</label><select id="overview-{{ $field }}" name="{{ $field }}" class="form-control" data-overview-dependent data-overview-auto-submit>
+<div><label for="overview-{{ $field }}">{{ $label }}</label><select id="overview-{{ $field }}" name="{{ $field }}" class="form-control" data-overview-dependent>
 <option value="">全部{{ $label }}</option>
+@if($selectedValue !== '' && ! collect($filterOptions[$field] ?? [])->contains(fn ($option) => (string) $option['value'] === $selectedValue))
+    <option value="{{ $selectedValue }}" selected>{{ $field === 'account' ? (['@channel:ye' => '叶总', '@channel:xuzong1' => '徐总1', '@channel:xuzong2' => '徐总2'][$selectedValue] ?? $selectedValue) : $selectedValue }}</option>
+@endif
 @foreach(($filterOptions[$field] ?? []) as $option)<option value="{{ $option['value'] }}" @selected($selectedValue === (string) $option['value'])>{{ $option['label'] }}</option>@endforeach
 </select></div>
 @endforeach
-@if($report === 'losses')
-@php
-    $comparison = $monthlyLossGroups ?? [$filters['month'] => $groups];
-    $allPanels = collect($comparison)->flatten(1)->unique(fn ($group) => $group['name'].'|'.$group['channel'])->values();
-    $panelScope = fn ($group) => $group['scope'] ?? (match($group['channel']) { 'paypal' => 'PayPal', 'combined' => 'Shopify', 'xuzong' => '徐总信用卡', default => \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] });
-    $panelCategory = fn ($group) => $group['category'] ?? (explode(' / ', $group['name'], 2)[1] ?? '总计');
-    $availableScopes = $allPanels->map($panelScope)->unique();
-    $scopes = collect(['Shopify', ...array_values(\App\Portals\Finance\FinanceTransactionSummary::VIEWS)])->merge($availableScopes)->unique()->values();
-    $selectedScope = $loadedLossScope ?? (in_array(request('loss_scope'), $scopes->all(), true) ? request('loss_scope') : ($availableScopes->first() ?? 'Shopify'));
-    $scopePanels = $allPanels->filter(fn ($group) => $panelScope($group) === $selectedScope);
-    $categoriesByScope = $scopes->mapWithKeys(function ($scope) use ($allPanels, $panelScope, $panelCategory) {
-        $base = ['总计', '订阅', '无订阅', '加购', '订阅复购1次', '订阅复购2次'];
-        if (in_array($scope, ['Shopify', 'PayPal', '合计'], true)) { $base[] = '刷单'; }
-        $categories = collect($base)->merge($allPanels->filter(fn ($panel) => $panelScope($panel) === $scope)->map($panelCategory))
-            ->reject(fn ($category) => $category === '未分类' || (! in_array($scope, ['Shopify', 'PayPal', '合计'], true) && $category === '刷单'))->unique()->values();
-        return [$scope => $categories];
-    });
-    $categories = $categoriesByScope[$selectedScope];
-
-    $selectedCategory = in_array(request('loss_category'), $categories->all(), true) ? request('loss_category') : ($categories->first() ?? '总计');
-    $panels = $scopePanels->filter(fn ($group) => $panelCategory($group) === $selectedCategory);
-    $switchFilters = request()->except(['loss_scope', 'loss_category', 'download', 'page']);
-@endphp
-@endif
-<div class="overview-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'month' => $filters['month'], 'month_from' => $filters['month_from'], 'month_to' => $filters['month_to']]) }}">重置</a>
-    <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
+<div class="overview-actions"><button type="submit" class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'month' => $filters['month'], 'month_from' => $filters['month_from'], 'month_to' => $filters['month_to']]) }}">重置</a>
+    @unless($overviewWaiting)
+    <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), ...((isset($overviewRun) && ($report === 'summary' || $loadedLossScope !== null)) ? ['_overview_run' => $overviewRun] : []), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
+    @endunless
 </div>@if(($filters['channel'] ?? '') === 'credit_card')
     <p class="overview-rate overview-import-months">信用卡数据来自「信用卡结算明细」导入记录。
         @if($creditMonths)
@@ -157,40 +167,44 @@
     </p>
 @endif
 </form>
+@unless($overviewWaiting)
 @php
     $rateText = $report === 'summary' && $filters['month_from'] !== $filters['month_to']
         ? '当前汇总按所选月份累计；各月份分别使用其对应通道汇率。'
-        : ($rate === null
-        ? '本月对应通道的美元兑人民币汇率未配置，物流和采购损耗占比暂不能计算。'
-        : (is_array($rate)
-            ? '本月汇率按各支付通道分别配置，物流和采购成本已按数据所属通道换算。'
-            : '本月汇率：1 USD = '.\App\Portals\Finance\FinanceCatalog::reportAmount($rate).' CNY'));
+        : ($filters['month_to'].' '.match (true) {
+            $rate === null => '缺少对应通道的美元兑人民币汇率，受影响的物流和采购占比显示为「—」。',
+            is_array($rate) => '物流和采购按各支付通道的汇率换算。',
+            default => '汇率 1 USD = '.\App\Portals\Finance\FinanceCatalog::reportAmount($rate).' CNY',
+        });
 @endphp
-<p class="overview-rate {{ $rate === null ? 'is-missing' : '' }}"><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rateText }}</p>
+<p @class(['overview-rate', 'is-missing' => $rate === null && $report === 'losses'])><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rateText }}</p>
+@endunless
 </div></div>
-@if($report === 'summary')
+@if($overviewWaiting)
+@include('portals.finance.partials.report-progress')
+@elseif($report === 'summary')
 <div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ \App\Portals\Finance\FinanceCatalog::settlementProjectName($group['name'], $group['channel']) }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">无符合条件的记录</td></tr>@endforelse</tbody></table></div></div>
 @else
 @php
     $scopeStats = $scopes->flatMap(function ($scope) use ($categoriesByScope, $groups, $panelScope, $panelCategory) {
         return $categoriesByScope[$scope]->map(function ($category) use ($scope, $groups, $panelScope, $panelCategory) {
             $selected = array_values(array_filter($groups, fn ($group) => $panelScope($group) === $scope && $panelCategory($group) === $category));
+            $settlements = array_column($selected, 'settlement');
+            $settlement = $settlements === [] || in_array(null, $settlements, true) ? '—'
+                : \App\Portals\Finance\FinanceCatalog::reportAmount(array_reduce($settlements, fn ($sum, $amount) => bcadd($sum, $amount, 8), '0'), 3);
             return ['scope' => $scope, 'category' => $category, 'count' => (string) count($selected),
                 'success' => number_format(array_sum(array_column($selected, 'success_count'))),
                 'failed' => number_format(array_sum(array_column($selected, 'failed_count'))),
-                'settlement' => \App\Portals\Finance\FinanceCatalog::reportAmount(array_reduce($selected, fn ($sum, $group) => bcadd($sum, $group['settlement'] ?? '0', 8), '0'), 3)];
+                'settlement' => $settlement];
         });
     })->values();
     $selectedStats = $scopeStats->first(fn ($stats) => $stats['scope'] === $selectedScope && $stats['category'] === $selectedCategory);
 @endphp
 <p class="overview-rate">以下统计对应结束月份 {{ $filters['month'] }} 的当前通道及分类。</p>
 <div class="overview-stats"><div class="overview-stat"><span>当前分类</span><strong data-loss-stat="count">{{ $selectedStats['count'] }}</strong><small>组</small></div><div class="overview-stat"><span>成功订单</span><strong data-loss-stat="success">{{ $selectedStats['success'] }}</strong><small>单</small></div><div class="overview-stat"><span>失败交易</span><strong data-loss-stat="failed">{{ $selectedStats['failed'] }}</strong><small>笔</small></div><div class="overview-stat"><span>结算金额 · USD</span><strong data-loss-stat="settlement">{{ $selectedStats['settlement'] }}</strong></div></div>
-@php
-    $lossMetricKeys = array_values(array_unique(array_merge(...array_map(fn ($group) => array_keys($group['ratios']), $groups))));
-@endphp
-<div class="loss-browser" data-loss-browser data-loss-loaded-scopes="{{ json_encode(collect([$selectedScope])->merge($availableScopes)->unique()->values()->all()) }}">
+<div class="loss-browser" data-loss-browser data-loss-loaded-scopes="{{ json_encode($loadedLossScope === null ? collect([$selectedScope])->merge($availableScopes)->unique()->values()->all() : [$selectedScope]) }}">
 <nav class="loss-scope-tabs" aria-label="损耗报表项目">
-@foreach($scopes as $scope)<a href="{{ route('finance.report', ['report' => $report, ...$switchFilters, 'loss_scope' => $scope]) }}" @class(['is-active' => $scope === $selectedScope]) @if($scope === $selectedScope) aria-current="page" @endif>{{ $scope }}</a>@endforeach
+@foreach($scopes as $scope)<a href="{{ route('finance.report', ['report' => $report, ...($scope === $selectedScope ? $switchFilters : $scopeSwitchFilters), 'loss_scope' => $scope]) }}" @class(['is-active' => $scope === $selectedScope]) @if($scope === $selectedScope) aria-current="page" @endif>{{ $scope }}</a>@endforeach
 </nav>
 <nav class="loss-category-tabs" aria-label="损耗报表分类">
 @foreach($categories as $category)<a href="{{ route('finance.report', ['report' => $report, ...$switchFilters, 'loss_scope' => $selectedScope, 'loss_category' => $category]) }}" @class(['is-active' => $category === $selectedCategory]) @if($category === $selectedCategory) aria-current="page" @endif>{{ $category }}</a>@endforeach

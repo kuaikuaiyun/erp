@@ -834,6 +834,12 @@ class FinanceSettlementService
                     );
                 }
                 $row['card_layout'] = array_replace($row['card_layout'], $displayEdits);
+                if (strcasecmp(trim((string) ($row['card_layout']['store_platform'] ?? '')), 'shopyy') === 0) {
+                    $row['card_layout']['store_platform'] = '索引';
+                }
+                if (isset($row['card_layout']['project'])) {
+                    $row['card_layout']['project'] = preg_replace('/项目$/u', '', trim((string) $row['card_layout']['project']));
+                }
                 if ($isConflux) $row['card_layout']['domain'] = $row['domain'];
                 $row['card_layout']['operation_region'] = self::normaliseRegionLabel((string) ($row['card_layout']['operation_region'] ?? ''));
             }

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Portals\Finance\FinanceOverviewJobs;
+use App\Portals\Finance\FinanceOverviewWorker;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -55,11 +56,32 @@ class FinanceOverviewJobsTest extends TestCase
         $this->assertSame(1, $jobs->run()['completed']);
         $completed = $this->prepare($jobs, $first['plan']['resume_url']);
         $this->assertFalse($completed['plan']['waiting']);
-        $fresh = $this->prepare($jobs);
+        $reopened = $this->prepare($jobs);
+        $this->assertSame($completed['result'], $reopened['result']);
+        $this->assertSame($completed['plan']['resume_url'], $reopened['plan']['resume_url']);
+        $fresh = $this->prepare($jobs, 'http://caiwu.example/finance/reports/losses?_overview_refresh=1');
         $this->assertTrue($fresh['plan']['waiting']);
         $this->assertNotSame($first['plan']['resume_url'], $fresh['plan']['resume_url']);
+        $this->assertStringNotContainsString('_overview_refresh', $fresh['plan']['resume_url']);
         $this->assertSame($completed['result'], $this->prepare($jobs, $first['plan']['resume_url'])['result']);
         $this->assertSame('overview_pending', DB::table($jobs::TABLE)->value('state'));
+    }
+
+    public function test_links_to_legacy_runs_with_blank_filters_still_resume(): void
+    {
+        $jobs = $this->jobs();
+        $data = ['report' => 'losses', 'userId' => 1, 'months' => ['2026-11'], 'scope' => ['account' => null, 'loss_scope' => 'PayPal']];
+        $run = str_repeat('a', 32);
+        DB::table($jobs::TABLE)->insert([
+            'job_key' => hash('sha256', 'overview-page-v1:'.json_encode($data)),
+            'kind' => $jobs::KIND, 'state' => 'overview_pending', 'attempts' => 0, 'available_at' => now(),
+            'payload' => json_encode([...$data, 'run' => $run]),
+        ]);
+        $jobs->run();
+        $prepared = $jobs->prepare(Request::create('http://caiwu.example/finance/reports/losses?account=&_overview_run='.$run),
+            $data['report'], $data['userId'], $data['months'], $data['scope']);
+        $this->assertFalse($prepared['plan']['waiting']);
+        $this->assertSame(1, DB::table($jobs::TABLE)->count());
     }
 
     public function test_clearing_result_cache_requeues_the_same_run_instead_of_waiting_forever(): void
@@ -99,5 +121,37 @@ class FinanceOverviewJobsTest extends TestCase
         $jobs->run();
         $this->expectException(ValidationException::class);
         $this->prepare($jobs, $first['plan']['resume_url'], 2);
+    }
+
+    public function test_pending_queries_report_the_queue_and_interrupted_jobs_stop_after_three_attempts(): void
+    {
+        $jobs = $this->jobs();
+        $first = $this->prepare($jobs);
+        $second = $this->prepare($jobs, user: 2);
+        $this->assertStringContainsString('前面还有 1 个报表任务', $second['plan']['message']);
+        DB::table($jobs::TABLE)->where('id', $first['plan']['job']['id'])->update(['state' => 'overview_running', 'attempts' => 3]);
+        $this->assertSame(['completed' => 1, 'failed' => 1], $jobs->run());
+        $this->assertSame('failed', $this->prepare($jobs, $first['plan']['resume_url'])['plan']['state']);
+    }
+
+    public function test_waiting_queries_wake_the_worker_and_ready_results_do_not(): void
+    {
+        $this->mock(FinanceOverviewWorker::class)->shouldReceive('wake')->twice()->andReturnTrue();
+        $jobs = $this->jobs();
+        $first = $this->prepare($jobs);
+        $this->prepare($jobs, $first['plan']['resume_url']);
+        $jobs->run();
+        $this->assertFalse($this->prepare($jobs, $first['plan']['resume_url'])['plan']['waiting']);
+    }
+
+    public function test_worker_launch_failure_is_actionable_and_can_be_retried(): void
+    {
+        $this->mock(FinanceOverviewWorker::class)->shouldReceive('wake')->twice()->andReturn(false, true);
+        $jobs = $this->jobs();
+        $failed = $this->prepare($jobs);
+        $this->assertSame('unavailable', $failed['plan']['state']);
+        $this->assertStringContainsString('无法启动后台计算', $failed['plan']['message']);
+        $this->assertSame('pending', $this->prepare($jobs, $failed['plan']['resume_url'])['plan']['state']);
+        $this->assertSame(1, DB::table($jobs::TABLE)->count());
     }
 }

@@ -3301,7 +3301,7 @@ class FinanceController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $data = $request->validate(['month' => 'nullable|date_format:Y-m', 'month_from' => 'nullable|date_format:Y-m', 'month_to' => 'nullable|date_format:Y-m|after_or_equal:month_from', 'channel' => ['nullable', Rule::in(array_keys(FinanceSettlementService::REPORT_CHANNELS))],
+        $data = $request->validate(['month' => 'nullable|date_format:Y-m', 'month_from' => 'nullable|date_format:Y-m', 'month_to' => 'nullable|date_format:Y-m', 'channel' => ['nullable', Rule::in(array_keys(FinanceSettlementService::REPORT_CHANNELS))],
             'months' => 'sometimes|array|min:1|max:24', 'months.*' => 'required|date_format:Y-m|distinct',
             'layer' => ['nullable', Rule::in(['project', 'account', 'channel', 'team', 'subscription', 'detail', 'business', 'classification', 'project_classification', 'payment_method'])],
             'account' => 'nullable|string|max:191', 'owner' => 'nullable|string|max:191',
@@ -3327,19 +3327,19 @@ class FinanceController extends Controller
                 $data['layer'] = 'business';
             }
         }
-        $comparisonMonths = [$month];
-        {
-            $monthFrom = $data['month_from'] ?? ($report === 'losses'
-                ? CarbonImmutable::parse($month.'-01', 'Asia/Shanghai')->subMonths(2)->format('Y-m') : $month);
-            if ($monthFrom > $month) {
-                throw \Illuminate\Validation\ValidationException::withMessages(['month_from' => '开始月份不能晚于结束月份。']);
+        $monthEnd = CarbonImmutable::parse($month.'-01', 'Asia/Shanghai');
+        $monthFrom = $data['month_from'] ?? ($report === 'losses' ? $monthEnd->subMonths(2)->format('Y-m') : $month);
+        if ($monthFrom > $month) {
+            throw ValidationException::withMessages(['month_from' => '开始月份不能晚于结束月份。']);
+        }
+        $data['month_from'] = $monthFrom;
+        $data['month_to'] = $month;
+        $comparisonMonths = [];
+        for ($period = CarbonImmutable::parse($monthFrom.'-01', 'Asia/Shanghai'); $period <= $monthEnd; $period = $period->addMonth()) {
+            if (count($comparisonMonths) === 24) {
+                throw ValidationException::withMessages(['month_from' => '请选择不超过24个月的日期范围。']);
             }
-            $data['month_from'] = $monthFrom;
-            $data['month_to'] = $month;
-            $comparisonMonths = [];
-            for ($period = CarbonImmutable::parse($monthFrom.'-01', 'Asia/Shanghai'); $period->format('Y-m') <= $month; $period = $period->addMonth()) {
-                $comparisonMonths[] = $period->format('Y-m');
-            }
+            $comparisonMonths[] = $period->format('Y-m');
         }
         unset($data['months']);
         if ($report === 'losses' && ($data['channel'] ?? null) === 'combined') {
@@ -3379,10 +3379,13 @@ class FinanceController extends Controller
                 || ($plan['waiting'] && $request->expectsJson())) {
                 return response()->json($plan, ($plan['state'] ?? '') === 'unavailable' ? 503 : 200)->header('Cache-Control', 'private, no-store');
             }
-            if ($plan['waiting']) return response()->view('portals.finance.report-preparing', [...$context,
-                'title' => __('finance.menus.'.$report), 'preparationPlan' => $plan])->header('Cache-Control', 'private, no-store');
+            if ($plan['waiting']) return response()->view('portals.finance.settlement-overview', [...$context,
+                'report' => $report, 'preparationPlan' => $plan, 'filters' => [...$data, 'month' => $month],
+                'creditMonths' => $creditMonths, 'filterOptions' => [],
+                'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])])->header('Cache-Control', 'private, no-store');
             $overviewResult = $prepared['result'];
             $context['overviewCalculatedAt'] = $overviewResult['calculated_at'];
+            $context['overviewRun'] = $plan['run'];
         }
         $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
         if ($statusOnly) return response()->json(['state' => 'ready'])->header('Cache-Control', 'no-store');
@@ -3623,17 +3626,17 @@ class FinanceController extends Controller
                 $sourceFilters['summary_payment_channels'] = array_values($selected);
             }
             $canonical = \App\Portals\Finance\FinanceSummarySourceCache::sharedFilters($sourceFilters);
-            if (request()->attributes->get('finance.overview_worker')) {
-                // This task owns its database snapshot. Read live source rows;
-                // neither notification readiness nor shared cache publication is required.
-                yield from $service->summaryRowStream($channel, $sourceFilters, $transactions);
-                continue;
-            }
             $projections = app(\App\Portals\Finance\FinanceSummaryProjection::class);
-            $projection = $sourceFields ? null : ($losses ? $projections->lossStream($channel, $canonical, $selected)
+            $worker = request()->attributes->get('finance.overview_worker');
+            // Verified facts can be read in the same snapshot. Unresolved
+            // notifications force a source read and never block a worker.
+            $canReadFacts = ! $sourceFields && (! $worker || app(\App\Portals\Finance\FinanceSummarySourceChanges::class)->reportReady($this->workbooks->database()));
+            if ($options !== null) unset($canonical['summary_row_filters']);
+            $projection = ! $canReadFacts ? null : ($losses ? $projections->lossStream($channel, $canonical, $selected)
                 : $projections->stream($channel, $canonical, false, paymentChannels: $selected));
-            $source = $projection ?? app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, $transactions,
-                fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters, $transactions), $options);
+            $source = $projection ?? ($worker ? $service->summaryRowStream($channel, $sourceFilters, $transactions)
+                : app(\App\Portals\Finance\FinanceSummarySourceCache::class)->stream($channel, $sourceFilters, $transactions,
+                    fn (array $canonicalFilters) => $service->summaryRowStream($channel, $canonicalFilters, $transactions), $options));
             foreach ($source as $row) {
                 if ($projection !== null && ! empty($sourceFilters['summary_native_settlement'])) {
                     $row = \App\Portals\Finance\FinanceSummarySourceCache::nativeRow($row);
@@ -3663,6 +3666,11 @@ class FinanceController extends Controller
             $channel => $accounting->monthlyCnyRate($comparisonMonth, 'USD', $channel),
         ])->all();
         $missingMonthlyRate = false;
+        $lossChannels = $report === 'losses' ? match ($data['loss_scope'] ?? null) {
+            'Shopify' => ['paypal', 'xuzong1', 'xuzong2'],
+            'PayPal' => ['paypal'], '徐总信用卡' => ['xuzong1', 'xuzong2'],
+            '叶总支付' => ['ye'], 'Worldpay' => ['worldpay'], default => null,
+        } : null;
         // The default screen already reads every channel. Keep only count
         // dimensions for failure allocation instead of matching the same orders
         // a second time (especially expensive without revision tracking).
@@ -3670,7 +3678,7 @@ class FinanceController extends Controller
             && ! collect(\Illuminate\Support\Arr::only($data, ['account', 'owner', 'team', 'subscription', 'payment_method']))->contains(fn ($value) => filled($value));
         if ($reuseFailureCounts && $layer === 'account') $filters['summary_account_counts'] = true;
         $failureRows = [];
-        $rows = (function () use ($service, $filters, $data, $report, $reuse, $layer, $includeOptions, $accountKeys, &$optionValues, $cnyRatesByChannel, &$missingMonthlyRate, $reuseFailureCounts, &$failureRows) {
+        $rows = (function () use ($service, $filters, $data, $report, $layer, $includeOptions, $accountKeys, &$optionValues, $cnyRatesByChannel, &$missingMonthlyRate, $reuseFailureCounts, &$failureRows, $lossChannels) {
             foreach (['paypal', 'credit_card'] as $channel) {
                 if (($data['channel'] ?? '') === 'paypal' && $channel !== 'paypal'
                     || filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'combined'], true) && $channel === 'paypal') {
@@ -3681,11 +3689,6 @@ class FinanceController extends Controller
                     'xuzong1', 'xuzong2', 'ye', 'worldpay' => [$data['channel']],
                     default => [],
                 };
-                $lossChannels = $report === 'losses' ? match ($data['loss_scope'] ?? null) {
-                    'Shopify' => ['paypal', 'xuzong1', 'xuzong2'],
-                    'PayPal' => ['paypal'], '徐总信用卡' => ['xuzong1', 'xuzong2'],
-                    '叶总支付' => ['ye'], 'Worldpay' => ['worldpay'], default => null,
-                } : null;
                 if ($lossChannels !== null) {
                     $candidates = $channel === 'paypal' ? ['paypal'] : ($paymentChannels ?: ['xuzong1', 'xuzong2', 'ye', 'worldpay']);
                     $paymentChannels = array_values(array_intersect($candidates, $lossChannels));
@@ -3797,6 +3800,7 @@ class FinanceController extends Controller
             'credit_card' => ['xuzong1', 'xuzong2', 'ye', 'worldpay'],
             default => array_keys($accounting::RATE_CHANNELS),
         };
+        if ($lossChannels !== null) $selectedRateChannels = array_intersect($selectedRateChannels, $lossChannels);
         $selectedRates = array_intersect_key($cnyRatesByChannel, array_flip($selectedRateChannels));
         $configuredRates = array_filter($selectedRates, fn ($value) => $value !== null);
         $rate = $missingMonthlyRate || $configuredRates === [] ? null

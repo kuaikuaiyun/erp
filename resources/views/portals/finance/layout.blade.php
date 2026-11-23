@@ -6,6 +6,7 @@
 @push('styles')
 <link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-theme.css?v=20261104-2">
 <style>
+    [data-finance-source-retry][hidden],[data-finance-source-detail][hidden]{display:none!important}
     .finance-system .finance-date-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0}
     .finance-system .finance-date-pair>div,.finance-system .finance-date-pair>label,.finance-system .finance-date-pair .form-control{min-width:0}
     .finance-system .finance-date-pair .form-control{width:100%}

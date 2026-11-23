@@ -8,8 +8,9 @@
             if (Date.now() - waitingSince > (plan.background === 'overview' ? 1800000 : 180000)) throw new Error('后台仍在处理，请稍后重新查询。');
             await new Promise(function (resolve) { setTimeout(resolve, 2000); });
             var poll = await fetch(plan.poll_url, {credentials: 'same-origin', headers: {Accept: 'application/json'}});
-            if (!poll.ok || !(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
+            if (!(poll.headers.get('Content-Type') || '').includes('application/json')) throw new Error('查询失败，请重试。');
             plan = await poll.json();
+            if (!poll.ok) throw new Error(plan.message || '查询失败，请重试。');
             if (!Array.isArray(plan.months)) throw new Error('查询失败，请重试。');
         }
         var next = 0;
@@ -53,16 +54,23 @@
     var payload = document.querySelector('[data-finance-source-plan]');
     if (!payload) return;
     var status = document.querySelector('[data-finance-source-progress]');
+    var detail = document.querySelector('[data-finance-source-detail]');
     var retry = document.querySelector('[data-finance-source-retry]');
+    var form = document.querySelector('[data-finance-overview-form]');
+    var submitting = false;
+    if (form) form.addEventListener('submit', function () { submitting = true; });
     var plan = JSON.parse(payload.textContent);
     async function start() {
         retry.hidden = true;
         try {
             var url = await run(plan, function (message) { status.textContent = message; });
+            if (submitting) return;
             status.textContent = '计算完成，正在显示结果…';
             window.location.replace(url);
         } catch (error) {
+            if (submitting) return;
             status.textContent = error.message || '查询失败，请重试。';
+            if (detail) detail.hidden = true;
             retry.hidden = false;
         }
     }

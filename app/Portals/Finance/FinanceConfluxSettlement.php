@@ -764,11 +764,68 @@ class FinanceConfluxSettlement
             }))
             ->when(filled($filters['account'] ?? null), fn ($query) => $query->where('merchant.activity_account', $filters['account']))
             ->when(filled($filters['card_group'] ?? null), fn ($query) => $query->where('merchant.card_group_id', $filters['card_group']))
-            ->when(filled($filters['reference'] ?? null), fn ($query) => $query->where('entry.reference', $filters['reference']))
-            ->when(filled($filters['from'] ?? null), fn ($query) => $query->where('entry.settlement_date', '>=', $filters['from']))
-            ->when(filled($filters['to'] ?? null), fn ($query) => $query->where('entry.settlement_date', '<=', $filters['to']));
+            ->when(filled($filters['reference'] ?? null), fn ($query) => $query->where('entry.reference', $filters['reference']));
+        if ($this->filtersInitiatedAt($filters)) {
+            $grammar = $query->getGrammar();
+            $sqlite = $query->getConnection()->getDriverName() === 'sqlite';
+            $initiated = $grammar->wrapForFinanceQuery($query, 'entry.payload->发起时间');
+            $trade = $grammar->wrapForFinanceQuery($query, 'entry.payload->交易时间');
+            if ($sqlite && ! app(FinanceSourceStorage::class)->active('statement')) {
+                // Older SQLite JSON1 versions do not unescape object keys during lookup.
+                $quote = fn ($value) => $query->getConnection()->getPdo()->quote($value);
+                $initiated = 'COALESCE('.$initiated.', JSON_EXTRACT(entry.payload, '.$quote('$.'.json_encode('发起时间')).'))';
+                $trade = 'COALESCE('.$trade.', JSON_EXTRACT(entry.payload, '.$quote('$.'.json_encode('交易时间')).'))';
+            }
+            $rawTime = "COALESCE(NULLIF(NULLIF(TRIM($initiated), ''), 'null'), NULLIF(NULLIF(TRIM($trade), ''), 'null'))";
+            // Fixed-width date/id prefixes pick the same latest nonempty value as statementRows.
+            $priority = $sqlite ? "entry.settlement_date || PRINTF('%020d', entry.id) || $rawTime"
+                : "CONCAT(entry.settlement_date, LPAD(entry.id, 20, '0'), $rawTime)";
+            // Filter group keys first, then retain every bill belonging to those keys.
+            $keys = (clone $query)->select('entry.payment_account_id', 'entry.reference')
+                ->selectRaw("SUBSTR(MAX(CASE WHEN $rawTime IS NOT NULL THEN $priority END), 31) AS initiated_time")
+                ->groupBy('entry.payment_account_id', 'entry.reference');
+            $dated = $this->workbooks->database()->query()->fromSub($keys, 'statement_orders')
+                ->select('statement_orders.payment_account_id', 'statement_orders.reference');
+            $time = $this->statementTimeSql($grammar->wrap('statement_orders.initiated_time'));
+            $zone = $filters['timezone'] ?? 'Asia/Shanghai';
+            if (filled($filters['from'] ?? null)) {
+                $dated->whereRaw($time.' >= ?', [CarbonImmutable::parse($filters['from'], $zone)->setTimezone('Asia/Shanghai')->toDateTimeString()]);
+            }
+            if (filled($filters['to'] ?? null)) {
+                $dated->whereRaw($time.' < ?', [CarbonImmutable::parse($filters['to'], $zone)->addDay()->setTimezone('Asia/Shanghai')->toDateTimeString()]);
+            }
+            $query->joinSub($dated, 'dated_orders', function ($join): void {
+                $join->on('dated_orders.payment_account_id', '=', 'entry.payment_account_id')
+                    ->on('dated_orders.reference', '=', 'entry.reference');
+            });
+        } else {
+            $query->when(filled($filters['from'] ?? null), fn ($query) => $query->where('entry.settlement_date', '>=', $filters['from']))
+                ->when(filled($filters['to'] ?? null), fn ($query) => $query->where('entry.settlement_date', '<=', $filters['to']));
+        }
         FinanceFilterSelection::applyQuery($query, 'merchant.activity_account', $filters['accounts'] ?? []);
         return $query;
+    }
+
+    private function filtersInitiatedAt(array $filters): bool
+    {
+        return empty($filters['summary_only']) && (filled($filters['from'] ?? null) || filled($filters['to'] ?? null));
+    }
+
+    /** Normalize Excel serials and source timestamps to Beijing wall time inside SQL. */
+    private function statementTimeSql(string $raw): string
+    {
+        $explicitZone = "(LENGTH($raw) > 19 AND (UPPER(SUBSTR($raw, -1)) = 'Z' OR SUBSTR($raw, -6, 1) IN ('+', '-')))";
+        if ($this->workbooks->database()->getDriverName() === 'sqlite') {
+            $text = "REPLACE($raw, '/', '-')";
+            return "CASE WHEN $raw GLOB '[0-9]*' AND $raw NOT GLOB '*[^0-9.]*'"
+                ." THEN DATETIME('1899-12-30', PRINTF('%+.0f seconds', CAST($raw AS REAL) * 86400))"
+                ." WHEN $explicitZone THEN DATETIME($text, '+8 hours') ELSE DATETIME($text) END";
+        }
+        $text = "CAST(LEFT(REPLACE(REPLACE($raw, 'T', ' '), '/', '-'), 19) AS DATETIME)";
+        return "CASE WHEN $raw REGEXP '^[0-9]+([.][0-9]+)?$'"
+            ." THEN DATE_ADD(CAST('1899-12-30 00:00:00' AS DATETIME), INTERVAL ROUND(CAST($raw AS DECIMAL(20, 10)) * 86400) SECOND)"
+            ." WHEN UPPER(RIGHT($raw, 1)) = 'Z' THEN DATE_ADD($text, INTERVAL 8 HOUR)"
+            ." WHEN $explicitZone THEN CONVERT_TZ($text, RIGHT($raw, 6), '+08:00') ELSE $text END";
     }
 
     public function unmatchedPage(array $filters, int $offset, int $limit): array
@@ -816,6 +873,9 @@ class FinanceConfluxSettlement
             ? \Illuminate\Support\LazyCollection::make(fn () => $this->streamExportEntries($query))
             : \Illuminate\Support\LazyCollection::make(fn () => $this->statementEntries($query));
         $service = app(FinanceSettlementService::class);
+        $filterInitiatedAt = $this->filtersInitiatedAt($filters);
+        $from = filled($filters['from'] ?? null) ? $filters['from'].' 00:00:00' : null;
+        $until = filled($filters['to'] ?? null) ? CarbonImmutable::parse($filters['to'])->addDay()->toDateTimeString() : null;
         $groups = $entries->chunkWhile(fn ($entry, $key, $group) =>
             $entry->payment_account_id === $group->first()->payment_account_id && $entry->reference === $group->first()->reference);
         foreach ($groups as $group) {
@@ -852,8 +912,8 @@ class FinanceConfluxSettlement
                     $layout[$field] ??= $payload[$header] ?? null;
                 }
                 $layout['failure_reason'] ??= $item->kind === 'failed' ? ($payload['交易返回信息'] ?? null) : null;
-                $time = $payload['发起时间'] ?? $payload['交易时间'] ?? null;
-                if ($time !== null) {
+                $time = filled($payload['发起时间'] ?? null) ? $payload['发起时间'] : ($payload['交易时间'] ?? null);
+                if (filled($time)) {
                     $layout['initiated_at'] ??= is_numeric($time)
                         ? Date::excelToDateTimeObject((float) $time)->format('Y-m-d H:i:s') : $time;
                 }
@@ -862,6 +922,13 @@ class FinanceConfluxSettlement
                 $layout[$field] = FinanceCreditSettlementLayout::reportTimestamp(
                     $layout[$field] ?? null, 'Asia/Shanghai', $filters['timezone'] ?? 'Asia/Shanghai',
                 );
+            }
+            if ($filterInitiatedAt) {
+                $initiatedAt = $layout['initiated_at'];
+                if (! is_string($initiatedAt) || ! preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D', $initiatedAt)
+                    || ($from !== null && $initiatedAt < $from) || ($until !== null && $initiatedAt >= $until)) {
+                    continue;
+                }
             }
             $layout = $this->storeFees($layout, $group);
             $wallet = $this->isWallet($layout['website_name'] ?? null, $group);

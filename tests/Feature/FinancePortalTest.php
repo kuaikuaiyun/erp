@@ -1733,6 +1733,122 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->pluck('reference')->all() === ['ORDER-'.$second->id]);
     }
 
+    public function test_ye_detail_dates_filter_statement_initiation_in_the_selected_timezone(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $account = $this->financePayPalAccount('发起时间筛选', ['account_type' => 'credit_card', 'card_platform' => 'ye']);
+        $times = [
+            'JULY' => '2026-07-15 12:00:00', 'AUGUST' => '2026-08-15 12:00:00',
+            'BEFORE' => '2026-08-31 23:59:59', 'START' => '2026-09-01 00:00:00',
+            'END' => '2026-09-30 23:59:59', 'NEXT' => '2026-10-01 00:00:00',
+            'LATER-BILL' => '2026-09-12 12:00:00',
+            'EXCEL' => \PhpOffice\PhpSpreadsheet\Shared\Date::PHPToExcel(new \DateTimeImmutable('2026-09-11 06:00:00')),
+            'FALLBACK' => '', 'MISSING' => null, 'INVALID' => 'invalid-time',
+        ];
+        foreach ($times as $reference => $time) {
+            DB::table('finance_credit_settlement_entries')->insert([
+                'payment_account_id' => $account->id, 'platform' => 'ye',
+                'settlement_date' => $reference === 'LATER-BILL' ? '2026-10-05' : '2026-09-15',
+                'reference' => $reference, 'kind' => 'sale', 'source_sheet' => '成功交易', 'source_row' => 2,
+                'report_hash' => hash('sha256', $reference), 'imported_by' => 1, 'created_at' => now(),
+                'payload' => json_encode(['发起时间' => $time, '交易时间' => $reference === 'FALLBACK' ? '2026-09-14 12:00:00' : null,
+                    '结算货币' => 'USD', '结算金额' => '10'], JSON_THROW_ON_ERROR),
+            ]);
+        }
+        DB::table('finance_credit_settlement_entries')->insert([
+            'payment_account_id' => $account->id, 'platform' => 'ye', 'settlement_date' => '2026-11-05',
+            'reference' => 'LATER-BILL', 'kind' => 'refund', 'source_sheet' => '退款', 'source_row' => 2,
+            'report_hash' => hash('sha256', 'later-refund'), 'imported_by' => 1, 'created_at' => now(),
+            'payload' => json_encode(['结算币种' => 'USD', '结算金额' => '2']),
+        ]);
+        $this->workbooks->importRecords('xuzong2-details', [[
+            '_card_channel' => 'ye', '平台订单号' => 'ORDER-START', '创建时间' => '2026-08-31 16:00:00',
+            '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS',
+        ]], $account->activity_account, 'UTC', 1);
+        $filters = ['card_channel' => 'ye', 'from' => '2026-09-01', 'to' => '2026-09-30', 'timezone' => 'Asia/Shanghai'];
+        $expected = ['START', 'END', 'LATER-BILL', 'EXCEL', 'FALLBACK', 'ORDER-START'];
+        $url = '/finance/reports/ye-settlement?'.http_build_query($filters);
+        $page = $this->get($url)->assertOk()->viewData('rows');
+        $this->assertSame(6, $page->total());
+        $this->assertEqualsCanonicalizing($expected, $page->getCollection()->pluck('card_layout.reference')->all());
+        foreach (['xlsx', 'csv'] as $format) {
+            $response = $this->get($url.'&'.http_build_query(['download' => 1, 'format' => $format,
+                'export_columns' => ['reference', 'initiated_at']]))->assertOk();
+            $export = $format === 'csv'
+                ? array_map('str_getcsv', explode("\n", trim(ltrim($response->streamedContent(), "\xEF\xBB\xBF"))))
+                : $this->readDownload($response->streamedContent())->toArray();
+            $this->assertEqualsCanonicalizing($expected, array_column(array_slice($export, 1), 0));
+            foreach (array_slice($export, 1) as $row) $this->assertStringStartsWith('2026-09-', $row[1]);
+        }
+        $utc = $this->get('/finance/reports/ye-settlement?'.http_build_query([...$filters, 'timezone' => 'UTC']))
+            ->assertOk()->viewData('rows');
+        $this->assertEqualsCanonicalizing(['END', 'NEXT', 'LATER-BILL', 'EXCEL', 'FALLBACK'],
+            $utc->getCollection()->pluck('card_layout.reference')->all());
+        $statements = app(\App\Portals\Finance\FinanceConfluxSettlement::class);
+        $references = [];
+        foreach ([0, 2, 4] as $offset) {
+            [$total, $rows] = $statements->unmatchedPage($filters, $offset, 2);
+            $this->assertSame(5, $total);
+            $references = [...$references, ...$rows->pluck('card_layout.reference')->all()];
+        }
+        $this->assertEqualsCanonicalizing(array_diff($expected, ['ORDER-START']), $references);
+        $later = collect(iterator_to_array($statements->unmatchedRows($filters)))->firstWhere('card_layout.reference', 'LATER-BILL');
+        $this->assertEquals(2, $later['card_layout']['refund']);
+        $summary = collect(iterator_to_array($statements->unmatchedRows([...$filters, 'summary_only' => true,
+            'conflux_report_fees' => new \App\Portals\Finance\FinanceStatementFeeCache])))->pluck('card_layout.reference');
+        $this->assertContains('JULY', $summary);
+        $this->assertNotContains('LATER-BILL', $summary);
+        (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+        app(\App\Portals\Finance\FinanceSourceMigration::class)->migrate();
+        Schema::table('finance_credit_settlement_entries', fn (Blueprint $table) => $table->dropColumn('payload'));
+        app(\App\Portals\Finance\FinanceSourceStorage::class)->setState('statement', 'active');
+        [$total, $rows] = $statements->unmatchedPage($filters, 0, 10);
+        $this->assertSame(5, $total);
+        $this->assertEqualsCanonicalizing($references, $rows->pluck('card_layout.reference')->all());
+    }
+
+    public function test_ye_date_counts_and_pages_only_hydrate_the_selected_statement_groups(): void
+    {
+        $account = $this->financePayPalAccount('日期分页性能', ['account_type' => 'credit_card', 'card_platform' => 'ye']);
+        $entries = [];
+        for ($index = 0; $index < 1102; $index++) {
+            $date = $index < 1100 ? '2026-07-10' : '2026-09-10';
+            $entries[] = ['payment_account_id' => $account->id, 'platform' => 'ye', 'settlement_date' => $date,
+                'reference' => sprintf('DATE-PAGE-%05d', $index), 'kind' => 'sale', 'source_sheet' => '成功交易',
+                'source_row' => $index + 2, 'report_hash' => hash('sha256', 'date-page'), 'imported_by' => 1, 'created_at' => now(),
+                'payload' => json_encode(['发起时间' => $date.' 12:00:00', '结算货币' => 'USD', '结算金额' => '1'], JSON_UNESCAPED_UNICODE)];
+        }
+        foreach (array_chunk($entries, 100) as $batch) DB::table('finance_credit_settlement_entries')->insert($batch);
+        $filters = ['card_channel' => 'ye', 'from' => '2026-09-01', 'to' => '2026-09-30', 'timezone' => 'Asia/Shanghai'];
+        $statements = app(\App\Portals\Finance\FinanceConfluxSettlement::class);
+        foreach ([false, true] as $relational) {
+            if ($relational) {
+                (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+                app(\App\Portals\Finance\FinanceSourceMigration::class)->migrate();
+                Schema::table('finance_credit_settlement_entries', fn (Blueprint $table) => $table->dropColumn('payload'));
+                app(\App\Portals\Finance\FinanceSourceStorage::class)->setState('statement', 'active');
+            }
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            try {
+                [$total, $rows] = $statements->unmatchedPage($filters, 0, 0);
+                $this->assertSame(2, $total);
+                $this->assertCount(0, $rows);
+                $detailQueries = fn () => collect(DB::getQueryLog())->filter(fn ($query) => preg_match('/^select ["`]entry["`]\.\*/i', $query['query']));
+                $this->assertCount(0, $detailQueries());
+                [$total, $rows] = $statements->unmatchedPage($filters, 1, 1);
+                $this->assertSame(2, $total);
+                $this->assertSame(['DATE-PAGE-01101'], $rows->pluck('card_layout.reference')->all());
+                $this->assertCount(1, $detailQueries());
+                $export = collect(iterator_to_array($statements->unmatchedRows([...$filters, 'stream_statement_export' => true])));
+                $this->assertSame(['DATE-PAGE-01100', 'DATE-PAGE-01101'], $export->pluck('card_layout.reference')->all());
+            } finally {
+                DB::disableQueryLog();
+                DB::flushQueryLog();
+            }
+        }
+    }
+
     public function test_unmatched_statement_groups_survive_bounded_pages_and_keep_all_entries(): void
     {
         $first = $this->financePayPalAccount('Statement page A', ['account_type' => 'credit_card']);
@@ -3149,7 +3265,7 @@ class FinancePortalTest extends TestCase
             3 => [...$this->recordRow(), '日期' => '2026-11-03', '交易 ID' => 'SCOPED-NOV', '淨額' => '8.50'],
         ], $account->activity_account, 'UTC', 1);
         $urls = [
-            'losses' => '/finance/reports/losses?month_from=2026-10&month_to=2026-11&channel=paypal&loss_scope=PayPal',
+            'losses' => '/finance/reports/losses?month_from=2026-10&month_to=2026-11&loss_scope=PayPal',
             'summary' => '/finance/reports/summary?month_from=2026-10&month_to=2026-11&channel=paypal',
         ];
         $expected = [];
@@ -3161,7 +3277,8 @@ class FinancePortalTest extends TestCase
         $ticket = $notifications->begin(DB::connection());
         $notifications->commit(DB::connection(), $ticket, [['source' => 'scope_user', 'values' => []]]);
         foreach ($urls as $report => $url) {
-            $first = $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+            $first = $this->get($url)->assertOk()->assertViewIs('portals.finance.settlement-overview')
+                ->assertSee('data-finance-overview-form', false)->assertDontSee('data-finance-download ', false);
             $plan = $first->viewData('preparationPlan');
             $this->assertSame('overview', $plan['background']);
             $this->getJson($plan['poll_url'])->assertOk()->assertJsonPath('waiting', true);
@@ -3171,8 +3288,22 @@ class FinancePortalTest extends TestCase
             $this->assertSame($expected[$report], $page->viewData('monthlyLossGroups'), $report);
             $this->assertNotEmpty($page->viewData('overviewCalculatedAt'));
             $this->assertFileExists($ticket['path']);
-            // A fresh query gets a fresh task; it never silently presents the last run as current.
-            $this->get($url)->assertOk()->assertViewIs('portals.finance.report-preparing');
+            $page->assertSee('name="_overview_refresh"', false);
+            $document = new \DOMDocument;
+            @$document->loadHTML($page->getContent());
+            $xpath = new \DOMXPath($document);
+            $export = $xpath->query('//*[@data-finance-export-url]')->item(0)->getAttribute('data-finance-export-url');
+            $this->assertStringContainsString('_overview_run='.$plan['run'], $export);
+            $this->get($export)->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            $this->get($url.'&team=&account=')->assertOk()->assertViewIs('portals.finance.settlement-overview')
+                ->assertViewHas('overviewCalculatedAt', $page->viewData('overviewCalculatedAt'));
+            if ($report === 'losses') {
+                $this->assertSame(['PayPal'], json_decode($xpath->query('//*[@data-loss-loaded-scopes]')->item(0)->getAttribute('data-loss-loaded-scopes'), true));
+                $scopeLink = $xpath->query('//nav[contains(@class,"loss-scope-tabs")]/a[normalize-space(.)="Shopify"]')->item(0)->getAttribute('href');
+                $this->assertStringNotContainsString('_overview_run', $scopeLink);
+                $this->get($scopeLink)->assertOk()->assertViewHas('preparationPlan');
+            }
+            $this->get($url.'&_overview_refresh=1')->assertOk()->assertViewHas('preparationPlan');
         }
     }
 
@@ -3385,12 +3516,12 @@ class FinancePortalTest extends TestCase
     {
         $calls = [];
         $service = Mockery::mock(\App\Portals\Finance\FinanceSettlementService::class, [$this->workbooks])->makePartial();
-        $service->shouldReceive('summaryRowStream')->times(5)->andReturnUsing(function ($channel, $filters) use (&$calls) {
+        $service->shouldReceive('summaryRowStream')->times(6)->andReturnUsing(function ($channel, $filters) use (&$calls) {
             $calls[] = [$channel, $filters['summary_payment_channels'] ?? []];
             return [];
         });
         $sources = Mockery::mock(\App\Portals\Finance\FinanceSummarySourceCache::class);
-        $sources->shouldReceive('stream')->times(5)->andReturnUsing(fn ($channel, $filters, $transactions, $build) => $build($filters));
+        $sources->shouldReceive('stream')->times(6)->andReturnUsing(fn ($channel, $filters, $transactions, $build) => $build($filters));
         $this->app->instance(\App\Portals\Finance\FinanceSummarySourceCache::class, $sources);
         $this->app->instance(\App\Portals\Finance\FinanceSettlementService::class, $service);
         $this->get('/finance/reports/losses?month_from=2026-10&month_to=2026-11')->assertOk()
@@ -3398,6 +3529,9 @@ class FinancePortalTest extends TestCase
         $this->assertSame([['paypal', []], ['credit_card', ['xuzong1', 'xuzong2']], ['paypal', []], ['credit_card', ['xuzong1', 'xuzong2']]], $calls);
         $this->get('/finance/reports/losses?month_from=2026-11&month_to=2026-11&loss_scope='.urlencode('叶总支付'))->assertOk();
         $this->assertSame(['credit_card', ['ye']], $calls[4]);
+        $this->get('/finance/reports/losses?month_from=2026-11&month_to=2026-11&channel=ye')->assertOk()
+            ->assertSee('name="loss_scope" value="叶总支付"', false);
+        $this->assertSame(['credit_card', ['ye']], $calls[5]);
     }
 
     public function test_loss_grand_total_combines_channels_once_and_exports_monthly_categories(): void
@@ -3594,7 +3728,7 @@ class FinancePortalTest extends TestCase
         $this->assertSame(['2026-10', '2026-11'], $months);
         $this->assertSame($months, array_keys($response->viewData('monthlyLossGroups')));
         $this->assertSame('2026-10', $response->viewData('filters')['month_from']);
-        $response->assertDontSee('data-month-picker', false)->assertSee('开始月份（北京时间）');
+        $response->assertDontSee('data-month-picker', false)->assertSee('开始月份（按通道时区）');
     }
 
     public function test_settlement_summary_combines_month_range_and_grouped_account_filter(): void

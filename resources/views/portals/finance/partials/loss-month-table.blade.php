@@ -8,9 +8,9 @@
 @php
     $missingReason = ! $item ? '当前月份无符合筛选的记录' : '缺少计算资料或结算金额为零';
     if ($item && in_array($key, ['logistics', 'purchase'], true)) {
-        $missingReason = ($item[$key] ?? null) === null
-            ? ($key === 'logistics' ? '当前月份未导入物流成本' : '当前月份未导入采购成本')
-            : (($monthlyRates[$period] ?? null) === null ? '当前月份未配置美元兑人民币汇率' : '结算金额缺失或为零');
+        $missingReason = ($item[$key] ?? null) !== null ? '结算金额缺失或为零'
+            : (($monthlyRates[$period] ?? null) === null ? '缺少成本或对应通道汇率'
+                : ($key === 'logistics' ? '当前月份未导入物流成本' : '当前月份未导入采购成本'));
     }
 @endphp
 <td @if(($item['ratios'][$key] ?? null) === null) title="{{ $missingReason }}" @endif>{{ ($item['ratios'][$key] ?? null) === null ? '—' : number_format((float) $item['ratios'][$key], 2).'%' }}</td>@endforeach</tr>@endforeach

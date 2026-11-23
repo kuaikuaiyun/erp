@@ -75,6 +75,60 @@ class FinanceScopedSourceMySqlTest extends TestCase
     private ?string $cachePath = null;
     private Connection $db;
 
+    public function test_ye_date_filter_counts_and_pages_groups_in_mysql_without_loading_old_details(): void
+    {
+        $schema = $this->db->getSchemaBuilder();
+        $schema->table('finance_records', fn (Blueprint $table) => $table->index(['dataset', 'account', 'reference'], 'finance_records_dataset_account_ref_idx'));
+        $account = $this->db->table('finance_payment_accounts')->insertGetId([
+            'activity_account' => 'DATE-ACCOUNT', 'account_name' => '日期筛选', 'account_type' => 'credit_card', 'card_platform' => 'ye',
+        ]);
+        $times = ['JULY' => '2026-07-01 12:00:00', 'START' => '2026-09-01 00:00:00',
+            'END' => '2026-09-30 23:59:59', 'NEXT' => '2026-10-01 00:00:00',
+            'EXCEL' => \PhpOffice\PhpSpreadsheet\Shared\Date::PHPToExcel(new \DateTimeImmutable('2026-09-12 12:00:00')),
+            'FALLBACK' => null, 'ISO-START' => '2026-08-31T16:00:00Z',
+            'OFFSET' => '2026-09-01T00:00:00+08:00', 'INVALID' => 'invalid-time'];
+        foreach ($times as $reference => $time) {
+            $this->db->table('finance_credit_settlement_entries')->insert([
+                'payment_account_id' => $account, 'platform' => 'ye', 'settlement_date' => '2026-10-05',
+                'reference' => $reference, 'kind' => 'sale',
+                'payload' => json_encode(['发起时间' => $time, '交易时间' => $reference === 'FALLBACK' ? '2026-09-15 12:00:00' : null,
+                    '结算货币' => 'USD', '结算金额' => '10'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            ]);
+        }
+        $this->db->table('finance_credit_settlement_entries')->insert([
+            'payment_account_id' => $account, 'platform' => 'ye', 'settlement_date' => '2026-11-05',
+            'reference' => 'START', 'kind' => 'refund', 'payload' => json_encode(['结算币种' => 'USD', '结算金额' => '2']),
+        ]);
+        $filters = ['card_channel' => 'ye', 'from' => '2026-09-01', 'to' => '2026-09-30', 'timezone' => 'Asia/Shanghai'];
+        $statements = app(\App\Portals\Finance\FinanceConfluxSettlement::class);
+        foreach ([false, true] as $relational) {
+            if ($relational) {
+                (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
+                app(\App\Portals\Finance\FinanceSourceMigration::class)->migrate();
+                $schema->table('finance_credit_settlement_entries', fn (Blueprint $table) => $table->dropColumn('payload'));
+                app(\App\Portals\Finance\FinanceSourceStorage::class)->setState('statement', 'active');
+            }
+            $this->db->flushQueryLog();
+            $this->db->enableQueryLog();
+            try {
+                [$total, $page] = $statements->unmatchedPage($filters, 0, 0);
+                $this->assertSame(6, $total);
+                $this->assertCount(0, $page);
+                $this->assertCount(0, collect($this->db->getQueryLog())->filter(fn ($query) => str_starts_with($query['query'], 'select `entry`.*')));
+                [$total, $page] = $statements->unmatchedPage($filters, 5, 1);
+                $this->assertSame(6, $total);
+                $this->assertSame(['START'], $page->pluck('card_layout.reference')->all());
+                $this->assertEquals(2, $page->first()['card_layout']['refund']);
+                [$total, $page] = $statements->unmatchedPage([...$filters, 'timezone' => 'UTC'], 0, 10);
+                $this->assertSame(4, $total);
+                $this->assertSame(['END', 'EXCEL', 'FALLBACK', 'NEXT'], $page->pluck('card_layout.reference')->all());
+            } finally {
+                $this->db->disableQueryLog();
+                $this->db->flushQueryLog();
+            }
+        }
+    }
+
     public function test_indexed_dependency_lookup_preserves_legacy_matching_and_uses_reference_indexes(): void
     {
         (require database_path('migrations/2026_11_21_000005_create_finance_relational_sources.php'))->up();
