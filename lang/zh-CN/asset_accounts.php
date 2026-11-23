@@ -1,15 +1,23 @@
 <?php
 
 return [
+    'employment_label' => '状态',
+    'permission_search' => '搜索系统或页面名称', 'expand_all' => '全部展开', 'collapse_all' => '全部收起', 'permission_empty' => '没有匹配的页面权限',
+    'export_scope_hint' => '导出同时受部门和企业授权限制；未归纳企业的账号可导出，已归属未授权或停用企业的账号不可导出。',
+    'department_structure' => '人员结构', 'department_level_root' => '一级部门', 'department_level_child' => '二级部门',
+    'department_context' => '上级部门（仅作层级展示）', 'department_not_set' => '未设置',
+    'department_expand' => '展开二级部门', 'department_collapse' => '收起二级部门', 'department_group_size' => '每页部门组',
+    'department_group_total' => '显示第 :from–:to 组，共 :total 组',
+
     'company' => '归属企业', 'no_company' => '未归纳企业',
     'department_title' => '部门管理', 'department_subtitle' => '仅可编辑已授权部门，不提供新增、删除及页面权限配置',
-    'department_search' => '部门名称或编码',
+    'department_list_search' => '部门名称或编码',
     'department_saved' => '部门信息已保存。', 'department_members' => '部门成员',
     'department_fields' => ['name'=>'部门名称','short_name'=>'简称','slug'=>'部门编码','parent_id'=>'上级部门','parent_name'=>'上级部门','sort'=>'排序','members'=>'成员数'],
     'transfer' => [
         'import'=>'批量导入账号', 'export'=>'导出筛选结果', 'export_selected'=>'导出勾选账号', 'company'=>'批量归纳企业',
         'select_all'=>'全选本页', 'select_first'=>'请先勾选账号。', 'scope_error'=>'只能使用已授权部门和企业；部门编码及岗位须按模板填写。',
-        'selection_error'=>'所选账号不存在或超出可管理范围，请刷新后重选。', 'template'=>'下载导入模板', 'file'=>'Excel 文件（最多 500 条，5MB）',
+        'selection_error'=>'所选账号不存在或超出部门／企业授权范围，请刷新后重选。', 'template'=>'下载导入模板', 'file'=>'Excel 文件（最多 500 条，5MB）',
         'line'=>'行号', 'preview'=>'预览并校验', 'commit'=>'确认导入', 'password'=>'新账号统一初始密码（至少 8 位）',
         'hint'=>'仅新增账号，不覆盖已有账号。先下载模板，按授权部门编码填写；预览有效期为 10 分钟，确认时重新校验权限和岗位名额。',
         'company_hint'=>'修改所选账号的企业归属，会同步影响主后台；部门任职与钉钉绑定保持不变。',

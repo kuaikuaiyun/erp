@@ -31,7 +31,7 @@ class AccountTransferController extends Controller
         $data = $request->validate(['account_ids' => 'nullable|array|max:5000', 'account_ids.*' => 'required|integer|distinct|min:1',
             'search' => 'nullable|string|max:100', 'department_ids' => 'nullable|array|max:500', 'department_ids.*' => 'integer|distinct',
             'status' => 'nullable|in:0,1', 'employment_status' => 'nullable|in:employed,resigned'], __('asset_accounts.validation'), __('asset_accounts.attributes'));
-        $query = $this->service->authorization->accounts($c['user']);
+        $query = $this->service->exportQuery($c['user']);
         if (!empty($data['account_ids'])) {
             $query->whereIn('id', $data['account_ids']);
             if ((clone $query)->count() !== count($data['account_ids'])) throw ValidationException::withMessages(['account_ids' => __('asset_accounts.transfer.selection_error')]);

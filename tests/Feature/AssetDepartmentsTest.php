@@ -53,4 +53,25 @@ class AssetDepartmentsTest extends TestCase
         $this->getJson($this->base.'/'.$this->teamA->id)->assertForbidden();
         $this->assertDatabaseHas('admin_roles',['id'=>$this->teamA->id]);
     }
+
+    public function test_whole_groups_paginate_together_and_counts_follow_main_backend_capacity_rules(): void
+    {
+        for($i=0;$i<25;$i++) \App\Models\Department::create(['name'=>'Child '.$i,'slug'=>'child-'.$i,'parent_id'=>$this->teamA->id]);
+        $this->hrMember($this->teamA,'manager');
+        $this->get($this->base.'?per_page=20')->assertOk()->assertViewHas('rows',fn($rows)=>$rows->total()===2)
+            ->assertViewHas('treeGroups',function($groups){$a=$groups->firstWhere('id',$this->teamA->id);return $a['children']->count()===25 && (int)$a['root']->manager_count===1;})
+            ->assertSee('Child 24')->assertSee('data-department-toggle',false)->assertSee('人员结构');
+        $this->get($this->base.'?search=Child%2024')->assertOk()->assertSee('Child 24')->assertDontSee('Child 23');
+    }
+
+    public function test_only_authorized_child_is_shown_and_parent_context_has_no_management_access(): void
+    {
+        $a=\App\Models\Department::create(['name'=>'Authorized child','slug'=>'authorized-child','parent_id'=>$this->outside->id]);
+        $b=\App\Models\Department::create(['name'=>'Private sibling','slug'=>'private-sibling','parent_id'=>$this->outside->id]);
+        DB::table('asset_computer_department_bindings')->insert(['source_department_id'=>$this->hrSource->id,'target_department_id'=>$a->id,'updated_by'=>1]);
+        $this->get($this->base)->assertOk()->assertSee('Authorized child')->assertDontSee('Private sibling')
+            ->assertDontSee('data-department-edit="'.$this->outside->id.'"',false)->assertDontSee('data-department-members="'.$this->outside->id.'"',false);
+        $this->getJson($this->base.'/'.$this->outside->id)->assertNotFound();
+        $this->getJson($this->base.'/'.$b->id)->assertNotFound();
+    }
 }

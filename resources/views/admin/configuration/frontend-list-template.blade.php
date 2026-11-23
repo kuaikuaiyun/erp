@@ -16,26 +16,28 @@
         </div>
         <div class="flt-filter-actions"><button type="submit" class="flt-btn flt-primary"><i class="fa fa-search" aria-hidden="true"></i> {{ __('frontend_list_template.query') }}</button><button type="reset" class="flt-btn">{{ __('frontend_list_template.reset') }}</button></div>
     </form>
-    <p class="flt-feedback" data-flt-feedback role="status" aria-live="polite" hidden></p>
     <section class="flt-card flt-records">
         <div class="flt-toolbar">
             <div class="flt-selection"><span data-flt-total></span><span class="flt-toolbar-divider" aria-hidden="true"></span><span data-flt-selection-count></span><button type="button" data-flt-clear-selected>{{ __('frontend_list_template.clear_selected') }}</button></div>
             <div class="flt-toolbar-actions">
                 <button type="button" class="flt-btn flt-primary" data-flt-create><i class="fa fa-plus" aria-hidden="true"></i> {{ __('frontend_list_template.create') }}</button>
                 <button type="button" class="flt-btn flt-danger-outline" data-flt-bulk-delete disabled><i class="fa fa-trash-o" aria-hidden="true"></i> {{ __('frontend_list_template.bulk_delete') }}</button>
+                <button type="button" class="flt-btn" data-flt-import><i class="fa fa-upload" aria-hidden="true"></i> {{ __('frontend_list_template.import') }}</button>
+                <button type="button" class="flt-btn" data-flt-export><i class="fa fa-download" aria-hidden="true"></i> {{ __('frontend_list_template.export') }}</button>
                 <button type="button" class="flt-btn" data-flt-restore><i class="fa fa-refresh" aria-hidden="true"></i> {{ __('frontend_list_template.restore') }}</button>
             </div>
         </div>
-        <div class="flt-table-scroll"><table><caption class="flt-sr-only">{{ __('frontend_list_template.table_caption') }}</caption><thead><tr><th class="flt-check"><input type="checkbox" data-flt-all aria-label="{{ __('frontend_list_template.check_page') }}"></th>@foreach (__('frontend_list_template.columns') as $key => $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead><tbody data-flt-rows></tbody></table></div>
+        <div class="flt-table-region" data-flt-region aria-busy="false"><div class="flt-loading" data-flt-loading role="status" hidden><span class="flt-spinner" aria-hidden="true"></span><span>{{ __('frontend_list_template.loading') }}</span></div><div class="flt-table-scroll"><table><caption class="flt-sr-only">{{ __('frontend_list_template.table_caption') }}</caption><thead><tr><th class="flt-check"><input type="checkbox" data-flt-all aria-label="{{ __('frontend_list_template.check_page') }}"></th>@foreach (__('frontend_list_template.columns') as $key => $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead><tbody data-flt-rows></tbody></table></div>
         <div class="flt-empty" data-flt-empty hidden><i class="fa fa-search" aria-hidden="true"></i><h4>{{ __('frontend_list_template.empty_title') }}</h4><p>{{ __('frontend_list_template.empty_hint') }}</p></div>
+        </div>
         <nav class="flt-pagination" aria-label="{{ __('frontend_list_template.pagination') }}">
             <label>{{ __('frontend_list_template.per_page') }} <select data-flt-size aria-label="{{ __('frontend_list_template.page_size') }}"><option>20</option><option selected>50</option><option>100</option></select></label>
             <button type="button" class="flt-btn" data-flt-previous>{{ __('frontend_list_template.previous') }}</button><strong data-flt-page-label></strong><button type="button" class="flt-btn" data-flt-next>{{ __('frontend_list_template.next') }}</button>
-            <form data-flt-jump data-loading="off"><label>{{ __('frontend_list_template.jump_to') }} <input type="number" min="1" step="1" required placeholder="{{ __('frontend_list_template.page_placeholder') }}" aria-label="{{ __('frontend_list_template.page_placeholder') }}"></label><button type="submit" class="flt-btn flt-primary">{{ __('frontend_list_template.jump') }}</button></form>
+            <form data-flt-jump data-loading="off" novalidate><label>{{ __('frontend_list_template.jump_to') }} <input type="number" min="1" step="1" required placeholder="{{ __('frontend_list_template.page_placeholder') }}" aria-label="{{ __('frontend_list_template.page_placeholder') }}"></label><button type="submit" class="flt-btn flt-primary">{{ __('frontend_list_template.jump') }}</button></form>
         </nav>
     </section>
     <dialog class="flt-dialog" data-flt-dialog aria-labelledby="flt-dialog-title">
-        <form data-flt-editor data-loading="off"><header><div><span class="flt-eyebrow">{{ __('frontend_list_template.demo') }}</span><h3 id="flt-dialog-title"></h3></div><button type="button" class="flt-icon-close" data-flt-close aria-label="{{ __('frontend_list_template.close') }}">×</button></header>
+        <form data-flt-editor data-loading="off" novalidate><header><div><span class="flt-eyebrow">{{ __('frontend_list_template.demo') }}</span><h3 id="flt-dialog-title"></h3></div><button type="button" class="flt-icon-close" data-flt-close aria-label="{{ __('frontend_list_template.close') }}">×</button></header>
             <div class="flt-dialog-content" data-flt-dialog-content></div>
             <footer><button type="button" class="flt-btn" data-flt-close>{{ __('frontend_list_template.cancel') }}</button><button type="submit" class="flt-btn flt-primary" data-flt-dialog-submit></button></footer>
         </form>

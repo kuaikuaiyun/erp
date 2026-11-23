@@ -248,19 +248,6 @@
     padding: 8px;
     cursor: pointer
 }
-.flt-feedback {
-    padding: 10px 15px;
-    background: #eaf7ef;
-    color: #298159;
-    border: 1px solid #cdebd7;
-    border-radius: 7px;
-    line-height: 1.7
-}
-.flt-feedback[data-error="1"] {
-    background: #fff1ed;
-    color: #b34730;
-    border-color: #f1d6cb
-}
 .flt-toolbar {
     display: flex;
     justify-content: space-between;
@@ -328,7 +315,10 @@
     cursor: default
 }
 .flt-table-scroll {
-    overflow-x: auto
+    overflow: auto;
+    max-height: clamp(300px, 58vh, 640px);
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
 }
 .flt table {
     width: 100%;
@@ -692,3 +682,27 @@
     .flt-toolbar-actions { margin-left: 0; width: 100%; }
     .flt-toolbar-actions .flt-btn { flex: 1; padding: 6px 9px; }
 }
+
+.flt thead th { position: sticky; top: 0; z-index: 2; }
+.flt-table-region { position: relative; min-height: 150px; }
+.flt-loading { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 12px; background: rgba(255,255,255,.86); color: #287da9; backdrop-filter: blur(1px); }
+.flt-spinner,.flt-btn.is-loading::before,.flt-pagination.is-loading .flt-btn::before { content: ''; display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: flt-spin .8s linear infinite; flex-shrink: 0; }
+.flt-spinner { width: 24px; height: 24px; }
+.flt-btn.is-loading>i { display: none; }
+.flt-pagination.is-loading .flt-btn { opacity: .65; }
+@keyframes flt-spin { to { transform: rotate(360deg); } }
+.flt-dialog .flt-required { color: #cc5a50; font-weight: 600; }
+.flt-dialog [aria-invalid=true] { border-color: #ce695a; box-shadow: 0 0 0 3px #c85e4c12; }
+.flt-dialog .flt-field-error { display: block; color: #bf5546; font-size: 12px; font-weight: 400; margin-top: 7px; line-height: 1.5; }
+.flt-transfer-hint { color: #758c9e; line-height: 1.8; padding: 12px 14px; background: #f3f8fc; border-radius: 6px; margin-bottom: 22px; }
+.flt-file-field { position: relative; }
+.flt-file-button { display: block; width: fit-content; margin-top: 10px; border: 1px dashed #b8cfe0; border-radius: 5px; padding: 10px 20px; color: #2587bc; background: #f8fbfe; }
+.flt-dialog .flt-file-field input { position: absolute; top: 23px; left: 0; width: 160px; height: 42px; opacity: 0; cursor: pointer; margin: 0; }
+.flt-file-field:focus-within .flt-file-button { outline: 2px solid #4e9ec9; outline-offset: 2px; }
+.flt-file-info { padding: 12px 14px; border: 1px solid #e1eaf1; border-radius: 6px; color: #8b9ca9; overflow-wrap: anywhere; }
+.flt-file-info strong { color: #41677f; display: block; margin-bottom: 7px; font-size: 13px; font-weight: 500; }
+.flt-dialog .flt-export-choice { display: flex; gap: 10px; align-items: center; border: 1px solid #deE8f0; padding: 14px; border-radius: 6px; cursor: pointer; }
+.flt-dialog .flt-export-choice input { width: 15px; height: 15px; margin: 0; accent-color: #2188be; }
+.flt-export-choice:has(input:checked) { background: #f0f8fe; border-color: #97c4df; }
+.flt-export-choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+@media(prefers-reduced-motion:reduce) { .flt-spinner,.flt-btn.is-loading::before,.flt-pagination.is-loading .flt-btn::before { animation-duration: 1.8s; } }

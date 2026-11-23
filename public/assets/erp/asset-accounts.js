@@ -197,18 +197,45 @@
         } else if (!retained.length) memberships.appendChild(node('p', t.no_membership, 'hr-hint'));
     }
     function permissions(data) {
-        permissionControls = []; fields.appendChild(node('p', t.permissions_hint, 'hr-hint')); var seen = new Set();
-        function append(nodes, depth) {
-            (nodes || []).forEach(function (item) {
+        permissionControls = []; var seen = new Set(), groups = [], sectionNodes = [], prior = null;
+        fields.appendChild(node('p', t.permissions_hint, 'hr-hint'));
+        var tools = node('div', null, 'hr-permission-tools'), search = node('input'), expand = node('button', t.expand_all, 'btn btn-default btn-sm'), collapse = node('button', t.collapse_all, 'btn btn-default btn-sm');
+        search.type = 'search'; search.className = 'form-control'; search.placeholder = t.permission_search; search.setAttribute('aria-label', t.permission_search); expand.type = collapse.type = 'button'; tools.append(search, expand, collapse); fields.appendChild(tools);
+        var list = node('div', null, 'hr-permission-groups'), empty = node('p', t.permission_empty, 'hr-hint'); fields.append(list, empty); empty.hidden = true;
+        function append(items, container, depth, path) {
+            (items || []).forEach(function (item) {
+                var labelPath = path.concat([item.title || '']);
                 if (item.permission_id && !seen.has(item.permission_id)) {
-                    seen.add(item.permission_id); var row = node('label', null, 'hr-permission'), name = node('span', item.title), select = node('select'); row.style.marginLeft = (depth * 12) + 'px'; select.className = 'form-control';
+                    seen.add(item.permission_id); var row = node('label', null, 'hr-permission'), name = node('span', item.title), select = node('select'); row.style.paddingLeft = (12 + Math.min(depth, 4) * 12) + 'px'; select.className = 'form-control';
                     select.add(new Option(t.inherit, '')); select.add(new Option(t.allow, 'allow')); select.add(new Option(t.deny, 'deny'));
-                    var override = data.overrides[item.permission_id]; select.value = override ? override.effect : ''; select.dataset.permission = item.permission_id; row.append(name, select); fields.appendChild(row); permissionControls.push(select);
-                } else if (!item.permission_id) fields.appendChild(node('h4', item.title));
-                append(item.children, depth + 1);
+                    var override = data.overrides[item.permission_id]; select.value = override ? override.effect : ''; select.dataset.permission = item.permission_id; select.setAttribute('aria-label', labelPath.join(' / ')); row.dataset.search = labelPath.join(' ').toLowerCase(); row.append(name, select); container.appendChild(row); permissionControls.push(select);
+                }
+                if (item.children && item.children.length) {
+                    var section = node('section', null, 'hr-permission-section');
+                    if (!item.permission_id) section.appendChild(node('h5', item.title));
+                    append(item.children, section, depth + 1, labelPath);
+                    if (section.querySelector('.hr-permission')) { container.appendChild(section); sectionNodes.push(section); }
+                }
             });
         }
-        append(data.tree, 0);
+        (data.tree || []).forEach(function (root) {
+            var group = node('details', null, 'hr-permission-group'), heading = node('summary', root.title), arrow = node('i', null, 'fa fa-chevron-right'); arrow.setAttribute('aria-hidden', 'true'); heading.prepend(arrow); group.appendChild(heading);
+            if (root.permission_id) append([root], group, 0, []); else append(root.children, group, 0, [root.title || '']);
+            if (group.querySelector('.hr-permission')) { group.open = groups.length === 0; groups.push(group); list.appendChild(group); }
+        });
+        function filter() {
+            var term = search.value.trim().toLowerCase();
+            if (term && !prior) prior = groups.map(function (group) { return group.open; });
+            list.querySelectorAll('.hr-permission').forEach(function (row) { row.hidden = !row.dataset.search.includes(term); });
+            sectionNodes.forEach(function (section) { section.hidden = !Array.from(section.querySelectorAll('.hr-permission')).some(function (row) { return !row.hidden; }); });
+            groups.forEach(function (group, i) { group.hidden = !Array.from(group.querySelectorAll('.hr-permission')).some(function (row) { return !row.hidden; }); if (term && !group.hidden) group.open = true; else if (!term && prior) group.open = prior[i]; });
+            if (!term) prior = null;
+            empty.hidden = groups.some(function (group) { return !group.hidden; });
+        }
+        search.oninput = filter;
+        expand.onclick = function () { groups.forEach(function (group) { group.open = true; }); };
+        collapse.onclick = function () { groups.forEach(function (group) { group.open = false; }); };
+        filter();
     }
     function destroyPickers() {
         closePicker(); if ($.fn.select2) $(fields).find('.hr-dept').each(function () { if ($(this).data('select2')) $(this).select2('destroy'); });

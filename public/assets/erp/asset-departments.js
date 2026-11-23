@@ -1,6 +1,13 @@
 (function () {
     'use strict';
     var c = window.AssetDepartmentsConfig, t = c.text, dialog = document.getElementById('hr-department-dialog'), form = document.getElementById('hr-department-form'), fields = document.getElementById('hr-department-fields'), error = document.getElementById('hr-department-error'), save = document.getElementById('hr-department-save');
+    document.querySelectorAll('[data-department-toggle]').forEach(function (button) {
+        button.onclick = function () {
+            var expanded = button.getAttribute('aria-expanded') !== 'true';
+            button.setAttribute('aria-expanded', String(expanded)); button.setAttribute('aria-label', expanded ? t.department_collapse : t.department_expand);
+            document.querySelectorAll('[data-department-child]').forEach(function (row) { if (row.dataset.departmentChild === button.dataset.departmentToggle) row.hidden = !expanded; });
+        };
+    });
     var seq = 0, busy = false, recordId = null;
     function node(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
     function fail(message) { error.textContent = message || ''; error.hidden = !message; }

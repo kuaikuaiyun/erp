@@ -34,10 +34,29 @@ class DepartmentController extends Controller
     {
         $c = $this->context($request);
         $data = $request->validate(['search' => 'nullable|string|max:100','page' => 'nullable|integer|min:1','per_page' => 'nullable|in:20,50,100'], __('asset_accounts.validation'), __('asset_accounts.attributes'));
-        $query = $this->query($c['user'])->with('parent')->withCount('departmentMembers');
-        if (filled($data['search'] ?? null)) $query->where(fn ($q) => $q->where('name', 'like', '%'.$data['search'].'%')->orWhere('slug', 'like', '%'.$data['search'].'%'));
-        $rows = $query->orderByRaw('COALESCE(parent_id, id)')->orderBy('sort')->orderBy('id')->paginate((int) ($data['per_page'] ?? 20))->withQueryString();
-        return view('portals.asset-manager.departments', $c + ['rows' => $rows, 'filters' => $data, 'writeIds' => $this->bindings->departmentIds($c['user'], true)]);
+        $query = $this->query($c['user']);
+        if (filled($data['search'] ?? null)) {
+            $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $data['search']).'%';
+            $query->where(fn ($q) => $q->whereRaw("name LIKE ? ESCAPE '!'", [$term])->orWhereRaw("slug LIKE ? ESCAPE '!'", [$term]));
+        }
+        // Paginate whole department groups so children never become orphaned on another page.
+        $groupSql = 'CASE WHEN parent_id IS NULL OR parent_id = 0 THEN id ELSE parent_id END';
+        $rows = (new Department)->getConnection()->query()->fromSub((clone $query)->selectRaw($groupSql.' as group_id')->distinct(), 'department_groups')
+            ->orderBy('group_id')->paginate((int) ($data['per_page'] ?? 20))->withQueryString();
+        $groupIds = $rows->pluck('group_id')->all();
+        $pivot = config('admin.database.role_users_table');
+        $records = (clone $query)->whereIn(\Illuminate\Support\Facades\DB::raw($groupSql), $groupIds)->with('parent:id,name')->withCount([
+            'children',
+            'departmentMembers as manager_count' => fn ($q) => $q->where($pivot.'.position', 'manager'),
+            'departmentMembers as deputy_count' => fn ($q) => $q->where($pivot.'.position', 'deputy'),
+            'departmentMembers as member_count' => fn ($q) => $q->where($pivot.'.position', 'member'),
+        ])->orderBy('sort')->orderBy('name')->get();
+        $parents = Department::business()->whereIn('id', $groupIds)->get(['id','name']);
+        $treeGroups = collect($groupIds)->map(function ($id) use ($records, $parents) {
+            return ['id' => (int) $id, 'root' => $records->firstWhere('id', $id), 'context' => $parents->firstWhere('id', $id),
+                'children' => $records->where('parent_id', $id)->values()];
+        });
+        return view('portals.asset-manager.departments', $c + ['rows' => $rows, 'treeGroups' => $treeGroups, 'filters' => $data, 'writeIds' => $this->bindings->departmentIds($c['user'], true)]);
     }
 
     public function show(Request $request, int $department)

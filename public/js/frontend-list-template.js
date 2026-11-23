@@ -9,9 +9,10 @@
         var body = root.querySelector('[data-flt-rows]');
         var dialog = root.querySelector('[data-flt-dialog]');
         var editor = root.querySelector('[data-flt-editor]');
-        var feedback = root.querySelector('[data-flt-feedback]');
+        var region = root.querySelector('[data-flt-region]');
+        var busy = false, timer = null, destroyed = false, locked = new Map();
         var records = [], filtered = [], selected = new Set(), pickers = {};
-        var page = 1, size = 50, applied = {}, action = null, currentId = null, nextId = 121, pendingDeleteIds = [];
+        var page = 1, size = 50, applied = {}, action = null, currentId = null, nextId = 121, pendingDeleteIds = [], importFile = null;
 
         function t(key, values) {
             return String(messages[key] || key).replace(/:([a-z_]+)/g, function (match, name) {
@@ -25,9 +26,39 @@
             return el;
         }
         function say(text, error) {
-            feedback.textContent = text;
-            feedback.hidden = !text;
-            feedback.dataset.error = error ? '1' : '0';
+            if (!text) return;
+            if (window.ErpAdminNotifier) window.ErpAdminNotifier.notify({ type: error ? 'error' : 'success', message: text });
+            else if (window.toastr) window.toastr[error ? 'error' : 'success'](text);
+        }
+        function lockControls() {
+            root.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+                if (!locked.has(el)) locked.set(el, el.disabled);
+                el.disabled = true;
+            });
+            root.querySelectorAll('.flt-picker').forEach(function (picker) { picker.open = false; });
+        }
+        function unlockControls() {
+            locked.forEach(function (disabled, el) { el.disabled = disabled; }); locked.clear();
+        }
+        function runTask(work, trigger) {
+            if (busy || destroyed) return;
+            busy = true; region.setAttribute('aria-busy', 'true'); root.querySelector('[data-flt-loading]').hidden = false;
+            root.querySelector('.flt-pagination').classList.add('is-loading');
+            if (trigger) trigger.classList.add('is-loading');
+            lockControls();
+            // Give the browser time to paint the same loading state used by real asynchronous lists.
+            timer = window.setTimeout(function () {
+                timer = null;
+                if (destroyed) return;
+                try { work(); root.querySelector('.flt-table-scroll').scrollTop = 0; }
+                catch (_) { say(t('loading_failed'), true); }
+                finally {
+                    busy = false; unlockControls(); render(); region.setAttribute('aria-busy', 'false');
+                    root.querySelector('[data-flt-loading]').hidden = true;
+                    root.querySelector('.flt-pagination').classList.remove('is-loading');
+                    if (trigger) trigger.classList.remove('is-loading');
+                }
+            }, 220);
         }
         function seed() {
             return Array.from({ length: 120 }, function (_, index) {
@@ -143,19 +174,22 @@
             root.querySelector('[data-flt-next]').disabled = page >= pages;
             var jump = root.querySelector('[data-flt-jump] input'); jump.max = pages; jump.value = '';
             updateSelection();
+            if (busy) lockControls();
         }
-        function reset() {
+        function reset(event) {
+            if (busy) { if (event) event.preventDefault(); return; }
             applied = {}; page = 1; selected.clear();
             Object.values(pickers).forEach(function (picker) { picker.clear(); });
             say(''); apply();
         }
         form.addEventListener('submit', function (event) {
             event.preventDefault();
+            if (busy) return;
             var start = form.elements.start.value, end = form.elements.end.value;
             if (start && end && start > end) { say(t('invalid_range'), true); return; }
-            applied = { keyword: form.elements.keyword.value.trim(), status: form.elements.status.value, start: start, end: end };
-            Object.keys(pickers).forEach(function (key) { applied[key] = Array.from(pickers[key].values); pickers[key].details.open = false; });
-            page = 1; say(''); apply();
+            var next = { keyword: form.elements.keyword.value.trim(), status: form.elements.status.value, start: start, end: end };
+            Object.keys(pickers).forEach(function (key) { next[key] = Array.from(pickers[key].values); });
+            runTask(function () { applied = next; page = 1; apply(); }, form.querySelector('[type=submit]'));
         });
         form.addEventListener('reset', reset);
         root.querySelector('[data-flt-restore]').onclick = function () { records = seed(); nextId = 121; form.reset(); say(t('restored')); };
@@ -167,32 +201,111 @@
             var input = event.target.closest('[data-flt-check-id]'); if (!input) return;
             if (input.checked) selected.add(Number(input.dataset.fltCheckId)); else selected.delete(Number(input.dataset.fltCheckId)); updateSelection();
         });
-        root.querySelector('[data-flt-size]').onchange = function (event) { size = Number(event.target.value); page = 1; render(); };
-        root.querySelector('[data-flt-previous]').onclick = function () { if (page > 1) { page--; render(); } };
-        root.querySelector('[data-flt-next]').onclick = function () { if (page < Math.ceil(filtered.length / size)) { page++; render(); } };
+        root.querySelector('[data-flt-size]').onchange = function (event) { var nextSize = Number(event.target.value); runTask(function () { size = nextSize; page = 1; }); };
+        root.querySelector('[data-flt-previous]').onclick = function (event) { if (page > 1) runTask(function () { page--; }, event.currentTarget); };
+        root.querySelector('[data-flt-next]').onclick = function (event) { if (page < Math.ceil(filtered.length / size)) runTask(function () { page++; }, event.currentTarget); };
         root.querySelector('[data-flt-jump]').onsubmit = function (event) {
             event.preventDefault();
+            if (busy) return;
             var value = Number(event.currentTarget.querySelector('input').value), pages = Math.ceil(filtered.length / size) || 1;
             if (!Number.isInteger(value) || value < 1 || value > pages) { say(t('invalid_page', { pages: pages }), true); return; }
-            page = value; say(''); render();
+            runTask(function () { page = value; }, event.currentTarget.querySelector('[type=submit]'));
         };
-        function close() { if (dialog.open) dialog.close(); action = null; currentId = null; pendingDeleteIds = []; }
+        function close() {
+            if (dialog.open) dialog.close();
+            var fileInput = editor.querySelector('input[type=file]'); if (fileInput) fileInput.value = '';
+            importFile = null; action = null; currentId = null; pendingDeleteIds = [];
+        }
         root.querySelectorAll('[data-flt-close]').forEach(function (button) { button.onclick = close; });
-        dialog.addEventListener('cancel', function (event) { event.preventDefault(); close(); });
+        // File inputs emit a bubbling cancel event when the OS chooser is dismissed.
+        // Only a cancel event from the dialog itself should close the modal.
+        dialog.addEventListener('cancel', function (event) {
+            if (event.target !== dialog) return;
+            event.preventDefault(); close();
+        });
         function addEditField(parent, key, value, choices) {
             var label = node('label', key === 'name' || key === 'note' ? 'flt-wide' : '', key === 'note' ? t('note') : messages.columns[key]);
             var input = node(choices ? 'select' : key === 'note' ? 'textarea' : 'input'); input.name = key;
+            input.id = 'flt-editor-' + key;
+            if (key !== 'note') { label.appendChild(node('span', 'flt-required', ' *')); input.required = true; }
             if (choices) Object.entries(choices).forEach(function (entry) { var option = node('option', '', entry[1]); option.value = entry[0]; input.appendChild(option); });
             else { input.maxLength = key === 'note' ? 500 : 100; if (key === 'name') input.required = true; }
-            input.value = value; label.appendChild(input); parent.appendChild(label);
+            var error = node('span', 'flt-field-error'); error.id = input.id + '-error'; error.hidden = true;
+            input.setAttribute('aria-describedby', error.id);
+            input.value = value; label.append(input, error); parent.appendChild(label);
+        }
+        function fieldError(input, text) {
+            input.setAttribute('aria-invalid', text ? 'true' : 'false');
+            var error = editor.querySelector('#' + input.id + '-error');
+            if (error) { error.textContent = text; error.hidden = !text; }
+        }
+        function validateEditor() {
+            var first = null;
+            editor.querySelectorAll('[required], [maxlength]').forEach(function (input) {
+                var value = input.value.trim(), title = messages.columns[input.name] || t(input.name), error = '';
+                if (input.required && !value) error = t('required_field', { field: title });
+                else if (input.maxLength > 0 && value.length > input.maxLength) error = t('too_long', { field: title, max: input.maxLength });
+                else if (input.tagName === 'SELECT' && !Array.from(input.options).some(function (option) { return option.value === value; })) error = t('invalid_choice', { field: title });
+                fieldError(input, error); if (error && !first) first = input;
+            });
+            if (first) first.focus(); return !first;
         }
         function openRecord(mode, row) {
+            if (busy) return;
+            importFile = null;
             action = mode; currentId = row ? row.id : null;
             root.querySelector('#flt-dialog-title').textContent = t(action + '_title');
             var content = root.querySelector('[data-flt-dialog-content]'); content.replaceChildren();
             var submit = root.querySelector('[data-flt-dialog-submit]'); submit.hidden = action === 'view'; submit.classList.toggle('flt-danger', action === 'delete' || action === 'bulk_delete');
-            submit.textContent = t(action === 'delete' || action === 'bulk_delete' ? 'confirm_delete' : action === 'create' ? 'create_save' : 'save');
-            if (action === 'view') {
+            submit.disabled = false;
+            submit.textContent = t(action === 'delete' || action === 'bulk_delete' ? 'confirm_delete' : action === 'create' ? 'create_save' : action === 'import' ? 'upload' : action === 'export' ? 'confirm_export' : 'save');
+            if (action === 'import') {
+                content.appendChild(node('p', 'flt-transfer-hint', t('import_hint')));
+                var label = node('label', '', t('file')), input = node('input');
+                input.type = 'file'; input.name = 'demo_file'; input.id = 'flt-demo-file'; input.accept = '.xlsx,.xls,.csv'; input.required = true;
+                input.className = 'flt-file-input'; label.htmlFor = input.id;
+                label.appendChild(node('span', 'flt-required', ' *'));
+                var zone = node('button', 'flt-dropzone'); zone.type = 'button';
+                var icon = node('i', 'fa fa-cloud-upload'); icon.setAttribute('aria-hidden', 'true');
+                zone.append(icon, node('strong', '', t('drop_file')), node('span', '', t('file_formats')));
+                zone.setAttribute('aria-describedby', 'flt-demo-file-error');
+                var info = node('div', 'flt-file-info', t('file_empty')), error = node('span', 'flt-field-error'); error.id = 'flt-demo-file-error'; error.hidden = true;
+                info.setAttribute('aria-live', 'polite');
+                input.setAttribute('aria-describedby', error.id); content.append(label, input, zone, error, info);
+                var dragDepth = 0;
+                function showFile() {
+                    info.replaceChildren();
+                    if (!importFile) { info.textContent = t('file_empty'); return; }
+                    info.append(node('strong', '', importFile.name), node('span', '', t('file_size', { size: (importFile.size / 1024).toFixed(1) + ' KB' })));
+                }
+                function acceptFiles(files) {
+                    if (!files.length) { showFile(); return; }
+                    if (files.length !== 1) { fieldError(input, t('single_file')); return; }
+                    if (!/\.(csv|xlsx|xls)$/i.test(files[0].name)) { fieldError(input, t('file_format_invalid')); return; }
+                    importFile = files[0]; fieldError(input, ''); zone.removeAttribute('aria-invalid'); showFile();
+                }
+                zone.onclick = function () { input.click(); };
+                zone.addEventListener('dragenter', function (event) { event.preventDefault(); dragDepth++; zone.classList.add('is-dragover'); });
+                zone.addEventListener('dragover', function (event) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; });
+                zone.addEventListener('dragleave', function (event) { event.preventDefault(); dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) zone.classList.remove('is-dragover'); });
+                zone.addEventListener('drop', function (event) {
+                    event.preventDefault(); event.stopPropagation(); dragDepth = 0; zone.classList.remove('is-dragover');
+                    if (event.dataTransfer) acceptFiles(Array.from(event.dataTransfer.files));
+                });
+                input.addEventListener('cancel', function (event) { event.stopPropagation(); showFile(); });
+                input.onchange = function () {
+                    acceptFiles(Array.from(input.files));
+                };
+            } else if (action === 'export') {
+                content.appendChild(node('p', 'flt-transfer-hint', t('export_hint')));
+                ['filtered', 'selected'].forEach(function (scope) {
+                    var label = node('label', 'flt-export-choice'), radio = node('input'), count = scope === 'filtered' ? filtered.length : selected.size;
+                    radio.type = 'radio'; radio.name = 'export_scope'; radio.value = scope; radio.checked = scope === 'filtered'; radio.disabled = count === 0;
+                    label.append(radio, node('span', '', t('export_' + scope, { count: count }))); content.appendChild(label);
+                });
+                submit.disabled = filtered.length === 0 && selected.size === 0;
+                if (!filtered.length && selected.size) content.querySelector('[value=selected]').checked = true;
+            } else if (action === 'view') {
                 var list = node('dl');
                 Object.keys(messages.columns).filter(function (key) { return key !== 'actions'; }).concat('note').forEach(function (key) {
                     list.append(node('dt', '', key === 'note' ? t('note') : messages.columns[key]), node('dd', '', key === 'status' ? messages.statuses[row.status] : key === 'time' ? row.time.replace('T', ' ') : row[key]));
@@ -210,7 +323,7 @@
                 addEditField(grid, 'status', row.status, messages.statuses); addEditField(grid, 'note', row.note); content.appendChild(grid);
             }
             if (!dialog.open) dialog.showModal(); dialog.scrollTop = 0;
-            var focus = content.querySelector('input'); if (focus) focus.focus();
+            var focus = content.querySelector('.flt-dropzone') || content.querySelector('input'); if (focus) focus.focus();
         }
         body.addEventListener('click', function (event) {
             var button = event.target.closest('[data-action]'); if (!button) return;
@@ -224,8 +337,17 @@
             pendingDeleteIds = records.filter(function (row) { return selected.has(row.id); }).map(function (row) { return row.id; });
             if (pendingDeleteIds.length) openRecord('bulk_delete');
         };
+        root.querySelector('[data-flt-import]').onclick = function () { openRecord('import'); };
+        root.querySelector('[data-flt-export]').onclick = function () { openRecord('export'); };
         editor.addEventListener('submit', function (event) {
-            event.preventDefault(); if (!['edit', 'delete', 'create', 'bulk_delete'].includes(action)) return;
+            event.preventDefault(); if (busy || !['edit', 'delete', 'create', 'bulk_delete', 'import', 'export'].includes(action)) return;
+            if (action === 'import') {
+                var file = editor.elements.demo_file;
+                if (!importFile) { fieldError(file, t('required_field', { field: t('file') })); contentFocus(); return; }
+                close(); say(t('upload_done')); return;
+            }
+            if (action === 'export') { var scope = editor.querySelector('[name=export_scope]:checked:not(:disabled)'); if (!scope) return; close(); say(t('export_done')); return; }
+            if ((action === 'create' || action === 'edit') && !validateEditor()) return;
             if (action === 'bulk_delete') {
                 var removing = new Set(pendingDeleteIds), count = 0;
                 records = records.filter(function (item) { if (!removing.has(item.id)) return true; selected.delete(item.id); count++; return false; });
@@ -233,7 +355,6 @@
             }
             if (action === 'create') {
                 var recordName = editor.elements.name.value.trim();
-                if (!recordName) { editor.elements.name.setCustomValidity(messages.columns.name); editor.elements.name.reportValidity(); return; }
                 var now = new Date();
                 var created = { id: nextId, code: 'DEMO-' + String(nextId).padStart(5, '0'), name: recordName,
                     time: now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + 'T' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') };
@@ -244,19 +365,18 @@
             if (action === 'delete') { records = records.filter(function (item) { return item.id !== row.id; }); selected.delete(row.id); say(t('deleted')); }
             else {
                 var name = editor.elements.name.value.trim();
-                if (!name) { editor.elements.name.setCustomValidity(messages.columns.name); editor.elements.name.reportValidity(); return; }
                 row.name = name;
                 ['company', 'department', 'owner', 'status', 'note'].forEach(function (key) { row[key] = editor.elements[key].value; }); say(t('saved'));
             }
             close(); apply();
         });
-        editor.addEventListener('input', function (event) { if (event.target.name === 'name') event.target.setCustomValidity(''); });
+        editor.addEventListener('input', function (event) { if (event.target.id) fieldError(event.target, ''); });
         function outside(event) { Object.values(pickers).forEach(function (picker) { if (!picker.details.contains(event.target)) picker.details.open = false; }); }
         function escape(event) { if (event.key === 'Escape') Object.values(pickers).forEach(function (picker) { if (picker.details.open) { picker.details.open = false; picker.details.querySelector('summary').focus(); } }); }
         document.addEventListener('click', outside); root.addEventListener('keydown', escape);
         // A PJAX history snapshot can contain an open attribute without a modal top layer.
         dialog.removeAttribute('open'); records = seed(); form.reset();
-        return { root: root, destroy: function () { close(); document.removeEventListener('click', outside); root.removeEventListener('keydown', escape); } };
+        return { root: root, destroy: function () { destroyed = true; window.clearTimeout(timer); unlockControls(); close(); document.removeEventListener('click', outside); root.removeEventListener('keydown', escape); } };
     }
     function init() {
         var root = document.querySelector('[data-frontend-list-template]');

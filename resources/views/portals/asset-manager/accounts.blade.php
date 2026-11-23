@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="{{ asset('css/dingtalk-bindings.css') }}?v=20261116-5">
 <link rel="stylesheet" href="{{ asset('css/erp-account-labels.css') }}?v=20261116-1">
 <link rel="stylesheet" href="{{ asset('css/dingtalk-companies.css') }}?v=20261116-4">
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-accounts.css') }}?v=20261118-2">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-accounts.css') }}?v=20261123-2">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ __('asset_accounts.title') }} <small>{{ __('asset_accounts.subtitle') }}</small></h1></section>
@@ -42,7 +42,7 @@
             </div>
             <div class="hr-toolbar"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> {{ __('asset_accounts.query') }}</button><a class="btn btn-default" href="{{ $accountBase }}">{{ __('asset_accounts.reset') }}</a></div>
         </form>
-        <div class="box-footer hr-hint">{{ __('asset_accounts.scope_hint') }} @if(!$canManage) {{ __('asset_accounts.readonly') }} @endif</div>
+        <div class="box-footer hr-hint">{{ __('asset_accounts.scope_hint') }} {{ __('asset_accounts.export_scope_hint') }} @if(!$canManage) {{ __('asset_accounts.readonly') }} @endif</div>
     </div>
     <div class="box box-default"><div class="box-header with-border hr-list-head"><h3 class="box-title">{{ __('asset_accounts.list') }}</h3><div class="pull-right hr-list-buttons">
         @if($owner)
@@ -58,12 +58,12 @@
     </div></div>
         <div class="table-responsive"><table class="table table-bordered table-hover hr-table"><thead><tr>
             <th><input type="checkbox" id="hr-select-all" aria-label="{{ __('asset_accounts.transfer.select_all') }}"></th><th><a href="{{ request()->fullUrlWithQuery(['direction'=>($filters['direction']??'desc')==='asc'?'desc':'asc','page'=>1]) }}">{{ __('asset_accounts.id') }} <i class="fa fa-sort" aria-hidden="true"></i></a></th>
-            @foreach(['username','name','company','hired_at','employment_status','status','memberships','binding','updated_at','actions'] as $heading)
+            @foreach(['username','name','company','employment_status','status','memberships','binding','updated_at','actions'] as $heading)
             <th>{{ __('asset_accounts.'.$heading) }}</th>
             @endforeach
         </tr></thead><tbody>
             @forelse($accounts as $account)
-            <tr><td><input type="checkbox" data-hr-select="{{ $account['id'] }}" data-writable="{{ $account['writable'] ? 1 : 0 }}" aria-label="{{ $account['username'] }}"></td><td>{{ $account['id'] }}</td><td>{{ $account['username'] }}</td><td>{{ $account['name'] }} @if($account['administrator'])<span class="label label-info">{{ __('asset_accounts.system') }}</span>@endif</td><td>{{ $account['company'] }}</td><td>{{ $account['hired_at'] ?? '—' }}</td><td>{{ __('asset_accounts.'.($account['employment_status']==='resigned' ? 'resigned':'employed')) }} @if($account['resigned_at'])<small class="hr-date">{{ $account['resigned_at'] }}</small>@endif</td><td><span class="label {{ $account['status'] ? 'label-success':'label-default' }}">{{ __($account['status'] ? 'asset_accounts.enabled':'asset_accounts.disabled') }}</span></td>
+            <tr><td><input type="checkbox" data-hr-select="{{ $account['id'] }}" data-writable="{{ $account['writable'] ? 1 : 0 }}" aria-label="{{ $account['username'] }}"></td><td>{{ $account['id'] }}</td><td>{{ $account['username'] }}</td><td>{{ $account['name'] }} @if($account['administrator'])<span class="label label-info">{{ __('asset_accounts.system') }}</span>@endif</td><td>{{ $account['company'] }}</td><td class="hr-employment-cell"><div><span>{{ __('asset_accounts.employment_label') }}：</span>{{ __('asset_accounts.'.($account['employment_status']==='resigned' ? 'resigned':'employed')) }}</div><div><span>{{ __('asset_accounts.hired_at') }}：</span>{{ $account['hired_at'] ?: '—' }}</div><div><span>{{ __('asset_accounts.resigned_at') }}：</span>{{ $account['resigned_at'] ?: '—' }}</div></td><td><span class="label {{ $account['status'] ? 'label-success':'label-default' }}">{{ __($account['status'] ? 'asset_accounts.enabled':'asset_accounts.disabled') }}</span></td>
                 <td>
                     @forelse($account['memberships'] as $membership)
                     <span class="hr-tag">{{ $membership['department_name'] }} · {{ __('asset_accounts.'.$membership['position']) }}</span>
@@ -93,7 +93,7 @@
                 </td>
             </tr>
             @empty
-            <tr><td colspan="12" class="hr-empty">{{ __('asset_accounts.empty') }}</td></tr>
+            <tr><td colspan="11" class="hr-empty">{{ __('asset_accounts.empty') }}</td></tr>
             @endforelse
         </tbody></table></div>
     </div>
@@ -127,6 +127,6 @@
 <script src="{{ asset('js/erp-account-labels.js') }}?v=20261116-2"></script>
 <script src="{{ asset('js/dingtalk-directory.js') }}?v=20261116-2"></script>
 <script src="{{ asset('js/dingtalk-bindings.js') }}?v=20261116-2"></script>
-<script src="{{ asset('assets/erp/asset-accounts.js') }}?v=20261118-2"></script>
+<script src="{{ asset('assets/erp/asset-accounts.js') }}?v=20261123-2"></script>
 <script src="{{ asset('assets/erp/asset-account-transfer.js') }}?v=20261123-1"></script>
 @endpush

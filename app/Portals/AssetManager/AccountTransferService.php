@@ -72,9 +72,19 @@ class AccountTransferService
         });
     }
 
+    public function exportQuery(AdminUser $actor)
+    {
+        $query = $this->authorization->accounts($actor);
+        if (! $actor->isAdministrator()) {
+            $query->where(fn ($q) => $q->whereNull('company_id')->orWhereIn('company_id', $this->companies($actor)->pluck('id')));
+        }
+        return $query;
+    }
+
     public function download(AdminUser $actor, $query = null)
     {
         $write = $query === null;
+        if ($query) $query->whereIn((new AdminUser)->getTable().'.id', $this->exportQuery($actor)->select((new AdminUser)->getTable().'.id'));
         $departments = Department::business()->whereIn('id', app(AssetComputerDepartmentBindingService::class)->departmentIds($actor, $write))->orderBy('id')->get();
         $allowed = $departments->pluck('id')->all(); $companies = $this->companies($actor);
         $cells = fn ($values) => ['cells' => array_map(fn ($v) => ['value' => (string) $v, 'type' => 'string'], $values)];

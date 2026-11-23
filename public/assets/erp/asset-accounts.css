@@ -52,3 +52,7 @@
     .hr-membership-controls { grid-template-columns: minmax(0,1fr); }
     .hr-modal .hr-membership { padding: 12px; }
 }
+
+.hr-employment-cell{min-width:180px;font-size:12px;line-height:1.9}.hr-employment-cell span{color:#71889d}.hr-modal .hr-permission-tools{display:flex;gap:8px;align-items:center;margin:14px 0;flex-wrap:wrap}.hr-modal .hr-permission-tools input{flex:1;min-width:180px}.hr-modal .hr-permission-group{border:1px solid #dce6ef;border-radius:6px;margin:12px 0;overflow:hidden}.hr-modal .hr-permission-group>summary{padding:12px 14px;background:#f3f7fb;color:#234a69;font-weight:600;cursor:pointer}.hr-modal .hr-permission-section h5{padding:8px 14px;margin:0;background:#fafbfd;color:#698197;font-weight:600}.hr-modal label.hr-permission{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:18px;margin:0;padding:10px 14px;border-bottom:1px solid #edf1f5;align-items:center}.hr-modal .hr-permission .form-control{max-width:none;width:100%;font-weight:400;margin:0}.hr-modal .hr-permission span{overflow-wrap:anywhere;line-height:1.6}.hr-modal .hr-permission [hidden]{display:none!important}@media(max-width:550px){.hr-modal label.hr-permission{grid-template-columns:minmax(0,1fr) 130px;gap:8px}}
+
+.hr-modal .hr-permission-group>summary{display:flex;align-items:center;gap:8px}.hr-modal .hr-permission-group>summary .fa{font-size:10px;color:#8ca1b4}.hr-modal .hr-permission-group[open]>summary .fa{transform:rotate(90deg)}@media(max-width:550px){.hr-modal .hr-permission-tools input{flex-basis:100%}}

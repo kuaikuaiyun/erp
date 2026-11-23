@@ -136,4 +136,41 @@ class AssetAccountTransferTest extends TestCase
         try{$service->create($rows,$this->hrActor,'initial-password');$this->fail('Must recheck occupied positions');}
         catch(ValidationException $e){$this->assertSame($before,AdminUser::count());$this->assertSame(0,AdminUser::whereIn('username',['first-new','second-new'])->count());}
     }
+
+    public function test_export_requires_both_department_and_company_scope_but_keeps_unassigned_accounts(): void
+    {
+        $assigned=$this->hrMember($this->teamA); $assigned->forceFill(['company_id'=>$this->company->id])->save();
+        $unassigned=$this->hrMember($this->teamA);
+        $other=$this->company->replicate(); $other->corp_id='other-export'; $other->login_slug='other-export'; $other->name='Unauthorized company'; $other->save();
+        $forbidden=$this->hrMember($this->teamA); $forbidden->forceFill(['company_id'=>$other->id])->save();
+        $url=$this->hrUrl.'/transfer/export';
+        $this->getJson($url.'?account_ids[]='.$forbidden->id)->assertUnprocessable();
+        $this->getJson($url.'?account_ids[]='.$assigned->id.'&account_ids[]='.$forbidden->id)->assertUnprocessable();
+        $response=$this->get($url)->assertOk();
+        $path=tempnam(sys_get_temp_dir(),'export-scope-'); file_put_contents($path,$response->streamedContent());
+        try {
+            $book=\PhpOffice\PhpSpreadsheet\IOFactory::load($path); $data=$book->getSheet(0)->toArray();
+            $this->assertSame([$assigned->username,$unassigned->username],array_column(array_slice($data,1),0));
+            $this->assertStringNotContainsString($other->name,json_encode($data)); $book->disconnectWorksheets();
+        } finally {unlink($path);}
+        DingTalkCompanyGrant::where('user_id',$this->hrActor->id)->delete();
+        $this->getJson($url.'?account_ids[]='.$assigned->id)->assertUnprocessable();
+        $this->get($url.'?account_ids[]='.$unassigned->id)->assertOk();
+        $this->hrActor=$this->hrOwner;
+        $this->get($url.'?account_ids[]='.$forbidden->id)->assertOk();
+    }
+
+    public function test_company_disabled_blocks_export_and_employment_dates_are_in_one_column(): void
+    {
+        $person=$this->hrMember($this->teamA);
+        $person->forceFill(['company_id'=>$this->company->id,'employment_status'=>'resigned','hired_at'=>'2026-11-01','resigned_at'=>'2026-11-23'])->save();
+        $page=$this->get($this->hrUrl)->assertOk()->assertSee('2026-11-01')->assertSee('2026-11-23')->assertSee('状态：');
+        preg_match('/<thead>.*?<\/thead>/s',$page->getContent(),$matches);
+        $this->assertStringNotContainsString('入职日期',$matches[0]);
+        $this->assertStringContainsString('在职状态',$matches[0]);
+        $this->company->forceFill(['enabled'=>false])->save();
+        $this->getJson($this->hrUrl.'/transfer/export?account_ids[]='.$person->id)->assertUnprocessable();
+        $this->hrActor=$this->hrOwner;
+        $this->get($this->hrUrl.'/transfer/export?account_ids[]='.$person->id)->assertOk();
+    }
 }
