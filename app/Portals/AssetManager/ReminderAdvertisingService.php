@@ -63,7 +63,7 @@ class ReminderAdvertisingService
         $date = $date->copy()->setTimezone('Asia/Shanghai')->startOfDay();
         $key = $date->toDateString();
         usort($rules, fn ($a, $b) => $a->department_id <=> $b->department_id);
-        $rosters = []; $current = []; $observedDates = [$key];
+        $rosters = []; $current = []; $observedDates = [$key]; $displayDepartments = [];
         // Only previously observed days contribute to the monthly total. Pure reminder
         // runs and recap snapshots are deliberately not used as historical evidence.
         $stored = $this->db()->table('asset_advertising_reminder_days')->whereIn('rule_id', array_column($rules, 'id'))
@@ -80,6 +80,7 @@ class ReminderAdvertisingService
             }
             $today = $this->roster($rule, $date);
             if ($persist) $this->capture($rule, $date, $today);
+            if ($key >= $rule->starts_on) $displayDepartments = array_merge($displayDepartments, $allowed);
             foreach ($today as $user) {
                 $rosters[$user['id'].'|'.$key] ??= $user;
                 $current[$user['id']] ??= $user;
@@ -103,12 +104,21 @@ class ReminderAdvertisingService
             }
         }
         $missing = array_diff_key($rosters, $submitted); $departments = []; $todayMissing = [];
+        // Display every selected membership, while keeping the stored roster and
+        // person/date counters unchanged. Load memberships in one batch, not per user.
+        $roles = config('admin.database.roles_table');
+        $memberships = $current === [] ? collect() : AdminUser::query()->select('id')->whereIn('id', array_keys($current))
+            ->with(['departments' => fn ($q) => $q->whereIn($roles.'.id', array_values(array_unique($displayDepartments)))])
+            ->get()->mapWithKeys(fn ($user) => [(int) $user->id => $user->departments->modelKeys()]);
         foreach ($current as $id => $user) {
             if (isset($submitted[$id.'|'.$key])) continue;
             $todayMissing[$id] = $user;
-            $departments[$user['department_id']][] = $user;
+            foreach ($memberships->get($id, []) as $department) {
+                $departments[$department][$id] = array_replace($user, ['department_id' => (int) $department]);
+            }
         }
         ksort($departments);
+        $departments = array_map('array_values', $departments);
         return ['date' => $key, 'from' => $from, 'count' => count($todayMissing),
             'monthly_count' => count($missing), 'monthly_people' => count(array_unique(array_column($missing, 'id'))),
             'departments' => $departments];

@@ -55,9 +55,47 @@ class AssetAdvertisingRemindersTest extends TestCase
         $service = app(ReminderAdvertisingService::class);
         $summary = $service->summary([$b, $a], now('Asia/Shanghai'), true);
         $this->assertSame(1, $summary['count']); $this->assertSame(1, $summary['monthly_count']); $this->assertSame(1, $summary['monthly_people']);
-        $this->assertSame([$this->teamA->id], array_keys($summary['departments']));
+        $this->assertSame([$this->teamA->id, $this->teamB->id], array_keys($summary['departments']));
+        foreach ($summary['departments'] as $members) $this->assertSame([$member->id], array_column($members, 'id'));
         $this->report($member); $this->report($member, 'fuzhuang');
-        $this->assertSame(0, $service->summary([$a, $b], now('Asia/Shanghai'), false)['count']);
+        $completed = $service->summary([$a, $b], now('Asia/Shanghai'), false);
+        $this->assertSame(0, $completed['count']); $this->assertSame([], $completed['departments']);
+    }
+
+    public function test_one_rule_lists_member_in_each_selected_department_but_not_unselected_memberships(): void
+    {
+        $rule = $this->reminderRule($this->reminderGroup(), ['department_ids' => [$this->teamA->id, $this->teamB->id]]);
+        $shared = $this->hrMember($this->teamA);
+        $shared->roles()->attach($this->teamB->id, ['position' => 'member']);
+        $shared->roles()->attach($this->outside->id, ['position' => 'member']);
+        $single = $this->hrMember($this->teamA);
+        $summary = $this->summary($rule, true);
+        $this->assertSame(2, $summary['count']); $this->assertSame(2, $summary['monthly_count']); $this->assertSame(2, $summary['monthly_people']);
+        $this->assertSame([$shared->id, $single->id], array_column($summary['departments'][$this->teamA->id], 'id'));
+        $this->assertSame([$shared->id], array_column($summary['departments'][$this->teamB->id], 'id'));
+        $this->assertArrayNotHasKey($this->outside->id, $summary['departments']);
+        $message = app(ReminderService::class)->build([$rule], now('Asia/Shanghai'), 1, false, true)['text'];
+        $this->assertStringContainsString('本次未提交人数：2人（按账号去重）', $message);
+        $this->assertStringContainsString('Team A（2人）', $message);
+        $this->assertStringContainsString('Team B（1人）', $message);
+        $this->report($shared, 'fuzhuang');
+        $completed = $this->summary($rule);
+        $this->assertSame(1, $completed['count']); $this->assertSame(1, $completed['monthly_count']);
+        $this->assertArrayNotHasKey($this->teamB->id, $completed['departments']);
+        $this->assertSame([$single->id], array_column($completed['departments'][$this->teamA->id], 'id'));
+    }
+
+    public function test_department_display_change_preserves_legacy_snapshots_and_unique_monthly_person_dates(): void
+    {
+        $rule = $this->reminderRule($this->reminderGroup(), ['department_ids' => [$this->teamA->id, $this->teamB->id]]);
+        $shared = $this->hrMember($this->teamA); $shared->roles()->attach($this->teamB->id, ['position' => 'member']);
+        $this->summary($rule, true);
+        $before = DB::table('asset_advertising_reminder_days')->where('data_date', '2026-11-19')->value('snapshot');
+        $this->travelTo(Carbon::parse('2026-11-20 10:00', 'Asia/Shanghai'));
+        $summary = $this->summary($rule, true);
+        $this->assertSame(1, $summary['count']); $this->assertSame(2, $summary['monthly_count']); $this->assertSame(1, $summary['monthly_people']);
+        $this->assertCount(2, $summary['departments']);
+        $this->assertSame($before, DB::table('asset_advertising_reminder_days')->where('data_date', '2026-11-19')->value('snapshot'));
     }
 
     public function test_only_active_employed_selected_members_are_expected_without_order_requirements(): void
