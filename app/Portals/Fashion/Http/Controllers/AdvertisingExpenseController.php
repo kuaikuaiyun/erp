@@ -4,8 +4,6 @@ namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
-use App\Models\AppLovinAccountStoreBinding;
-use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
 use App\Models\AssistantDomainStore;
@@ -14,6 +12,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Fashion\OperationProjectCatalog;
+use App\Services\AppLovinAccountStoreBindingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -125,6 +124,7 @@ class AdvertisingExpenseController extends Controller
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $selectedOperator,
             'operatorStores' => $operatorStores,
+            'appLovinStoreBindings' => app(AppLovinAccountStoreBindingService::class)->numberStoreMap(),
             'operationProject' => $this->project,
             'supportsMiscFeeRmb' => OperationProjectCatalog::supportsMiscFeeRmb($this->project['code']),
         ]);
@@ -296,9 +296,9 @@ class AdvertisingExpenseController extends Controller
             $report->adSpendEntries()->createMany($advertising);
         });
         foreach (collect($advertising)->where(fn ($row) => mb_strtolower(trim((string) ($row['media'] ?? ''))) === 'applovin') as $row) {
-            AppLovinAccountStoreBinding::query()->updateOrCreate([
-                'account_key' => AppLovinSpendScreenshot::accountKey((int) $performanceOwnerId, (string) $row['agency'], (string) $row['media'], (string) $row['account_name'], (string) $row['account_number']),
-            ], ['assistant_domain_store_id' => (int) $row['assistant_domain_store_id'], 'bound_by' => $user->getKey()]);
+            app(AppLovinAccountStoreBindingService::class)->bind(
+                (string) $row['account_number'], (int) $row['assistant_domain_store_id'], (int) $user->getKey()
+            );
         }
 
         $newPaths = collect($performance)->pluck('screenshot_path')->merge(collect($advertising)->pluck('screenshot_path'))->filter()->all();

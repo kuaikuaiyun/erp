@@ -185,6 +185,7 @@ class AppLovinSpendController extends Controller
                     'media' => (string) $row->media,
                     'account_name' => (string) $row->account_name,
                     'account_number' => trim((string) $row->account_number),
+                    'store_domain' => (string) ($row->store_domain ?: ''),
                     'actual_spend' => (float) $row->actual_spend_usd,
                 ]);
         })->groupBy(fn (array $row): string => implode('|', [
@@ -199,6 +200,7 @@ class AppLovinSpendController extends Controller
             return [
                 ...$first,
                 'account_name' => $name,
+                'store_domain' => (string) ($rows->pluck('store_domain')->filter()->last() ?: ''),
                 'account_key' => AppLovinSpendScreenshot::accountKey(
                     $first['operator_user_id'], $first['agency'], $first['media'], $name, $number
                 ),

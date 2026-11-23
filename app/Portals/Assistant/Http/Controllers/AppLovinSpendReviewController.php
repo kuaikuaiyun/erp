@@ -14,6 +14,7 @@ use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Fashion\OperationProjectCatalog;
+use App\Services\AppLovinAccountStoreBindingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -213,6 +214,7 @@ class AppLovinSpendReviewController extends Controller
                 return [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->operator_user_id, (string) ($row['agency'] ?? ''), (string) ($row['media_source'] ?? ''), (string) ($row['account_name'] ?? ''), (string) ($row['account_number'] ?? '')),
                     'operator_user_id' => (int) $report->operator_user_id,
+                    'account_number' => (string) ($row['account_number'] ?? ''),
                     'media' => mb_strtolower(trim((string) ($row['media_source'] ?? ''))),
                 ];
             }))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
@@ -225,13 +227,16 @@ class AppLovinSpendReviewController extends Controller
                 ->get()->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number),
                     'operator_user_id' => (int) $report->submitter_id,
+                    'account_number' => (string) $entry->account_number,
                     'media' => mb_strtolower(trim((string) $entry->media)),
                 ]))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
         }
         abort_unless($account, 403);
 
         if (empty($validated['store_id'])) {
-            AppLovinAccountStoreBinding::query()->where('account_key', $validated['account_key'])->delete();
+            app(AppLovinAccountStoreBindingService::class)->unbind(
+                (string) $account['account_number'], (string) $validated['account_key']
+            );
 
             return back()->with('success', '店铺域名绑定已取消。');
         }
@@ -243,9 +248,8 @@ class AppLovinSpendReviewController extends Controller
             })->exists();
         abort_unless($canBindStore, 422, '只能绑定当前或历史上归属该运营人员的店铺。');
 
-        AppLovinAccountStoreBinding::query()->updateOrCreate(
-            ['account_key' => $validated['account_key']],
-            ['assistant_domain_store_id' => (int) $validated['store_id'], 'bound_by' => $context['user']->getKey()]
+        app(AppLovinAccountStoreBindingService::class)->bind(
+            (string) $account['account_number'], (int) $validated['store_id'], (int) $context['user']->getKey()
         );
 
         return back()->with('success', '店铺域名绑定成功。');

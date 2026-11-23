@@ -7,8 +7,6 @@ use App\Models\AdminUser;
 use App\Models\AssistantAdvertisingMedia;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantDomainStore;
-use App\Models\AppLovinAccountStoreBinding;
-use App\Models\AppLovinSpendScreenshot;
 use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -18,6 +16,7 @@ use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\Operation\AdvertisingReportSpreadsheetService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use App\Services\DepartmentAuthorizationService;
+use App\Services\AppLovinAccountStoreBindingService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -528,6 +527,7 @@ class OperationReportController extends Controller
             'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds),
             'advertisingAgencyGroups' => $this->advertisingAgencyGroups($advertisingAssistantDepartmentIds),
             'operatorStores' => AssistantDomainStore::query()->where('owner_user_id', $operatorId)->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get(['id','domain','shop_name']),
+            'appLovinStoreBindings' => app(AppLovinAccountStoreBindingService::class)->numberStoreMap(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => false,
@@ -895,9 +895,9 @@ class OperationReportController extends Controller
         if ($editingReport) $editingReport->update($values);
         else OperationReport::query()->create($values);
         foreach (collect($ads)->where(fn ($row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin') as $row) {
-            AppLovinAccountStoreBinding::query()->updateOrCreate([
-                'account_key' => AppLovinSpendScreenshot::accountKey($operatorId, (string) $row['agency'], (string) $row['media_source'], (string) $row['account_name'], (string) $row['account_number']),
-            ], ['assistant_domain_store_id' => (int) $row['assistant_domain_store_id'], 'bound_by' => $user->getKey()]);
+            app(AppLovinAccountStoreBindingService::class)->bind(
+                (string) $row['account_number'], (int) $row['assistant_domain_store_id'], (int) $user->getKey()
+            );
         }
 
         $successMessage = $supplementingExisting
