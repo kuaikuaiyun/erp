@@ -1,5 +1,5 @@
 @extends('portal.layout')
-@section('page_title', $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析')
+@section('page_title', $reportProjectLabel.'店铺分析')
 @push('styles')
 <style>
 .fashion-filter-grid:before,.fashion-filter-grid:after{display:none!important;content:none!important}
@@ -11,7 +11,7 @@
 @php
 $sortUrl=function($field)use($filters,$reportProject){$direction=$filters['sort']===$field&&$filters['direction']==='desc'?'asc':'desc';return route('assistant.fashion-store-analytics.index',array_merge(request()->except('page'),['project_code'=>$reportProject['code'],'sort'=>$field,'direction'=>$direction]));};
 @endphp
-<section class="content-header"><h1>{{ $reportProject['code'] === 'danbao-general' ? '单包百货店铺分析' : '单包服装店铺分析' }} <small>统计对应项目 XShoppy、Shopline 店铺订单与营业额</small></h1></section>
+<section class="content-header"><h1>{{ $reportProjectLabel }}店铺分析 <small>统计对应项目 XShoppy、Shopline 店铺订单与营业额</small></h1></section>
 <section class="content">
 <div class="fashion-analytics-summary">
 <div class="fashion-kpi"><span>店铺数</span><strong>{{ number_format($summary['stores_count']) }}</strong></div>

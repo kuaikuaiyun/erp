@@ -35,7 +35,7 @@ class FashionStoreAnalyticsController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
         $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
         $projectCode = (string) $request->query('project_code', 'fuzhuang');
-        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
 
         $filters = $this->filters($request);
@@ -81,6 +81,7 @@ class FashionStoreAnalyticsController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'stores' => $stores, 'filters' => $filters,
             'reportProject' => $project,
+            'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
             'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
@@ -97,7 +98,7 @@ class FashionStoreAnalyticsController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
         $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
         $projectCode = (string) $request->query('project_code', 'fuzhuang');
-        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
         $filters = $this->filters($request);
         $groupBy = in_array($request->input('group_by'), ['store', 'date'], true) ? (string) $request->input('group_by') : 'store';
@@ -106,7 +107,7 @@ class FashionStoreAnalyticsController extends Controller
             $this->stores($context['user'], $filters, $project),
             $filters,
             $groupBy,
-            $projectCode === 'danbao-general' ? '单包百货' : '单包服装',
+            OperationProjectCatalog::shortName($projectCode),
         );
     }
 

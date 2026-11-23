@@ -49,7 +49,7 @@ class FashionOperationReportController extends Controller
             $this->authorization->assertAssistantPortal($context['portal']);
         }
         $projectCode = (string) $request->query('project_code', 'fuzhuang');
-        abort_unless(in_array($projectCode, ['fuzhuang', 'danbao-general'], true), 404);
+        abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
         $visibleDepartmentIds = $isDashboard
             ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
@@ -394,6 +394,7 @@ class FashionOperationReportController extends Controller
                 ? 'operation-dashboard.fashion-operation-reports.index'
                 : 'assistant.fashion-operation-reports.index',
             'reportProject' => $project,
+            'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
                 'exclude_resigned' => $excludeResigned, 'personal_range' => $personalRangeMode, 'profit_coefficient' => $profitCoefficient,

@@ -99,4 +99,15 @@ final class OperationProjectCatalog
             $project['store_projects'] ?? [$project['name']]
         ))));
     }
+
+    public static function shortName(string $code): string
+    {
+        return match ($code) {
+            'fuzhuang' => '单包服装',
+            'danbao-general' => '单包百货',
+            'baokuan-fashion' => '爆款服装',
+            'baokuan-general' => '爆款百货',
+            default => self::get($code)['name'],
+        };
+    }
 }
