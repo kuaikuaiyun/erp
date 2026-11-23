@@ -27,6 +27,13 @@ Route::prefix('asset-manager/accounts')->name('asset-manager.accounts.')->group(
     $ding = AccountDingTalkController::class;
     Route::get('/', [$accounts, 'index'])->name('index');
     Route::get('/options', [$accounts, 'options'])->name('options');
+    $transfer = \App\Portals\AssetManager\Http\Controllers\AccountTransferController::class;
+    Route::get('/transfer/options', [$transfer, 'options'])->name('transfer.options');
+    Route::get('/transfer/template', [$transfer, 'template'])->name('transfer.template');
+    Route::get('/transfer/export', [$transfer, 'export'])->name('transfer.export');
+    Route::post('/transfer/preview', [$transfer, 'preview'])->middleware('throttle:10,1')->name('transfer.preview');
+    Route::post('/transfer/import', [$transfer, 'commit'])->middleware('throttle:10,1')->name('transfer.import');
+    Route::post('/transfer/company', [$transfer, 'assign'])->middleware('throttle:10,1')->name('transfer.company');
     Route::get('/dingtalk/directory', [$ding, 'directory'])->middleware('throttle:60,1')->name('dingtalk.directory');
     Route::get('/dingtalk/audits', [$ding, 'audits'])->name('dingtalk.audits');
     Route::get('/dingtalk/company-grants', [$ding, 'grants'])->name('dingtalk.grants');
@@ -40,6 +47,13 @@ Route::prefix('asset-manager/accounts')->name('asset-manager.accounts.')->group(
     Route::get('/{account}', [$accounts, 'show'])->whereNumber('account')->name('show');
     Route::put('/{account}', [$accounts, 'update'])->whereNumber('account')->name('update');
     Route::delete('/{account}', [$accounts, 'destroy'])->whereNumber('account')->name('destroy');
+});
+
+Route::prefix('asset-manager/departments')->name('asset-manager.departments.')->controller(\App\Portals\AssetManager\Http\Controllers\DepartmentController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::get('/{department}', 'show')->whereNumber('department')->name('show');
+    Route::put('/{department}', 'update')->whereNumber('department')->name('update');
+    Route::get('/{department}/members', 'members')->whereNumber('department')->name('members');
 });
 
 Route::prefix('asset-manager/computer-department-bindings')->name('asset-manager.computer-department-bindings.')->controller(ComputerDepartmentBindingController::class)->group(function () {

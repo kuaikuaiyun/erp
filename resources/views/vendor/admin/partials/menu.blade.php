@@ -9,6 +9,9 @@
         if ($adminPrefix !== '' && str_starts_with($uri, $adminPrefix.'/')) {
             $uri = substr($uri, strlen($adminPrefix) + 1);
         }
+        if ($uri === 'configuration/frontend-list-template' && (int) $administrator->id !== 1) {
+            return false;
+        }
         $isManagementMenu = in_array($permission, ['organization.accounts', 'organization.departments', 'auth.management'], true);
         foreach (['organization/accounts', 'organization/departments', 'organization/department-permissions', 'auth/users', 'auth/roles', 'auth/permissions', 'auth/menu', 'auth/logs'] as $managementPath) {
             if ($uri === $managementPath || str_starts_with($uri, $managementPath.'/')) {

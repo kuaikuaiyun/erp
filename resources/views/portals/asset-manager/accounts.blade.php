@@ -9,6 +9,7 @@
     $lastPage = null;
 @endphp
 @push('styles')
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-reminders.css') }}?v=20261123-1">
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <link rel="stylesheet" href="{{ asset('css/dingtalk-bindings.css') }}?v=20261116-5">
 <link rel="stylesheet" href="{{ asset('css/erp-account-labels.css') }}?v=20261116-1">
@@ -47,18 +48,22 @@
         @if($owner)
         <button class="btn btn-default btn-sm" type="button" data-ding-grants>{{ __('dingtalk.company.assign') }}</button>
         @endif
+        <button type="button" class="btn btn-default btn-sm" data-hr-transfer="export">{{ __('asset_accounts.transfer.export') }}</button>
+        <button type="button" class="btn btn-default btn-sm" data-hr-transfer="selected">{{ __('asset_accounts.transfer.export_selected') }}</button>
         @if($canManage)
+        <button type="button" class="btn btn-default btn-sm" data-hr-transfer="import">{{ __('asset_accounts.transfer.import') }}</button>
+        <button type="button" class="btn btn-default btn-sm" data-hr-transfer="company">{{ __('asset_accounts.transfer.company') }}</button>
         <button class="btn btn-primary btn-sm" id="hr-add" type="button"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('asset_accounts.add') }}</button>
         @endif
     </div></div>
         <div class="table-responsive"><table class="table table-bordered table-hover hr-table"><thead><tr>
-            <th><a href="{{ request()->fullUrlWithQuery(['direction'=>($filters['direction']??'desc')==='asc'?'desc':'asc','page'=>1]) }}">{{ __('asset_accounts.id') }} <i class="fa fa-sort" aria-hidden="true"></i></a></th>
-            @foreach(['username','name','hired_at','employment_status','status','memberships','binding','updated_at','actions'] as $heading)
+            <th><input type="checkbox" id="hr-select-all" aria-label="{{ __('asset_accounts.transfer.select_all') }}"></th><th><a href="{{ request()->fullUrlWithQuery(['direction'=>($filters['direction']??'desc')==='asc'?'desc':'asc','page'=>1]) }}">{{ __('asset_accounts.id') }} <i class="fa fa-sort" aria-hidden="true"></i></a></th>
+            @foreach(['username','name','company','hired_at','employment_status','status','memberships','binding','updated_at','actions'] as $heading)
             <th>{{ __('asset_accounts.'.$heading) }}</th>
             @endforeach
         </tr></thead><tbody>
             @forelse($accounts as $account)
-            <tr><td>{{ $account['id'] }}</td><td>{{ $account['username'] }}</td><td>{{ $account['name'] }} @if($account['administrator'])<span class="label label-info">{{ __('asset_accounts.system') }}</span>@endif</td><td>{{ $account['hired_at'] ?? '—' }}</td><td>{{ __('asset_accounts.'.($account['employment_status']==='resigned' ? 'resigned':'employed')) }} @if($account['resigned_at'])<small class="hr-date">{{ $account['resigned_at'] }}</small>@endif</td><td><span class="label {{ $account['status'] ? 'label-success':'label-default' }}">{{ __($account['status'] ? 'asset_accounts.enabled':'asset_accounts.disabled') }}</span></td>
+            <tr><td><input type="checkbox" data-hr-select="{{ $account['id'] }}" data-writable="{{ $account['writable'] ? 1 : 0 }}" aria-label="{{ $account['username'] }}"></td><td>{{ $account['id'] }}</td><td>{{ $account['username'] }}</td><td>{{ $account['name'] }} @if($account['administrator'])<span class="label label-info">{{ __('asset_accounts.system') }}</span>@endif</td><td>{{ $account['company'] }}</td><td>{{ $account['hired_at'] ?? '—' }}</td><td>{{ __('asset_accounts.'.($account['employment_status']==='resigned' ? 'resigned':'employed')) }} @if($account['resigned_at'])<small class="hr-date">{{ $account['resigned_at'] }}</small>@endif</td><td><span class="label {{ $account['status'] ? 'label-success':'label-default' }}">{{ __($account['status'] ? 'asset_accounts.enabled':'asset_accounts.disabled') }}</span></td>
                 <td>
                     @forelse($account['memberships'] as $membership)
                     <span class="hr-tag">{{ $membership['department_name'] }} · {{ __('asset_accounts.'.$membership['position']) }}</span>
@@ -88,7 +93,7 @@
                 </td>
             </tr>
             @empty
-            <tr><td colspan="10" class="hr-empty">{{ __('asset_accounts.empty') }}</td></tr>
+            <tr><td colspan="12" class="hr-empty">{{ __('asset_accounts.empty') }}</td></tr>
             @endforelse
         </tbody></table></div>
     </div>
@@ -113,6 +118,7 @@
     <div class="modal-body" id="hr-modal-body"><div class="alert alert-danger" id="hr-error" role="alert" hidden></div><div id="hr-fields"></div></div>
     <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('asset_accounts.close') }}</button><button type="submit" class="btn btn-primary" id="hr-save">{{ __('asset_accounts.save') }}</button></div>
 </form></div></div></div>
+<dialog id="hr-transfer-dialog" class="ar-dialog" aria-labelledby="hr-transfer-title"><form id="hr-transfer-form" novalidate data-loading="off"><header><h3 id="hr-transfer-title"></h3><button type="button" data-transfer-close class="close" aria-label="{{ __('asset_accounts.close') }}">&times;</button></header><div class="ar-modal-body"><div id="hr-transfer-error" class="alert alert-danger" hidden></div><div id="hr-transfer-fields"></div></div><footer><button type="button" data-transfer-close class="btn btn-default">{{ __('asset_accounts.close') }}</button><button type="submit" id="hr-transfer-save" class="btn btn-primary">{{ __('asset_accounts.save') }}</button></footer></form></dialog>
 @include('admin.organization.dingtalk-modals',compact('owner','options','messages'))
 @endsection
 @push('scripts')
@@ -122,4 +128,5 @@
 <script src="{{ asset('js/dingtalk-directory.js') }}?v=20261116-2"></script>
 <script src="{{ asset('js/dingtalk-bindings.js') }}?v=20261116-2"></script>
 <script src="{{ asset('assets/erp/asset-accounts.js') }}?v=20261118-2"></script>
+<script src="{{ asset('assets/erp/asset-account-transfer.js') }}?v=20261123-1"></script>
 @endpush

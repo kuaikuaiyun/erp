@@ -38,6 +38,7 @@ class AccountService
         ])->values()->all();
 
         return [
+            'company_id' => $account->company_id, 'company' => $account->company ? $account->company->name.($account->company->trashed() ? __('organization.accounts.company_archived') : (!$account->company->enabled ? __('organization.accounts.company_disabled') : '')) : __('asset_accounts.no_company'),
             'id' => $account->id, 'username' => $account->username, 'name' => $account->name,
             'hired_at' => $account->hired_at?->format('Y-m-d'), 'resigned_at' => $account->resigned_at?->format('Y-m-d'),
             'employment_status' => $account->employment_status, 'status' => (int) $account->status,

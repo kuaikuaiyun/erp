@@ -45,7 +45,7 @@ class AccountController extends Controller
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
             'direction' => ['nullable', Rule::in(['asc', 'desc'])],
         ], __('asset_accounts.validation'), __('asset_accounts.attributes'));
-        $query = $this->authorization->accounts($c['user'])->with(['roles', 'dingTalkBindings.identity']);
+        $query = $this->authorization->accounts($c['user'])->with(['roles', 'company', 'dingTalkBindings.identity']);
         if ($request->filled('search')) {
             $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['search']).'%';
             $query->where(fn ($q) => $q->whereRaw("name LIKE ? ESCAPE '!'", [$term])->orWhereRaw("username LIKE ? ESCAPE '!'", [$term]));

@@ -1,6 +1,20 @@
 <?php
 
 return [
+    'company' => '归属企业', 'no_company' => '未归纳企业',
+    'department_title' => '部门管理', 'department_subtitle' => '仅可编辑已授权部门，不提供新增、删除及页面权限配置',
+    'department_search' => '部门名称或编码',
+    'department_saved' => '部门信息已保存。', 'department_members' => '部门成员',
+    'department_fields' => ['name'=>'部门名称','short_name'=>'简称','slug'=>'部门编码','parent_id'=>'上级部门','parent_name'=>'上级部门','sort'=>'排序','members'=>'成员数'],
+    'transfer' => [
+        'import'=>'批量导入账号', 'export'=>'导出筛选结果', 'export_selected'=>'导出勾选账号', 'company'=>'批量归纳企业',
+        'select_all'=>'全选本页', 'select_first'=>'请先勾选账号。', 'scope_error'=>'只能使用已授权部门和企业；部门编码及岗位须按模板填写。',
+        'selection_error'=>'所选账号不存在或超出可管理范围，请刷新后重选。', 'template'=>'下载导入模板', 'file'=>'Excel 文件（最多 500 条，5MB）',
+        'line'=>'行号', 'preview'=>'预览并校验', 'commit'=>'确认导入', 'password'=>'新账号统一初始密码（至少 8 位）',
+        'hint'=>'仅新增账号，不覆盖已有账号。先下载模板，按授权部门编码填写；预览有效期为 10 分钟，确认时重新校验权限和岗位名额。',
+        'company_hint'=>'修改所选账号的企业归属，会同步影响主后台；部门任职与钉钉绑定保持不变。',
+        'preview_ok'=>'校验通过，确认导入以下账号：', 'confirm_company'=>'确认将所选账号归纳到此企业？', 'choose_company'=>'请选择企业',
+    ],
     'basic_information' => '基本资料', 'employment_information' => '入离职与账号状态', 'account_security' => '账号密码',
     'change_password' => '修改密码', 'cancel_password_change' => '取消修改密码',
     'department_search' => '输入部门名称搜索', 'no_matches' => '没有匹配的部门',
@@ -29,6 +43,6 @@ return [
     'previous' => '上一页', 'next' => '下一页', 'permissions' => '页面权限', 'inherit' => '继承部门授权', 'allow' => '允许', 'deny' => '拒绝',
     'permissions_hint' => '仅超级管理员可配置普通账号的页面权限；此操作同步影响总后台。',
     'install_required' => '请先创建编码为 asset-manager 的系统，再安装人事账号管理菜单。',
-    'attributes' => ['username' => '登录账号', 'name' => '姓名', 'password' => '密码', 'status' => '账号状态', 'employment_status' => '在职状态', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'memberships' => '部门任职', 'memberships.*.department_id' => '所属部门', 'memberships.*.position' => '部门岗位', 'permissions' => '页面权限', 'search' => '搜索内容', 'per_page' => '每页条数', 'page' => '页码', 'department_ids' => '筛选部门', 'department_ids.*' => '筛选部门'],
-    'validation' => ['required' => ':attribute不能为空。', 'string' => ':attribute必须为文字。', 'integer' => ':attribute必须为有效编号。', 'array' => ':attribute必须为列表。', 'boolean' => ':attribute状态无效。', 'in' => ':attribute选项无效。', 'distinct' => ':attribute不能重复。', 'date_format' => ':attribute格式应为 :format。', 'max.string' => ':attribute最多 :max 字。', 'max.array' => ':attribute最多 :max 项。', 'min.string' => ':attribute至少 :min 位。', 'min.numeric' => ':attribute不能小于 :min。', 'confirmed' => '两次输入的密码不一致。', 'unique' => '该登录账号已存在。', 'present' => '请提交:attribute。'],
+    'attributes' => ['company_id'=>'归属企业','account_ids'=>'所选账号','file'=>'Excel 文件','token'=>'预览凭证','username' => '登录账号', 'name' => '姓名', 'password' => '密码', 'status' => '账号状态', 'employment_status' => '在职状态', 'hired_at' => '入职日期', 'resigned_at' => '离职日期', 'memberships' => '部门任职', 'memberships.*.department_id' => '所属部门', 'memberships.*.position' => '部门岗位', 'permissions' => '页面权限', 'search' => '搜索内容', 'per_page' => '每页条数', 'page' => '页码', 'department_ids' => '筛选部门', 'department_ids.*' => '筛选部门'],
+    'validation' => ['prohibited'=>':attribute不可修改。','min.array'=>':attribute至少选择 :min 项。','max.numeric'=>':attribute不能超过 :max。','max.file'=>':attribute不能超过 :max KB。','mimes'=>':attribute格式应为 :values。','file'=>':attribute必须为文件。','required' => ':attribute不能为空。', 'string' => ':attribute必须为文字。', 'integer' => ':attribute必须为有效编号。', 'array' => ':attribute必须为列表。', 'boolean' => ':attribute状态无效。', 'in' => ':attribute选项无效。', 'distinct' => ':attribute不能重复。', 'date_format' => ':attribute格式应为 :format。', 'max.string' => ':attribute最多 :max 字。', 'max.array' => ':attribute最多 :max 项。', 'min.string' => ':attribute至少 :min 位。', 'min.numeric' => ':attribute不能小于 :min。', 'confirmed' => '两次输入的密码不一致。', 'unique' => '该登录账号已存在。', 'present' => '请提交:attribute。'],
 ];

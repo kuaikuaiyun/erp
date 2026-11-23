@@ -88,6 +88,7 @@ Route::group([
     $router->post('configuration/captcha/reveal/{secret}', [CaptchaController::class, 'revealSecret'])->where('secret', 'turnstile|recaptcha_v2|tencent_captcha_app_secret_key|tencent_captcha_secret_id|tencent_captcha_secret_key')->middleware('admin.permission:check,configuration.captcha')->name('configuration.captcha.reveal');
     $router->get('configuration/watermark', [WatermarkController::class, 'index'])->middleware('admin.permission:check,configuration.watermark')->name('configuration.watermark');
     $router->post('configuration/watermark', [WatermarkController::class, 'save'])->middleware('admin.permission:check,configuration.watermark')->name('configuration.watermark.save');
+    $router->get('configuration/frontend-list-template', [\App\Admin\Controllers\ConfigurationCenter\FrontendListTemplateController::class, 'index'])->middleware(RequireSystemAdministrator::class)->name('configuration.frontend-list-template');
     $router->get('configuration/basic', [BasicConfigurationController::class, 'index'])->middleware('admin.permission:check,configuration.basic')->name('configuration.basic');
     $router->post('configuration/basic', [BasicConfigurationController::class, 'save'])->middleware('admin.permission:check,configuration.basic')->name('configuration.basic.save');
 });
