@@ -120,14 +120,13 @@ class FashionOperationReportController extends Controller
         }
         // Keep the assistant report on the exact same time basis as the fashion
         // performance report. The legacy paid_at_utc column stores a
-        // China-normalized payment time for both XShoppy and Shopline orders.
+        // China-normalized payment time for orders from every supported builder.
         $storageFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)
             ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $storageTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)
             ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
 
         $stores = AssistantDomainStore::query()
-            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
             ->whereIn(\DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
             ->with('ownerUser.departments')
             ->orderBy('shop_name')->get();
@@ -181,16 +180,21 @@ class FashionOperationReportController extends Controller
             $fashionDepartmentIds = $fashionDepartmentIds->merge($childIds)->unique()->values();
         } while ($fashionDepartmentIds->count() > $before);
         */
+        $storeIdsByPlatform = $stores->groupBy(function (AssistantDomainStore $store): string {
+            $platform = mb_strtolower(trim((string) $store->site_builder));
+
+            return $platform === 'xshopy' ? 'xshoppy' : $platform;
+        })->filter(fn ($platformStores, string $platform): bool => $platform !== '');
         $ordersQuery = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
-            ->where(function ($platform) use ($stores): void {
-                $platform->where(function ($xshoppy) use ($stores): void {
-                    $xshoppy->where('source_platform', 'xshoppy')
-                        ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true))->pluck('id'));
-                })->orWhere(function ($shopline) use ($stores): void {
-                    $shopline->where('source_platform', 'shopline')
-                        ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => mb_strtolower(trim((string) $store->site_builder)) === 'shopline')->pluck('id'));
-                });
+            ->where(function ($platformQuery) use ($storeIdsByPlatform): void {
+                foreach ($storeIdsByPlatform as $platform => $platformStores) {
+                    $platformQuery->orWhere(function ($matchingPlatform) use ($platform, $platformStores): void {
+                        $matchingPlatform->whereRaw('LOWER(TRIM(source_platform)) = ?', [$platform])
+                            ->whereIn('assistant_domain_store_id', $platformStores->pluck('id'))
+                            ->when(in_array($platform, ['nbc', 'shopyy'], true), fn ($paid) => $paid->where('payment_status', '230'));
+                    });
+                }
             })
             ->whereNotNull('paid_at_utc')
             ->whereBetween('paid_at_utc', [$storageFrom, $storageTo]);
@@ -246,8 +250,16 @@ class FashionOperationReportController extends Controller
             $storeRows = $operatorStores->map(function (AssistantDomainStore $store) use ($orderMetrics): array {
                 $metric = $orderMetrics->get($store->getKey());
 
+                $builder = mb_strtolower(trim((string) $store->site_builder));
+
                 return ['name' => (string) ($store->shop_name ?: $store->domain), 'domain' => (string) $store->domain,
-                    'site_builder' => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true) ? 'XShoppy' : 'Shopline',
+                    'site_builder' => match ($builder) {
+                        'xshoppy', 'xshopy' => 'XShoppy',
+                        'shopline' => 'Shopline',
+                        'nbc' => 'NBC',
+                        'shopyy' => 'ShopYY',
+                        default => (string) ($store->site_builder ?: '未填写'),
+                    },
                     'orders' => (int) ($metric->order_count ?? 0), 'revenue' => (float) ($metric->revenue ?? 0)];
             })->values();
             $orderCount = (int) $storeRows->sum('orders');
