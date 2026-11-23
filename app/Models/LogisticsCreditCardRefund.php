@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsCreditCardRefund extends Model
 {
@@ -27,6 +28,9 @@ class LogisticsCreditCardRefund extends Model
             'refund_amount_usd' => 'decimal:4',
             'occurred_at' => 'datetime',
             'last_imported_at' => 'datetime',
+            'subscription_cancelled' => 'boolean',
+            'add_on_cancelled' => 'boolean',
+            'first_handled_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
@@ -35,5 +39,10 @@ class LogisticsCreditCardRefund extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(LogisticsOrder::class, 'logistics_order_id');
+    }
+
+    public function operations(): HasMany
+    {
+        return $this->hasMany(LogisticsCreditCardRefundOperation::class, 'logistics_credit_card_refund_id')->orderByDesc('id');
     }
 }

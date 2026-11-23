@@ -10,9 +10,26 @@
         var dialog = root.querySelector('[data-flt-dialog]');
         var editor = root.querySelector('[data-flt-editor]');
         var region = root.querySelector('[data-flt-region]');
+        var tableScroll = root.querySelector('.flt-table-scroll'), emptyHost = root.querySelector('[data-flt-empty-host]');
+        var emptyObserver = null;
         var busy = false, timer = null, destroyed = false, locked = new Map();
         var records = [], filtered = [], selected = new Set(), pickers = {};
         var page = 1, size = 50, applied = {}, action = null, currentId = null, nextId = 121, pendingDeleteIds = [], importFile = null;
+        var baseline = '';
+        var recordLoadTimer = null, recordLoadVersion = 0, recordState = 'closed';
+        root.querySelectorAll('.flt-discard-dialog').forEach(function (stale) { stale.remove(); });
+        var discardDialog = node('dialog', 'flt-dialog flt-discard-dialog');
+        discardDialog.setAttribute('aria-labelledby', 'flt-discard-title');
+        var discardHeader = node('header'), discardTitle = node('h3', '', t('discard_title'));
+        discardTitle.id = 'flt-discard-title'; discardHeader.appendChild(discardTitle);
+        var discardBody = node('div', 'flt-dialog-content', t('discard_hint'));
+        var discardFooter = node('footer'), continueButton = node('button', 'flt-btn', t('continue_editing'));
+        var discardButton = node('button', 'flt-btn flt-danger', t('discard_confirm'));
+        continueButton.type = discardButton.type = 'button'; discardFooter.append(continueButton, discardButton);
+        discardDialog.append(discardHeader, discardBody, discardFooter); root.appendChild(discardDialog);
+        continueButton.onclick = function () { discardDialog.close(); };
+        discardButton.onclick = function () { close(); };
+        discardDialog.addEventListener('cancel', function (event) { event.preventDefault(); event.stopPropagation(); discardDialog.close(); });
 
         function t(key, values) {
             return String(messages[key] || key).replace(/:([a-z_]+)/g, function (match, name) {
@@ -84,11 +101,15 @@
                 };
             });
         }
-        function makePicker(host) {
-            var key = host.dataset.fltPicker, multi = host.dataset.multiple === '1';
-            var values = new Set(), choices = messages[key];
+        function makePicker(host, config) {
+            config = config || {};
+            var key = config.key || host.dataset.fltPicker, multi = host.dataset.multiple === '1';
+            var source = config.choices || messages[key];
+            var choices = Array.isArray(source) ? source.map(function (value) { return { value: value, label: value }; }) : Object.entries(source).map(function (entry) { return { value: entry[0], label: entry[1] }; });
+            var values = new Set(config.backing && config.backing.value ? [config.backing.value] : []);
             var details = node('details', 'flt-picker'), summary = node('summary', '', t('all'));
-            summary.setAttribute('aria-labelledby', host.getAttribute('aria-labelledby'));
+            summary.id = 'flt-picker-summary-' + key;
+            summary.setAttribute('aria-labelledby', host.getAttribute('aria-labelledby') + ' ' + summary.id);
             var panel = node('div', 'flt-picker-panel'), options = node('div', 'flt-picker-options');
             var search = null;
             if (host.dataset.searchable === '1') {
@@ -97,39 +118,57 @@
                 search.addEventListener('input', drawOptions);
             }
             function refreshLabel() {
-                summary.textContent = values.size === 0 ? t('all') : (multi ? t('selected_options', { names: Array.from(values).join('、'), count: values.size }) : Array.from(values)[0]);
-                summary.title = Array.from(values).join('、') || t('all');
+                var labels = Array.from(values).map(function (value) { return choices.find(function (choice) { return choice.value === value; })?.label || value; });
+                summary.textContent = labels.length === 0 ? (config.placeholder || t('all')) : (multi ? t('selected_options', { names: labels.join('、'), count: labels.length }) : labels[0]);
+                summary.title = labels.join('、') || config.placeholder || t('all');
+                if (config.backing) config.backing.value = Array.from(values)[0] || '';
             }
             function drawOptions() {
                 options.replaceChildren();
-                var visible = choices.filter(function (choice) { return !search || choice.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()); });
+                var available = config.showAll ? [{ value: '', label: t('all') }].concat(choices) : choices;
+                var visible = available.filter(function (choice) { return !search || choice.label.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()); });
                 if (!visible.length) options.appendChild(node('p', '', t('no_options')));
                 visible.forEach(function (choice) {
                     var label = node('label'), input = node('input');
                     input.type = multi ? 'checkbox' : 'radio'; input.name = 'flt-picker-' + key;
-                    input.value = choice; input.checked = values.has(choice);
+                    input.value = choice.value; input.checked = choice.value === '' ? !values.size : values.has(choice.value);
                     input.addEventListener('change', function () {
                         if (!multi) values.clear();
-                        if (input.checked) values.add(choice); else values.delete(choice);
+                        if (input.checked && choice.value !== '') values.add(choice.value); else values.delete(choice.value);
                         refreshLabel();
+                        if (config.backing) { if (editor.contains(config.backing)) fieldError(config.backing, ''); summary.setAttribute('aria-invalid', 'false'); }
                         if (!multi) { details.open = false; summary.focus(); }
                     });
-                    label.append(input, node('span', '', choice)); options.appendChild(label);
+                    label.append(input, node('span', '', choice.label)); options.appendChild(label);
                 });
             }
             var clear = node('button', 'flt-picker-clear', t('clear_choice')); clear.type = 'button';
             clear.onclick = function () { values.clear(); if (search) search.value = ''; refreshLabel(); drawOptions(); };
-            panel.append(options, clear); details.append(summary, panel); host.replaceChildren(details);
+            panel.append(options); if (config.allowClear !== false && !config.showAll) panel.append(clear);
+            details.append(summary, panel); host.replaceChildren(details);
+            function positionPanel() {
+                if (!details.open || !dialog.contains(details)) return;
+                var anchor = summary.getBoundingClientRect(), bounds = dialog.getBoundingClientRect();
+                var bottom = Math.min(innerHeight - 10, bounds.bottom - 8), top = Math.max(10, bounds.top + 8);
+                var below = bottom - anchor.bottom - 6, above = anchor.top - top - 6;
+                var height = Math.min(250, Math.max(below, above));
+                panel.style.position = 'fixed'; panel.style.width = Math.min(anchor.width, innerWidth - 24) + 'px';
+                panel.style.left = Math.max(12, Math.min(anchor.left, innerWidth - anchor.width - 12)) + 'px'; panel.style.right = 'auto';
+                panel.style.maxHeight = Math.max(80, height) + 'px'; panel.style.overflowY = 'auto';
+                panel.style.top = (below >= Math.min(250, panel.scrollHeight) || below >= above ? anchor.bottom + 6 : Math.max(top, anchor.top - Math.min(panel.scrollHeight, height) - 6)) + 'px';
+            }
             details.addEventListener('toggle', function () {
                 if (details.open) {
-                    Object.values(pickers).forEach(function (other) { if (other.details !== details) other.details.open = false; });
-                    drawOptions(); if (search) search.focus();
+                    root.querySelectorAll('.flt-picker').forEach(function (other) { if (other !== details) other.open = false; });
+                    drawOptions(); positionPanel(); if (search) search.focus();
                 }
             });
-            drawOptions();
-            return { details: details, values: values, clear: function () { values.clear(); if (search) search.value = ''; details.open = false; refreshLabel(); drawOptions(); } };
+            drawOptions(); refreshLabel();
+            return { details: details, summary: summary, position: positionPanel, values: values, clear: function () { values.clear(); if (search) search.value = ''; details.open = false; refreshLabel(); drawOptions(); } };
         }
-        root.querySelectorAll('[data-flt-picker]').forEach(function (host) { pickers[host.dataset.fltPicker] = makePicker(host); });
+        root.querySelectorAll('[data-flt-picker]').forEach(function (host) {
+            pickers[host.dataset.fltPicker] = makePicker(host, host.dataset.fltPicker === 'statuses' ? { backing: form.elements.status, showAll: true } : {});
+        });
 
         function apply() {
             var keyword = (applied.keyword || '').toLocaleLowerCase();
@@ -146,6 +185,9 @@
         }
         function visibleRows() { return filtered.slice((page - 1) * size, page * size); }
         function updateSelection() {
+            var stats = { all: filtered.length, active: 0, pending: 0, disabled: 0, selected: selected.size };
+            filtered.forEach(function (row) { if (Object.prototype.hasOwnProperty.call(messages.statuses, row.status)) stats[row.status]++; });
+            root.querySelectorAll('[data-flt-stat]').forEach(function (value) { value.textContent = stats[value.dataset.fltStat]; });
             var visible = visibleRows(), count = visible.filter(function (row) { return selected.has(row.id); }).length;
             var all = root.querySelector('[data-flt-all]');
             all.checked = visible.length > 0 && count === visible.length;
@@ -157,6 +199,11 @@
                 input.checked = selected.has(Number(input.dataset.fltCheckId));
                 input.closest('tr').dataset.selected = input.checked ? '1' : '0';
             });
+        }
+        function syncEmptyLayout() {
+            if (emptyHost.hidden) return;
+            emptyHost.style.width = tableScroll.querySelector('table').getBoundingClientRect().width + 'px';
+            root.querySelector('[data-flt-empty]').style.width = tableScroll.clientWidth + 'px';
         }
         function render() {
             body.replaceChildren();
@@ -177,6 +224,10 @@
                 tr.appendChild(actions); body.appendChild(tr);
             });
             root.querySelector('[data-flt-empty]').hidden = filtered.length !== 0;
+            emptyHost.hidden = filtered.length !== 0;
+            tableScroll.classList.toggle('is-empty', filtered.length === 0);
+            if (!filtered.length) { tableScroll.scrollLeft = 0; tableScroll.scrollTop = 0; }
+            syncEmptyLayout();
             root.querySelector('[data-flt-total]').textContent = t('records', { count: filtered.length });
             var pages = Math.ceil(filtered.length / size) || 1;
             root.querySelector('[data-flt-page-label]').textContent = t('page_label', { page: page, pages: pages });
@@ -222,30 +273,55 @@
             runTask(function () { page = value; }, event.currentTarget.querySelector('[type=submit]'));
         };
         function close() {
+            cancelRecordLoad(); recordState = 'closed';
+            if (discardDialog.open) discardDialog.close();
+            closePickers();
             if (dialog.open) dialog.close();
             var fileInput = editor.querySelector('input[type=file]'); if (fileInput) fileInput.value = '';
-            importFile = null; action = null; currentId = null; pendingDeleteIds = [];
+            importFile = null; action = null; currentId = null; pendingDeleteIds = []; baseline = '';
+            root.querySelector('[data-flt-dialog-content]').replaceChildren();
         }
-        root.querySelectorAll('[data-flt-close]').forEach(function (button) { button.onclick = close; });
+        function editorSnapshot() {
+            return JSON.stringify(['name', 'company', 'department', 'owner', 'status', 'note'].map(function (key) { return editor.elements[key]?.value || ''; }));
+        }
+        function requestClose() {
+            if (discardDialog.open) return;
+            if (recordState === 'ready' && dialog.open && (action === 'create' || action === 'edit') && editorSnapshot() !== baseline) {
+                closePickers(); discardDialog.showModal(); continueButton.focus(); return;
+            }
+            close();
+        }
+        root.querySelectorAll('[data-flt-close]').forEach(function (button) { button.onclick = requestClose; });
         // File inputs emit a bubbling cancel event when the OS chooser is dismissed.
         // Only a cancel event from the dialog itself should close the modal.
         dialog.addEventListener('cancel', function (event) {
             if (event.target !== dialog) return;
-            event.preventDefault(); close();
+            event.preventDefault(); requestClose();
         });
         function addEditField(parent, key, value, choices) {
-            var label = node('label', key === 'name' || key === 'note' ? 'flt-wide' : '', key === 'note' ? t('note') : messages.columns[key]);
+            var field = node('div', 'flt-edit-field' + (key === 'name' || key === 'note' ? ' flt-wide' : ''));
+            var label = node('label', '', key === 'note' ? t('note') : messages.columns[key]);
             var input = node(choices ? 'select' : key === 'note' ? 'textarea' : 'input'); input.name = key;
             input.id = 'flt-editor-' + key;
+            label.htmlFor = input.id; label.id = input.id + '-label';
             if (key !== 'note') { label.appendChild(node('span', 'flt-required', ' *')); input.required = true; }
             if (choices) Object.entries(choices).forEach(function (entry) { var option = node('option', '', entry[1]); option.value = entry[0]; input.appendChild(option); });
             else { input.maxLength = key === 'note' ? 500 : 100; if (key === 'name') input.required = true; }
             var error = node('span', 'flt-field-error'); error.id = input.id + '-error'; error.hidden = true;
             input.setAttribute('aria-describedby', error.id);
-            input.value = value; label.append(input, error); parent.appendChild(label);
+            input.value = value; field.append(label, input);
+            if (choices) {
+                input.hidden = true;
+                var host = node('div'); host.dataset.fltEditorPicker = key; host.setAttribute('aria-labelledby', label.id);
+                field.appendChild(host);
+                input.fltPicker = makePicker(host, { key: 'editor-' + key, choices: choices, backing: input, allowClear: false, placeholder: t('please_select') });
+                input.fltPicker.summary.setAttribute('aria-describedby', error.id);
+            }
+            field.appendChild(error); parent.appendChild(field);
         }
         function fieldError(input, text) {
             input.setAttribute('aria-invalid', text ? 'true' : 'false');
+            if (input.fltPicker) input.fltPicker.summary.setAttribute('aria-invalid', text ? 'true' : 'false');
             var error = editor.querySelector('#' + input.id + '-error');
             if (error) { error.textContent = text; error.hidden = !text; }
         }
@@ -258,19 +334,57 @@
                 else if (input.tagName === 'SELECT' && !Array.from(input.options).some(function (option) { return option.value === value; })) error = t('invalid_choice', { field: title });
                 fieldError(input, error); if (error && !first) first = input;
             });
-            if (first) first.focus(); return !first;
+            if (first) (first.fltPicker ? first.fltPicker.summary : first).focus(); return !first;
+        }
+        function cancelRecordLoad() {
+            recordLoadVersion++; window.clearTimeout(recordLoadTimer); recordLoadTimer = null;
+            root.querySelector('[data-flt-dialog-content]').setAttribute('aria-busy', 'false');
         }
         function openRecord(mode, row) {
+            if (busy || destroyed || discardDialog.open) return;
+            cancelRecordLoad();
+            if (mode !== 'view' && mode !== 'edit') { recordState = 'ready'; renderRecord(mode, row); return; }
+            action = mode; currentId = row.id; baseline = ''; recordState = 'loading';
+            closePickers();
+            root.querySelector('#flt-dialog-title').textContent = t(mode + '_title');
+            var submit = root.querySelector('[data-flt-dialog-submit]');
+            submit.hidden = mode === 'view'; submit.disabled = true; submit.classList.remove('flt-danger'); submit.textContent = t('save');
+            var content = root.querySelector('[data-flt-dialog-content]');
+            content.setAttribute('aria-busy', 'true');
+            var loading = node('div', 'flt-dialog-loading'); loading.setAttribute('role', 'status');
+            var spinner = node('span', 'flt-spinner'); spinner.setAttribute('aria-hidden', 'true');
+            loading.append(spinner, node('span', '', t('loading'))); content.replaceChildren(loading);
+            if (!dialog.open) dialog.showModal(); dialog.scrollTop = 0;
+            var version = recordLoadVersion, id = row.id;
+            recordLoadTimer = window.setTimeout(function () {
+                recordLoadTimer = null;
+                if (destroyed || version !== recordLoadVersion || !dialog.open) return;
+                try {
+                    var latest = records.find(function (item) { return item.id === id; });
+                    if (!latest) throw Error('record-unavailable');
+                    renderRecord(mode, latest); recordState = 'ready';
+                } catch (_) {
+                    recordState = 'error'; submit.disabled = true; content.replaceChildren();
+                    var error = node('div', 'flt-dialog-load-error'); error.setAttribute('role', 'alert');
+                    var retry = node('button', 'flt-btn flt-primary', t('reload_record')); retry.type = 'button';
+                    retry.onclick = function () { openRecord(mode, { id: id }); };
+                    error.append(node('p', '', t('record_load_failed')), retry); content.appendChild(error);
+                } finally {
+                    if (version === recordLoadVersion) content.setAttribute('aria-busy', 'false');
+                }
+            }, 300);
+        }
+        function renderRecord(mode, row) {
             if (busy) return;
             importFile = null;
             action = mode; currentId = row ? row.id : null;
-            root.querySelector('#flt-dialog-title').textContent = t(action + '_title');
+            var title = root.querySelector('#flt-dialog-title');
+            title.textContent = t(action + '_title');
             var content = root.querySelector('[data-flt-dialog-content]'); content.replaceChildren();
             var submit = root.querySelector('[data-flt-dialog-submit]'); submit.hidden = action === 'view'; submit.classList.toggle('flt-danger', action === 'delete' || action === 'bulk_delete');
             submit.disabled = false;
             submit.textContent = t(action === 'delete' || action === 'bulk_delete' ? 'confirm_delete' : action === 'create' ? 'create_save' : action === 'import' ? 'upload' : action === 'export' ? 'confirm_export' : 'save');
             if (action === 'import') {
-                content.appendChild(node('p', 'flt-transfer-hint', t('import_hint')));
                 var label = node('label', '', t('file')), input = node('input');
                 input.type = 'file'; input.name = 'demo_file'; input.id = 'flt-demo-file'; input.accept = '.xlsx,.xls,.csv'; input.required = true;
                 input.className = 'flt-file-input'; label.htmlFor = input.id;
@@ -282,6 +396,22 @@
                 var info = node('div', 'flt-file-info', t('file_empty')), error = node('span', 'flt-field-error'); error.id = 'flt-demo-file-error'; error.hidden = true;
                 info.setAttribute('aria-live', 'polite');
                 input.setAttribute('aria-describedby', error.id); content.append(label, input, zone, error, info);
+                var template = node('button', 'flt-template-download'); template.type = 'button';
+                var templateIcon = node('i', 'fa fa-file-excel-o'); templateIcon.setAttribute('aria-hidden', 'true');
+                template.append(templateIcon, node('span', '', t('download_template')));
+                template.onclick = function () {
+                    var fields = ['name', 'company', 'department', 'owner', 'status', 'note'];
+                    var headers = fields.map(function (key) { return key === 'note' ? t('note') : messages.columns[key]; });
+                    var sample = [t('record_name', { number: '001' }), messages.companies[0], messages.departments[0], messages.owners[0], messages.statuses.active, t('demo_note')];
+                    var csv = '\uFEFF' + [headers, sample].map(function (row) {
+                        return row.map(function (value) { return '"' + String(value).replace(/"/g, '""') + '"'; }).join(',');
+                    }).join('\r\n') + '\r\n';
+                    var url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+                    var link = node('a'); link.href = url; link.download = 'frontend-list-template.csv';
+                    document.body.appendChild(link); link.click(); link.remove();
+                    window.setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+                };
+                content.appendChild(template);
                 var dragDepth = 0;
                 function showFile() {
                     info.replaceChildren();
@@ -307,7 +437,6 @@
                     acceptFiles(Array.from(input.files));
                 };
             } else if (action === 'export') {
-                content.appendChild(node('p', 'flt-transfer-hint', t('export_hint')));
                 ['filtered', 'selected'].forEach(function (scope) {
                     var label = node('label', 'flt-export-choice'), radio = node('input'), count = scope === 'filtered' ? filtered.length : selected.size;
                     radio.type = 'radio'; radio.name = 'export_scope'; radio.value = scope; radio.checked = scope === 'filtered'; radio.disabled = count === 0;
@@ -333,6 +462,7 @@
                 addEditField(grid, 'status', row.status, messages.statuses); addEditField(grid, 'note', row.note); content.appendChild(grid);
             }
             if (!dialog.open) dialog.showModal(); dialog.scrollTop = 0;
+            baseline = editorSnapshot();
             var focus = content.querySelector('.flt-dropzone') || content.querySelector('input'); if (focus) focus.focus();
         }
         body.addEventListener('click', function (event) {
@@ -341,7 +471,7 @@
             openRecord(button.dataset.action, row);
         });
         root.querySelector('[data-flt-create]').onclick = function () {
-            openRecord('create', { name: '', company: (applied.companies || [])[0] || messages.companies[0], department: (applied.departments || [])[0] || messages.departments[0], owner: (applied.owners || [])[0] || messages.owners[0], status: applied.status || 'active', note: '' });
+            openRecord('create', { name: '', company: '', department: '', owner: '', status: '', note: '' });
         };
         root.querySelector('[data-flt-bulk-delete]').onclick = function () {
             pendingDeleteIds = records.filter(function (row) { return selected.has(row.id); }).map(function (row) { return row.id; });
@@ -351,6 +481,7 @@
         root.querySelector('[data-flt-export]').onclick = function () { openRecord('export'); };
         editor.addEventListener('submit', function (event) {
             event.preventDefault(); if (busy || !['edit', 'delete', 'create', 'bulk_delete', 'import', 'export'].includes(action)) return;
+            if (action === 'edit' && recordState !== 'ready') return;
             if (action === 'import') {
                 var file = editor.elements.demo_file;
                 if (!importFile) { fieldError(file, t('required_field', { field: t('file') })); editor.querySelector('.flt-dropzone').focus(); return; }
@@ -382,12 +513,25 @@
             close(); apply();
         });
         editor.addEventListener('input', function (event) { if (event.target.id) fieldError(event.target, ''); });
-        function outside(event) { Object.values(pickers).forEach(function (picker) { if (!picker.details.contains(event.target)) picker.details.open = false; }); }
-        function escape(event) { if (event.key === 'Escape') Object.values(pickers).forEach(function (picker) { if (picker.details.open) { picker.details.open = false; picker.details.querySelector('summary').focus(); } }); }
+        function closePickers() { root.querySelectorAll('.flt-picker').forEach(function (picker) { picker.open = false; }); }
+        function outside(event) { root.querySelectorAll('.flt-picker').forEach(function (picker) { if (!picker.contains(event.target)) picker.open = false; }); }
+        function escape(event) {
+            if (event.key !== 'Escape') return;
+            if (discardDialog.open) {
+                event.preventDefault(); event.stopPropagation(); discardDialog.close(); return;
+            }
+            var opened = root.querySelector('.flt-picker[open]');
+            if (opened) { event.preventDefault(); event.stopPropagation(); opened.open = false; opened.querySelector('summary').focus(); }
+            else if (dialog.open) { event.preventDefault(); event.stopPropagation(); requestClose(); }
+        }
+        function scrollDialog(event) { if (event.target === dialog) closePickers(); }
         document.addEventListener('click', outside); root.addEventListener('keydown', escape);
+        function resizeLayout() { closePickers(); syncEmptyLayout(); }
+        window.addEventListener('resize', resizeLayout); dialog.addEventListener('scroll', scrollDialog);
+        if (window.ResizeObserver) { emptyObserver = new ResizeObserver(syncEmptyLayout); emptyObserver.observe(tableScroll); }
         // A PJAX history snapshot can contain an open attribute without a modal top layer.
         dialog.removeAttribute('open'); records = seed(); form.reset();
-        return { root: root, destroy: function () { destroyed = true; window.clearTimeout(timer); unlockControls(); close(); document.removeEventListener('click', outside); root.removeEventListener('keydown', escape); } };
+        return { root: root, destroy: function () { destroyed = true; window.clearTimeout(timer); if (emptyObserver) emptyObserver.disconnect(); unlockControls(); close(); document.removeEventListener('click', outside); root.removeEventListener('keydown', escape); window.removeEventListener('resize', resizeLayout); dialog.removeEventListener('scroll', scrollDialog); } };
     }
     function init() {
         var root = document.querySelector('[data-frontend-list-template]');

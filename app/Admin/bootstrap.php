@@ -50,5 +50,5 @@ app(\App\Services\AdminWatermarkService::class)->registerForCurrentAdministrator
 
 Ladmin\Admin::css(asset('css/account-transfer.css').'?v=20261121-1');
 Ladmin\Admin::js(asset('js/account-transfer.js').'?v=20261121-1');
-Ladmin\Admin::css(asset('css/frontend-list-template.css').'?v=20261123-4');
-Ladmin\Admin::js(asset('js/frontend-list-template.js').'?v=20261123-4');
+Ladmin\Admin::css(asset('css/frontend-list-template.css').'?v=20261123-17');
+Ladmin\Admin::js(asset('js/frontend-list-template.js').'?v=20261123-17');
