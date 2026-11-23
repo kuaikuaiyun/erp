@@ -13,6 +13,7 @@ use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AppLovinHistoricalSpendService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\AssistantStoreOwnerAttributionService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
@@ -34,6 +35,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         private readonly AssistantStoreOwnerAttributionService $ownerAttribution,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
         private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
+        private readonly AppLovinHistoricalSpendService $historicalSpend,
     ) {}
 
     public function index(Request $request): Response|View
@@ -202,6 +204,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ];
         }));
         $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        $globalSpendTotals = $this->historicalSpend->totalsByAccountNumber();
         $giftScreenshots = AppLovinSpendScreenshot::query()
             ->whereIn('operator_user_id', $accountSpendReports->pluck('submitter_id')->filter()->unique()->values())
             ->get()
@@ -301,12 +304,13 @@ class FashionAppLovinPerformanceReportController extends Controller
         })->values();
 
         $rows = $dailyRows->groupBy(fn (array $row) => $row['operator_id'].'|'.$row['store_id'])
-            ->map(function ($group) use ($accountSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
+            ->map(function ($group) use ($accountSpendTotals, $globalSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('orders');
                 $revenue = round((float) $group->sum('revenue'), 2);
                 $spend = round((float) $group->sum('ad_spend'), 2);
                 $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
+                $accountNumberValues = $group->pluck('account_numbers')->flatten()->filter()->unique()->values();
                 $giftEligibleKeys = $accountKeys->filter(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0) >= 5000);
                 $giftStatus = $giftEligibleKeys->isEmpty()
                     ? 'not_eligible'
@@ -324,8 +328,10 @@ class FashionAppLovinPerformanceReportController extends Controller
                 return [...$first, 'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'orders' => $orders, 'revenue' => $revenue, 'ad_spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null,
                     'account_numbers' => $group->pluck('account_numbers')->flatten()->filter()->unique()->implode('、'),
+                    'account_number_values' => $accountNumberValues->all(),
                     'account_keys' => $accountKeys->all(),
                     'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
+                    'global_total_consumption' => $this->historicalSpend->sumForAccountNumbers($globalSpendTotals, $accountNumberValues),
                     'deducted_consumption' => $deductedConsumption,
                     'historical_revenue' => $historicalRevenue,
                     'estimated_total_roi' => $deductedConsumption > 0 ? $historicalRevenue / $deductedConsumption : null,
@@ -378,6 +384,10 @@ class FashionAppLovinPerformanceReportController extends Controller
         $totals = ['stores' => $rows->pluck('store_id')->filter(fn ($id) => (int) $id > 0)->unique()->count(), 'orders' => (int) $rows->sum('orders'),
             'revenue' => round((float) $rows->sum('revenue'), 2), 'ad_spend' => round((float) $rows->sum('ad_spend'), 2),
             'total_consumption' => round((float) $totalAccountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2)];
+        $totals['global_total_consumption'] = $this->historicalSpend->sumForAccountNumbers(
+            $globalSpendTotals,
+            $rows->pluck('account_number_values')->flatten()->filter()->unique(),
+        );
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $totals['deducted_consumption'] = round((float) $totalAccountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
             $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
@@ -403,6 +413,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             'gift_status' => $row['gift_status'],
             'account_numbers' => $row['account_numbers'],
             'total_consumption' => $row['total_consumption'],
+            'global_total_consumption' => $row['global_total_consumption'],
             'deducted_consumption' => $row['deducted_consumption'],
             'historical_revenue' => $row['historical_revenue'],
             'estimated_total_roi' => $row['estimated_total_roi'],
