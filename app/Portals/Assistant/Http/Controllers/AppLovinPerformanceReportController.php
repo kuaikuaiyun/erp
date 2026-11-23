@@ -123,7 +123,7 @@ class AppLovinPerformanceReportController extends Controller
             ->unique()
             ->sort()
             ->values();
-        $metricsCacheKey = 'assistant-applovin-performance:v3:'.$this->ownerAttribution->cacheVersion().':'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $metricsCacheKey = 'assistant-applovin-performance:v4:'.$this->ownerAttribution->cacheVersion().':'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($metricsCacheKey, now()->addMinutes(15), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
             $calculated = [];
             // 长时间范围会包含大量订单及商品明细，按运营分批读取，避免 90 天等范围一次性加载导致内存溢出。
@@ -134,6 +134,7 @@ class AppLovinPerformanceReportController extends Controller
                     $operatorIdBatch->values()->all(),
                     $timezone,
                     requireBothSubscriptionTags: true,
+                    attributeByStoreOwnerHistory: true,
                 );
                 gc_collect_cycles();
             }

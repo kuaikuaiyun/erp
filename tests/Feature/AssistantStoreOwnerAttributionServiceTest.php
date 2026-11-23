@@ -62,10 +62,12 @@ class AssistantStoreOwnerAttributionServiceTest extends TestCase
         $service = app(AssistantStoreOwnerAttributionService::class);
         $timelines = $service->timelines([88]);
         $before = $service->resolve($timelines, 88, Carbon::parse('2026-11-01 12:29:59', 'UTC'));
+        $beforeFirstRecord = $service->resolve($timelines, 88, Carbon::parse('2026-09-01 00:00:00', 'UTC'));
         $atBoundary = $service->resolve($timelines, 88, Carbon::parse('2026-11-01 12:30:00', 'UTC'));
 
         self::assertTrue($before['has_history']);
         self::assertSame(101, $before['owner_user_id']);
+        self::assertSame(101, $beforeFirstRecord['owner_user_id']);
         self::assertSame('玄策', $before['owner_name']);
         self::assertSame(202, $atBoundary['owner_user_id']);
         self::assertSame('通天代', $atBoundary['owner_name']);

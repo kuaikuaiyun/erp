@@ -42,6 +42,11 @@ class AssistantStoreOwnerAttributionService
             $item->effective_from->lessThanOrEqualTo($at)
             && ($item->effective_to === null || $item->effective_to->greaterThan($at))
         );
+        // The first recorded assignment is the best-known owner for orders that
+        // predate the history feature. Otherwise those older orders are lost.
+        if (! $history && $historyRows->isNotEmpty() && $at->lessThan($historyRows->first()->effective_from)) {
+            $history = $historyRows->first();
+        }
 
         return [
             'has_history' => $historyRows->isNotEmpty(),
