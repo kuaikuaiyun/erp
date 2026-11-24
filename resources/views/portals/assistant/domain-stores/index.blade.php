@@ -157,6 +157,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261102-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ asset('css/assistant-domain-stores-template-controls.css') }}?v=20261124-1">
     <style>
         .assistant-domain-stores-table tbody tr.assistant-shop-status-stopped > td {
             background-color: #f8d7da !important;
@@ -246,10 +247,10 @@
                                 <label>{{ $t('fields.date') }}</label>
                                 <div><input type="date" class="form-control" name="created_from" value="{{ $filters['created_from'] }}" aria-label="{{ $t('filters.range_start', ['field' => $t('fields.date')]) }}"><span>{{ $t('common.from') }}</span><input type="date" class="form-control" name="created_to" value="{{ $filters['created_to'] }}" aria-label="{{ $t('filters.range_end', ['field' => $t('fields.date')]) }}"></div>
                             </div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-shop-status">{{ $t('fields.shop_status') }}</label><select id="filter-shop-status" class="form-control" name="shop_status"><option value="">{{ $t('common.all') }}</option>@foreach ($shopStatusLabels as $value => $label)<option value="{{ $value }}" @selected($filters['shop_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-domain-check">{{ $t('fields.domain_check') }}</label><select id="filter-domain-check" class="form-control" name="domain_check_status"><option value="">{{ $t('common.all') }}</option>@foreach ($domainCheckLabels as $value => $label)<option value="{{ $value }}" @selected($filters['domain_check_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
+                            <div class="assistant-advanced-filter-field form-group"><label for="filter-shop-status">{{ $t('fields.shop_status') }}</label><select id="filter-shop-status" class="form-control" name="shop_status" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('fields.shop_status') }}"><option value="">{{ $t('common.all') }}</option>@foreach ($shopStatusLabels as $value => $label)<option value="{{ $value }}" @selected($filters['shop_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
+                            <div class="assistant-advanced-filter-field form-group"><label for="filter-domain-check">{{ $t('fields.domain_check') }}</label><select id="filter-domain-check" class="form-control" name="domain_check_status" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('fields.domain_check') }}"><option value="">{{ $t('common.all') }}</option>@foreach ($domainCheckLabels as $value => $label)<option value="{{ $value }}" @selected($filters['domain_check_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
                             @if ($canManageDepartmentAccess)
-                                <div class="assistant-advanced-filter-field"><label for="filter-department">{{ $t('filters.department') }}</label><select id="filter-department" class="form-control" name="department_id"><option value="">{{ $t('filters.all_departments') }}</option>@foreach ($assistantChildDepartments as $department)<option value="{{ $department->getKey() }}" @selected($filters['department_id'] === (string) $department->getKey())>{{ $department->name }}</option>@endforeach</select></div>
+                                <div class="assistant-advanced-filter-field form-group"><label for="filter-department">{{ $t('filters.department') }}</label><select id="filter-department" class="form-control" name="department_id" data-filter-multiselect data-placeholder="{{ $t('filters.all_departments') }}" data-search-placeholder="搜索{{ $t('filters.department') }}"><option value="">{{ $t('filters.all_departments') }}</option>@foreach ($assistantChildDepartments as $department)<option value="{{ $department->getKey() }}" @selected($filters['department_id'] === (string) $department->getKey())>{{ $department->name }}</option>@endforeach</select></div>
                             @endif
                             <div class="assistant-advanced-filter-field"><label for="filter-site-builder">{{ $t('fields.site_builder') }}</label><input id="filter-site-builder" class="form-control" name="site_builder" value="{{ $filters['site_builder'] }}" list="filter-site-builder-options"><datalist id="filter-site-builder-options">@foreach ($quickOptions['site_builder'] ?? [] as $value)<option value="{{ $value }}">{{ $siteBuilderOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-shop-name">{{ $t('fields.shop_name') }}</label><input id="filter-shop-name" class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}"></div>
@@ -259,39 +260,18 @@
                                 <div><input type="date" class="form-control" name="domain_expires_from" value="{{ $filters['domain_expires_from'] }}" aria-label="{{ $t('filters.range_start', ['field' => $t('fields.domain_expires_at')]) }}"><span>{{ $t('common.from') }}</span><input type="date" class="form-control" name="domain_expires_to" value="{{ $filters['domain_expires_to'] }}" aria-label="{{ $t('filters.range_end', ['field' => $t('fields.domain_expires_at')]) }}"></div>
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-email">{{ $t('fields.email') }}</label><input id="filter-email" class="form-control" name="email" value="{{ $filters['email'] }}"></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-email-bound">{{ $t('fields.email_binding') }}</label><select id="filter-email-bound" class="form-control" name="email_bound"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_bound'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_bound'] === '0')>{{ $t('common.no') }}</option></select></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-email-purchased">{{ $t('fields.email_purchase') }}</label><select id="filter-email-purchased" class="form-control" name="email_purchased"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_purchased'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_purchased'] === '0')>{{ $t('common.no') }}</option></select></div>
-                            <div class="assistant-advanced-filter-field">
+                            <div class="assistant-advanced-filter-field form-group"><label for="filter-email-bound">{{ $t('fields.email_binding') }}</label><select id="filter-email-bound" class="form-control" name="email_bound" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('fields.email_binding') }}"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_bound'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_bound'] === '0')>{{ $t('common.no') }}</option></select></div>
+                            <div class="assistant-advanced-filter-field form-group"><label for="filter-email-purchased">{{ $t('fields.email_purchase') }}</label><select id="filter-email-purchased" class="form-control" name="email_purchased" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('fields.email_purchase') }}"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_purchased'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_purchased'] === '0')>{{ $t('common.no') }}</option></select></div>
+                            <div class="assistant-advanced-filter-field form-group">
                                 <label id="filter-team-label">{{ $t('fields.team') }}</label>
-                                <div class="assistant-team-picker"
-                                     data-team-picker
-                                     data-empty-label="{{ $t('filters.team_all') }}"
-                                     data-selected-label="{{ $t('filters.team_selected', ['count' => '__count__']) }}">
-                                    <button type="button" class="form-control assistant-team-picker-toggle" data-team-picker-toggle aria-haspopup="true" aria-expanded="false" aria-labelledby="filter-team-label filter-team-summary">
-                                        <span id="filter-team-summary" data-team-picker-summary>{{ $filters['team'] === [] ? $t('filters.team_all') : '' }}</span>
-                                        <i class="fa fa-angle-down" aria-hidden="true"></i>
-                                    </button>
-                                    <div class="assistant-team-picker-menu" data-team-picker-menu hidden>
-                                        <div class="assistant-team-picker-head">
-                                            <strong>{{ $t('fields.team') }}</strong>
-                                            <button type="button" class="btn btn-link btn-xs" data-team-picker-clear>{{ $t('filters.team_clear') }}</button>
-                                        </div>
-                                        <div class="assistant-team-picker-options">
-                                            @forelse (collect($quickOptions['team'] ?? [])->merge($filters['team'])->unique()->values() as $value)
-                                                <label class="assistant-team-picker-option">
-                                                    <input type="checkbox" name="team[]" value="{{ $value }}" @checked(in_array($value, $filters['team'], true))>
-                                                    <span class="assistant-team-picker-check"><i class="fa fa-check"></i></span>
-                                                    <span>{{ $value }}</span>
-                                                </label>
-                                            @empty
-                                                <span class="assistant-team-picker-empty">{{ $t('filters.team_empty') }}</span>
-                                            @endforelse
-                                        </div>
-                                    </div>
-                                </div>
+                                <select class="form-control" name="team[]" multiple data-filter-multiselect data-placeholder="{{ $t('filters.team_all') }}" data-search-placeholder="搜索{{ $t('fields.team') }}" data-no-results="{{ $t('filters.team_empty') }}" data-clear-text="{{ $t('filters.team_clear') }}" data-select-all-text="全选">
+                                    @foreach (collect($quickOptions['team'] ?? [])->merge($filters['team'])->unique()->values() as $value)
+                                        <option value="{{ $value }}" @selected(in_array($value, $filters['team'], true))>{{ $value }}</option>
+                                    @endforeach
+                                </select>
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-project">{{ $t('fields.project') }}</label><input id="filter-project" class="form-control" name="project" value="{{ $filters['project'] }}"></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-owner-assignment">{{ $t('filters.owner_assignment') }}</label><select id="filter-owner-assignment" class="form-control" name="owner_assignment"><option value="">{{ $t('common.all') }}</option><option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option><option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option></select></div>
+                            <div class="assistant-advanced-filter-field form-group"><label for="filter-owner-assignment">{{ $t('filters.owner_assignment') }}</label><select id="filter-owner-assignment" class="form-control" name="owner_assignment" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('filters.owner_assignment') }}"><option value="">{{ $t('common.all') }}</option><option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option><option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option></select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-erp">{{ $t('fields.erp') }}</label><input id="filter-erp" class="form-control" name="erp" value="{{ $filters['erp'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-credit-card">{{ $t('fields.credit_card') }}</label><input id="filter-credit-card" class="form-control" name="credit_card" value="{{ $filters['credit_card'] }}" list="filter-credit-card-options"><datalist id="filter-credit-card-options">@foreach ($quickOptions['credit_card'] ?? [] as $value)<option value="{{ $value }}">{{ $creditCardOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-wallet">{{ $t('fields.wallet') }}</label><input id="filter-wallet" class="form-control" name="wallet" value="{{ $filters['wallet'] }}" list="filter-wallet-options"><datalist id="filter-wallet-options">@foreach ($quickOptions['wallet'] ?? [] as $value)<option value="{{ $value }}">{{ $walletOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
@@ -756,6 +736,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261121-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261102-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>
+    <script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-2"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({

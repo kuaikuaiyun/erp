@@ -40,6 +40,7 @@ class AdvertisingSpendSummaryController extends Controller
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
             'project' => ['nullable', 'in:shopify,fashion'],
+            'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
         $dateFrom = (string) ($validated['date_from'] ?? $now->copy()->subDays(6)->format('Y-m-d'));
@@ -142,10 +143,11 @@ class AdvertisingSpendSummaryController extends Controller
             return true;
         })->values();
         $page = max(1, (int) $request->query('page', 1));
+        $perPage = (int) ($validated['per_page'] ?? 20);
         $rows = new LengthAwarePaginator(
-            $filteredRows->forPage($page, 20)->values(),
+            $filteredRows->forPage($page, $perPage)->values(),
             $filteredRows->count(),
-            20,
+            $perPage,
             $page,
             ['path' => $request->url(), 'query' => $request->query()],
         );

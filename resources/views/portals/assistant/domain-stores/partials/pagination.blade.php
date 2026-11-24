@@ -1,34 +1,12 @@
 @php
     $t = static fn (string $key, array $replace = []): string => __('assistant.domain_stores.'.$key, $replace);
     $currentPage = $stores->currentPage();
-    $lastPage = $stores->lastPage();
-    $visiblePages = collect([1, 2, $currentPage - 1, $currentPage, $currentPage + 1, $lastPage - 1, $lastPage])
-        ->filter(fn (int $page): bool => $page >= 1 && $page <= $lastPage)
-        ->unique()
-        ->sort()
-        ->values();
-    $previousVisiblePage = null;
+    $lastPage = max(1, $stores->lastPage());
 @endphp
 
-<div class="assistant-pagination-control" data-loading="region" data-loading-target=".assistant-domain-stores-list">
+<nav class="assistant-pagination-control" aria-label="{{ $t('pagination.navigation') }}" data-loading="region" data-loading-target=".assistant-domain-stores-list">
     <span class="assistant-pagination-summary">{{ $t('pagination.summary', ['from' => $stores->firstItem() ?? 0, 'to' => $stores->lastItem() ?? 0, 'total' => $stores->total()]) }}</span>
-    @if ($lastPage > 1)
-        <nav aria-label="{{ $t('pagination.navigation') }}">
-            <ul class="pagination pagination-sm no-margin">
-                <li class="{{ $stores->onFirstPage() ? 'disabled' : '' }}"><a href="{{ $stores->previousPageUrl() ?: '#' }}" aria-label="{{ $t('pagination.previous') }}">&laquo;</a></li>
-                @foreach ($visiblePages as $page)
-                    @if ($previousVisiblePage !== null && $page - $previousVisiblePage > 1)
-                        <li class="disabled"><span>…</span></li>
-                    @endif
-                    <li class="{{ $currentPage === $page ? 'active' : '' }}"><a href="{{ $stores->url($page) }}">{{ $page }}</a></li>
-                    @php
-                        $previousVisiblePage = $page;
-                    @endphp
-                @endforeach
-                <li class="{{ $stores->hasMorePages() ? '' : 'disabled' }}"><a href="{{ $stores->nextPageUrl() ?: '#' }}" aria-label="{{ $t('pagination.next') }}">&raquo;</a></li>
-            </ul>
-        </nav>
-    @endif
+
     <form method="get" action="{{ route('assistant.domain-stores.index') }}" class="assistant-per-page-form" data-loading="region" data-loading-target=".assistant-domain-stores-list">
         @foreach ($filters as $filterName => $filterValue)
             @if ($filterName !== 'per_page')
@@ -50,4 +28,34 @@
             {{ $t('pagination.records_suffix') }}
         </label>
     </form>
-</div>
+
+    @if ($stores->onFirstPage())
+        <span class="assistant-page-button is-disabled" aria-disabled="true">{{ $t('pagination.previous') }}</span>
+    @else
+        <a class="assistant-page-button" href="{{ $stores->previousPageUrl() }}" rel="prev">{{ $t('pagination.previous') }}</a>
+    @endif
+
+    <strong class="assistant-pagination-status">第 {{ $currentPage }} / {{ $lastPage }} 页</strong>
+
+    @if ($stores->hasMorePages())
+        <a class="assistant-page-button" href="{{ $stores->nextPageUrl() }}" rel="next">{{ $t('pagination.next') }}</a>
+    @else
+        <span class="assistant-page-button is-disabled" aria-disabled="true">{{ $t('pagination.next') }}</span>
+    @endif
+
+    @if ($lastPage > 1)
+        <form method="get" action="{{ route('assistant.domain-stores.index') }}" class="assistant-page-jump-form" data-loading="region" data-loading-target=".assistant-domain-stores-list">
+            @foreach ($filters as $filterName => $filterValue)
+                @if (is_array($filterValue))
+                    @foreach ($filterValue as $item)
+                        <input type="hidden" name="{{ $filterName }}[]" value="{{ $item }}">
+                    @endforeach
+                @else
+                    <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                @endif
+            @endforeach
+            <label>跳至 <input type="number" name="page" min="1" max="{{ $lastPage }}" step="1" required placeholder="页码" aria-label="页码"></label>
+            <button type="submit">跳转</button>
+        </form>
+    @endif
+</nav>

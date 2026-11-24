@@ -1,0 +1,106 @@
+.assistant-ad-pagination {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-height: 58px;
+    padding: 12px 16px !important;
+    border-top: 1px solid #e4edf3;
+    background: #fff;
+    color: #71899d;
+    font-size: 12px;
+}
+.assistant-ad-pagination-summary {
+    margin-right: auto;
+}
+.assistant-ad-pagination-size,
+.assistant-ad-pagination-jump,
+.assistant-ad-pagination-jump label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    color: #71899d;
+    font-weight: 400;
+    white-space: nowrap;
+}
+.assistant-ad-pagination select,
+.assistant-ad-pagination input[type=number] {
+    width: 67px !important;
+    min-width: 67px !important;
+    min-height: 32px !important;
+    padding: 5px 7px !important;
+    border: 1px solid #ccdae6 !important;
+    border-radius: 5px !important;
+    background: #fff !important;
+    color: #315f7a !important;
+    font-size: 12px !important;
+    box-shadow: none !important;
+}
+.assistant-ad-pagination select:focus,
+.assistant-ad-pagination input[type=number]:focus {
+    border-color: #339dd3 !important;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1) !important;
+}
+.assistant-ad-pagination-button,
+.assistant-ad-pagination-jump button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 5px 11px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    background: #fff;
+    color: #315f7a;
+    font-size: 12px;
+    line-height: 20px;
+    text-decoration: none !important;
+    box-shadow: none;
+}
+.assistant-ad-pagination a.assistant-ad-pagination-button:hover {
+    border-color: #8dbbd5;
+    background: #eff7fc;
+    color: #176e9d;
+}
+.assistant-ad-pagination-button.is-disabled {
+    border-color: #e1e8ed;
+    background: #f3f6f8;
+    color: #a4b2bc;
+    cursor: default;
+}
+.assistant-ad-pagination-status {
+    padding: 0 3px;
+    color: #3c6a88;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.assistant-ad-pagination-jump button {
+    border-color: #2188be;
+    background: #2188be;
+    color: #fff;
+    cursor: pointer;
+}
+.assistant-ad-pagination-jump button:hover {
+    border-color: #176e9d;
+    background: #176e9d;
+}
+@media(max-width:767px) {
+    .assistant-ad-pagination {
+        justify-content: center;
+        padding: 16px 10px !important;
+        gap: 8px;
+    }
+    .assistant-ad-pagination-summary {
+        flex-basis: 100%;
+        margin-right: 0;
+        text-align: center;
+    }
+    .assistant-ad-pagination-jump {
+        flex-basis: 100%;
+        justify-content: center;
+    }
+}

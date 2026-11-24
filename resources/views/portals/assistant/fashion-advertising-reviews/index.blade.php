@@ -59,10 +59,7 @@
         </div></td></tr>
     @empty<tr><td colspan="14" class="review-empty">暂无符合条件的{{ $reviewProject['name'] }}广告费提报</td></tr>@endforelse
     </tbody></table></div>
-    @if($reports->total() > 0)
-        @php($pageStart=max(1,$reports->currentPage()-2)) @php($pageEnd=min($reports->lastPage(),$reports->currentPage()+2))
-        <div class="box-footer review-pagination"><div class="review-pagination-summary">显示 <strong>{{$reports->firstItem()}}-{{$reports->lastItem()}}</strong> 份，共 <strong>{{$reports->total()}}</strong> 份</div><div class="review-pagination-controls"><label class="review-per-page">每页显示 <select id="fashion-review-per-page">@foreach([20,50,100] as $size)<option value="{{$size}}" @selected($reports->perPage()===$size)>{{$size}}</option>@endforeach</select> 份</label>@if($reports->lastPage()>1)<nav class="review-pages" aria-label="{{$reviewProject['name']}}广告费审核分页"><a class="review-page {{$reports->onFirstPage()?'disabled':''}}" href="{{$reports->previousPageUrl()?:'#'}}" title="上一页"><i class="fa fa-angle-left"></i></a>@if($pageStart>1)<a class="review-page" href="{{$reports->url(1)}}">1</a>@if($pageStart>2)<span class="review-page-gap">…</span>@endif @endif @for($page=$pageStart;$page<=$pageEnd;$page++)<a class="review-page {{$page===$reports->currentPage()?'active':''}}" href="{{$reports->url($page)}}">{{$page}}</a>@endfor @if($pageEnd<$reports->lastPage())@if($pageEnd<$reports->lastPage()-1)<span class="review-page-gap">…</span>@endif<a class="review-page" href="{{$reports->url($reports->lastPage())}}">{{$reports->lastPage()}}</a>@endif<a class="review-page {{$reports->hasMorePages()?'':'disabled'}}" href="{{$reports->nextPageUrl()?:'#'}}" title="下一页"><i class="fa fa-angle-right"></i></a></nav>@endif</div></div>
-    @endif
+    @include('portals.assistant.partials.advertising-template-pagination', ['paginator' => $reports, 'unit' => '份'])
     </div>
 @include('portals.fashion.partials.misc-fee-help-modal')
 </section>
@@ -75,7 +72,6 @@
 @push('scripts')
 <script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-1"></script>
 <script>
-(function(){var select=document.getElementById('fashion-review-per-page');if(!select)return;select.addEventListener('change',function(){var url=new URL(window.location.href);url.searchParams.set('per_page',select.value);url.searchParams.delete('page');window.location.href=url.toString();});})();
 (function(){var select=document.querySelector('.js-fashion-departments'),hint=document.getElementById('fashion-department-filter-hint');if(!select||!hint)return;function refresh(){var count=Array.prototype.filter.call(select.options,function(option){return option.selected;}).length;hint.innerHTML=count?('已选择 <b>'+count+'</b> 个部门'):'支持多选和搜索，未选择时查询全部部门';}select.addEventListener('change',refresh);refresh();})();
 (function(){
  var csrf=@json(csrf_token()), deleteActions=@json($reports->getCollection()->reject->trashed()->mapWithKeys(fn($report)=>[(string)$report->id=>route('assistant.fashion-advertising-reviews.destroy',$report)]));
