@@ -1,0 +1,125 @@
+.assistant-review-delete-dialog {
+    width: min(520px, 94vw);
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid #d4e3ef;
+    border-radius: 12px;
+    background: #fff;
+    color: #24455b;
+    box-shadow: 0 22px 90px rgba(23, 54, 76, .25);
+}
+
+.assistant-review-delete-dialog::backdrop {
+    background: rgba(22, 46, 72, .44);
+}
+
+.assistant-review-delete-dialog header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 20px 24px;
+    border-bottom: 1px solid #e5edf5;
+    background: #f6faff;
+}
+
+.assistant-review-delete-kicker {
+    display: block;
+    margin-bottom: 4px;
+    color: #c96959;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.assistant-review-delete-dialog h3 {
+    margin: 0;
+    color: #24455b;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.assistant-review-delete-close {
+    padding: 2px 5px;
+    border: 0;
+    background: none;
+    color: #8b9dad;
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.assistant-review-delete-content {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding: 26px 24px;
+}
+
+.assistant-review-delete-warning {
+    display: inline-flex;
+    width: 42px;
+    height: 42px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #fff2ef;
+    color: #c96959;
+    font-size: 18px;
+}
+
+.assistant-review-delete-content p {
+    margin: 0;
+    color: #846255;
+    line-height: 1.9;
+}
+
+.assistant-review-delete-dialog footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px;
+    border-top: 1px solid #e8eff5;
+    background: #fbfdff;
+}
+
+.assistant-review-delete-button {
+    min-height: 34px;
+    padding: 6px 14px;
+    border: 1px solid #d4dfe8;
+    border-radius: 5px;
+    background: #fff;
+    color: #426176;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.assistant-review-delete-button:hover {
+    border-color: #9bc4dc;
+    background: #f1f7fb;
+    color: #256f98;
+}
+
+.assistant-review-delete-button.is-danger {
+    border-color: #c85e4c;
+    background: #c85e4c;
+    color: #fff;
+}
+
+.assistant-review-delete-button.is-danger:hover {
+    border-color: #b34e3e;
+    background: #b34e3e;
+    color: #fff;
+}
+
+.assistant-review-delete-button:disabled {
+    cursor: wait;
+    opacity: .65;
+}
+
+@media (max-width: 560px) {
+    .assistant-review-delete-content { grid-template-columns: 1fr; }
+    .assistant-review-delete-dialog footer { flex-direction: column-reverse; }
+    .assistant-review-delete-button { width: 100%; }
+}
