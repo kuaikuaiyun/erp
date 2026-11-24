@@ -86,6 +86,7 @@ class AppLovinPerformanceReportController extends Controller
                 'historical_revenue', 'estimated_total_roi',
             ])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+            'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $timezone = (string) ($filters['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $today = now($timezone)->startOfDay();
@@ -491,7 +492,8 @@ class AppLovinPerformanceReportController extends Controller
             'estimated_total_roi' => $row['estimated_total_roi'],
         ])->values();
         $page = max(1, (int) $request->query('page', 1));
-        $paginator = new LengthAwarePaginator($rows->forPage($page, 30)->values(), $rows->count(), 30, $page, ['path' => $request->url(), 'query' => $request->query()]);
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $paginator = new LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return view('portals.assistant.applovin-performance-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
