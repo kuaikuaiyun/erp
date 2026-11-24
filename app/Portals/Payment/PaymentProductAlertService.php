@@ -78,7 +78,7 @@ class PaymentProductAlertService
             return null;
         }
 
-        $detailCacheKey = 'payment:product-alert-detail:v2:'.sha1((string) json_encode([
+        $detailCacheKey = 'payment:product-alert-detail:v3:'.sha1((string) json_encode([
             'code' => (string) $alert['code'],
             'channel' => (string) ($alert['channel_type'] ?? ''),
             'orders' => (int) ($alert['eligible_order_count'] ?? 0),
@@ -222,7 +222,7 @@ class PaymentProductAlertService
                 ->selectRaw('COUNT(*) as dispute_count')
                 ->groupBy('refund.logistics_order_id');
             $query->leftJoinSub($cardDisputes, 'card_risk', 'card_risk.logistics_order_id', '=', 'orders.id');
-            $eligible = $this->creditCardTagExpression('orders');
+            $eligible = $this->creditCardPaymentExpression('orders');
             if (in_array('credit_card_dispute_rate', $cardMetrics, true)) {
                 $this->selectDisputeRate($query, 'credit_card_dispute_rate', $eligible, 'COALESCE(card_risk.dispute_count, 0)');
             }
@@ -260,9 +260,9 @@ class PaymentProductAlertService
             ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
     }
 
-    private function creditCardTagExpression(string $alias): string
+    private function creditCardPaymentExpression(string $alias): string
     {
-        return "(CASE WHEN JSON_VALID(COALESCE({$alias}.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT({$alias}.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+        return "({$alias}.payment_method = 'cc')";
     }
 
     private function creditCardReasonExpression(): string
@@ -323,7 +323,7 @@ class PaymentProductAlertService
             })
             ->select('detail_orders.id')->distinct();
         if (($alert['channel_type'] ?? 'paypal') === 'credit_card') {
-            $orderIds->whereRaw("CASE WHEN JSON_VALID(COALESCE(detail_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(detail_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL");
+            $orderIds->whereRaw($this->creditCardPaymentExpression('detail_orders'));
         } else {
             $orderIds->whereNotNull('detail_orders.paypal_account_id')
                 ->where('detail_orders.paypal_association_source', 'actual_transaction');
@@ -474,7 +474,7 @@ class PaymentProductAlertService
             ->selectRaw('MAX(COALESCE(orders.paid_amount_usd, 0)) as paid_amount_usd')
             ->selectRaw('MAX(orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
-            ->selectRaw('MAX(orders.shopify_payload) as shopify_payload')
+            ->selectRaw('MAX(orders.payment_method) as payment_method')
             ->selectRaw('MAX(orders.logistics_status) as logistics_status')
             ->selectRaw('MAX(orders.paid_at) as paid_at')
             ->groupByRaw("{$productKey}, orders.id");
@@ -512,10 +512,7 @@ class PaymentProductAlertService
             ->groupBy('refund.logistics_order_id');
 
         $actualPayPal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
-        $creditCard = $this->creditCardTagExpression('product_orders');
-        $payload = "LOWER(COALESCE(product_orders.shopify_payload, ''))";
-        $yunhui = "({$creditCard} AND ({$payload} LIKE '%yunhui%' OR {$payload} LIKE '%云汇%'))";
-        $qianhai = "({$creditCard} AND ({$payload} LIKE '%qianhai%' OR {$payload} LIKE '%oceanpayment%' OR {$payload} LIKE '%钱海%'))";
+        $creditCard = $this->creditCardPaymentExpression('product_orders');
 
         $delivered = $database->getPdo()->quote(\App\Models\LogisticsOrder::LOGISTICS_DELIVERED);
 
@@ -552,10 +549,6 @@ class PaymentProductAlertService
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
-            ->selectRaw("SUM(CASE WHEN {$yunhui} THEN 1 ELSE 0 END) as yunhui_payment_count")
-            ->selectRaw("SUM(CASE WHEN {$yunhui} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as yunhui_complaint_count")
-            ->selectRaw("SUM(CASE WHEN {$qianhai} THEN 1 ELSE 0 END) as qianhai_payment_count")
-            ->selectRaw("SUM(CASE WHEN {$qianhai} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as qianhai_complaint_count")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as card_order_count")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN product_orders.paid_amount_usd ELSE 0 END) as card_received_amount")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as card_complaint_count")
@@ -584,8 +577,6 @@ class PaymentProductAlertService
             $matchedName = trim((string) $row->tongtu_product_name);
             $productCode = trim((string) $row->tongtu_product_code);
             $fallbackSku = trim((string) ($row->shopify_sku ?: $row->tongtu_sku));
-            $yunhuiPayments = (int) $row->yunhui_payment_count;
-            $qianhaiPayments = (int) $row->qianhai_payment_count;
 
             $base = [
                 'product_key' => (string) $row->product_key,
@@ -598,12 +589,6 @@ class PaymentProductAlertService
                 'description_mismatch_amount' => $mismatchAmount,
                 'description_mismatch_rate' => $disputeAmount > 0 ? round($mismatchAmount / $disputeAmount * 100, 2) : 0.0,
                 'sku_dispute_amount_share' => $globalDisputeAmount > 0 ? round($disputeAmount / $globalDisputeAmount * 100, 2) : 0.0,
-                'yunhui_complaint_count' => (int) $row->yunhui_complaint_count,
-                'yunhui_payment_count' => $yunhuiPayments,
-                'yunhui_dispute_rate' => $yunhuiPayments > 0 ? round((int) $row->yunhui_complaint_count / $yunhuiPayments * 100, 2) : 0.0,
-                'qianhai_complaint_count' => (int) $row->qianhai_complaint_count,
-                'qianhai_payment_count' => $qianhaiPayments,
-                'qianhai_dispute_rate' => $qianhaiPayments > 0 ? round((int) $row->qianhai_complaint_count / $qianhaiPayments * 100, 2) : 0.0,
                 'status_key' => 'pending',
                 'workflow_status_key' => 'pending',
                 'action_key' => 'process',
@@ -783,7 +768,7 @@ class PaymentProductAlertService
             'date_mode' => (string) ($filters['date_mode'] ?? 'order'),
             'store' => (string) ($filters['store'] ?? ''),
         ];
-        $cacheKey = 'payment:product-alert-metrics:v3:'.sha1((string) json_encode([
+        $cacheKey = 'payment:product-alert-metrics:v4:'.sha1((string) json_encode([
             'qualified' => $onlyQualified,
             'products' => $productKeys,
             'filters' => $metricFilters,

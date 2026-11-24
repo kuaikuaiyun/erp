@@ -119,7 +119,7 @@ class LogisticsProductStatisticsService
             'paypal_refund_amount', 'paypal_refund_rate', 'paypal_dispute_count',
             'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate',
         ] : [];
-        $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v1', $filters)
+        $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v2', $filters)
             .'.'.sha1(json_encode([$ranges, $extraMetrics, $useFullQuery, $filters['only_abnormal']]));
 
         $selection = Cache::flexible($cacheKey, [120, 600], function () use ($filters, $ranges, $baseMetrics, $useFullQuery, $addMetrics): array {
@@ -1901,6 +1901,18 @@ class LogisticsProductStatisticsService
                 'first_item.shopify_sku',
             ])
             ->selectRaw("COALESCE(NULLIF(TRIM(first_item.product_image_url), ''), NULLIF(TRIM(image_item.product_image_url), '')) as product_image_url");
+    }
+
+    /** @param list<string>|Builder $productKeys */
+    public function relatedOrderCountsQuery(array $filters, array|Builder $productKeys): Builder
+    {
+        $key = $this->productKeyExpression('items', 'sku_mappings');
+
+        return $this->baseItemQuery($filters)
+            ->whereIn(DB::raw($key), $productKeys)
+            ->selectRaw("{$key} as product_key")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->groupByRaw($key);
     }
 
     private function metricCandidateQuery(array $filters): Builder

@@ -41,7 +41,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:product-risk-dashboard:v2:'.sha1((string) json_encode(
+        $cacheKey = 'payment:product-risk-dashboard:v3:'.sha1((string) json_encode(
             $filters,
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
@@ -72,7 +72,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function tab(array $filters, string $tab): array
     {
-        $cacheKey = 'payment:product-risk-tab:v2:'.sha1((string) json_encode([
+        $cacheKey = 'payment:product-risk-tab:v3:'.sha1((string) json_encode([
             'filters' => $filters,
             'tab' => $tab,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -127,15 +127,13 @@ class PaymentProductRiskService
             [...array_keys($ranges), $sort],
         ));
         if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
-            return $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]));
+            return $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]), $filters);
         }
 
-        $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics): void {
-            // The supplementary values currently displayed use product history.
-            // Only the candidate product set uses the list's date/store filters.
+        $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics, $filters): void {
             if (in_array('order_count', $extraMetrics, true)) {
-                $query->leftJoinSub($this->paidOrderFactsQuery(clone $candidateKeys), 'payment_order_facts', 'payment_order_facts.product_key', '=', 'base.product_key')
-                    ->selectRaw('COALESCE(payment_order_facts.order_count, 0) as order_count');
+                $query->leftJoinSub($this->statistics->relatedOrderCountsQuery($filters, clone $candidateKeys), 'related_orders', 'related_orders.product_key', '=', 'base.product_key')
+                    ->selectRaw('COALESCE(related_orders.order_count, 0) as order_count');
             }
             $rates = array_values(array_intersect(self::SUPPLEMENTARY_DISPUTE_RATES, $extraMetrics));
             if ($rates !== []) {
@@ -146,11 +144,11 @@ class PaymentProductRiskService
             }
         });
 
-        return $this->withPaymentProductNames($data);
+        return $this->withPaymentProductNames($data, $filters);
     }
 
-    /** @param list<string>|Builder $keys */
-    private function paidOrderFactsQuery(array|Builder $keys, array $filters = []): Builder
+    /** @param list<string> $keys */
+    private function paidOrderDatesQuery(array $keys): Builder
     {
         $key = $this->productKeyExpression('items');
         $query = DB::connection(config('admin.database.connection') ?: config('database.default'))
@@ -158,20 +156,15 @@ class PaymentProductRiskService
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereIn(DB::raw($key), $keys)
             ->whereNotNull('orders.paid_at');
-        $this->applyPaidAtRange($query, $filters);
-        if (($filters['store'] ?? '') !== '') {
-            $query->where('orders.store_name', $filters['store']);
-        }
 
         return $query->selectRaw("{$key} as product_key")
-            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
             ->selectRaw('MIN(orders.paid_at) as first_paid_at')
             ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
             ->groupByRaw($key);
     }
 
-    /** @param array<string,mixed> $data @return array<string,mixed> */
-    private function withPaymentProductNames(array $data): array
+    /** @param array<string,mixed> $data @param array<string,mixed> $filters @return array<string,mixed> */
+    private function withPaymentProductNames(array $data, array $filters): array
     {
         $products = $data['products'] ?? [];
         $keys = collect($products)->mapWithKeys(function (array $product): array {
@@ -197,11 +190,11 @@ class PaymentProductRiskService
             ->get(['payment_product_names.product_key', 'source_item.product_title', 'source_item.tongtu_product_name'])
             ->keyBy('product_key');
 
-        $activeFilters = (array) ($data['filters'] ?? []);
-        $orderFacts = $this->paidOrderFactsQuery(array_values($keys), $activeFilters)->get()->keyBy('product_key');
+        $orderDates = $this->paidOrderDatesQuery(array_values($keys))->get()->keyBy('product_key');
+        $orderCounts = $this->statistics->relatedOrderCountsQuery($filters, array_values($keys))->pluck('order_count', 'product_key');
 
-        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), $activeFilters);
-        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $orderFacts): array {
+        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys));
+        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $orderDates, $orderCounts): array {
             $encoded = substr((string) $product['id'], 8);
             $encoded = strtr($encoded, '-_', '+/').str_repeat('=', (4 - strlen($encoded) % 4) % 4);
             $key = base64_decode($encoded, true);
@@ -232,8 +225,8 @@ class PaymentProductRiskService
             $product['credit_card_delivered_order_count'] = (int) ($card['delivered_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_count'] = (int) ($card['delivered_dispute_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_rate'] = (float) ($card['delivered_dispute_rate'] ?? 0);
-            $facts = $key === false ? null : $orderFacts->get($key);
-            $product['order_count'] = (int) ($facts->order_count ?? 0);
+            $facts = $key === false ? null : $orderDates->get($key);
+            $product['order_count'] = $key === false ? 0 : (int) $orderCounts->get($key, 0);
             $firstPaidAt = $facts->first_paid_at ?? null;
             $product['first_paid_at'] = $firstPaidAt
                 ? Carbon::parse((string) $firstPaidAt, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i')
