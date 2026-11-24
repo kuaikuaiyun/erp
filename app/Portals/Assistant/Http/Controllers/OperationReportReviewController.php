@@ -221,6 +221,7 @@ class OperationReportReviewController extends Controller
             'approveUrl' => route('assistant.operation-report-reviews.approve', $report),
             'rejectUrl' => route('assistant.operation-report-reviews.reject', $report),
             'screenshotRouteName' => 'assistant.operation-report-reviews.screenshot',
+            'pageTitle' => '提交广告费详情',
         ]);
     }
 

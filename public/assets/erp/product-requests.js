@@ -26,6 +26,9 @@
 
     function notify(type, text) {
         if (!text) { return; }
+        if (typeof window.ErpProductRequestTemplateNotify === 'function' && window.ErpProductRequestTemplateNotify(type, text)) {
+            return;
+        }
         if (window.ErpAdminNotifier) {
             window.ErpAdminNotifier.notify({ type: type, title: config.noticeTitle || '', message: text });
             return;
@@ -1696,7 +1699,11 @@
             setProgress(100);
             window.setTimeout(function () {
                 hideEditor();
-                notify('success', payload.message || '');
+                if (config.noticeStorageKey && payload.message) {
+                    try { window.sessionStorage.setItem(config.noticeStorageKey, JSON.stringify({ type: 'success', message: payload.message })); } catch (error) {}
+                } else {
+                    notify('success', payload.message || '');
+                }
                 window.location.assign(payload.redirect || window.location.href);
             }, 420);
         });

@@ -52,6 +52,7 @@
         <p class="product-request-modal-subtitle">{{ __('product_requests.operation.form_subtitle') }}</p>
     </div>
     <div class="modal-body product-request-modal-body">
+        <div class="product-request-form-guidance"><i class="fa fa-info-circle"></i><div><strong>新增数据填写提示</strong><br>带红色星号的项目为必填项；提交前请核对 SKU、1688 链接及上传图片，提交成功后会在列表中显示处理状态。</div></div>
         <section class="form-section">
             <h2 class="form-section-title">{{ __('product_requests.show.overview') }}</h2>
             <div class="row">
