@@ -40,6 +40,9 @@ class FashionStoreAnalyticsController extends Controller
 
         $platformOptions = $this->platformOptions($project);
         $filters = $this->filters($request, $platformOptions);
+        if ($projectCode === 'fuzhuang') {
+            $filters['platform'] = '';
+        }
         $query = $this->stores($context['user'], $filters, $project);
         $metrics = $this->orderMetrics($filters);
         $query->leftJoinSub($metrics, 'fashion_metrics', fn ($join) => $join
@@ -103,6 +106,9 @@ class FashionStoreAnalyticsController extends Controller
         abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
         $filters = $this->filters($request, $this->platformOptions($project));
+        if ($projectCode === 'fuzhuang') {
+            $filters['platform'] = '';
+        }
         $groupBy = in_array($request->input('group_by'), ['store', 'date'], true) ? (string) $request->input('group_by') : 'store';
 
         return $this->csvExporter->download(
@@ -124,7 +130,13 @@ class FashionStoreAnalyticsController extends Controller
             ->when($filters['platform'] !== '', fn (Builder $q) => $filters['platform'] === 'xshoppy'
                 ? $q->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")
                 : $q->whereRaw('LOWER(TRIM(site_builder)) = ?', [$filters['platform']]))
-            ->when($filters['team'] !== '', fn (Builder $q) => $q->whereJsonContains('team', $filters['team']))
+            ->when($filters['team'] !== [], function (Builder $q) use ($filters): void {
+                $q->where(function (Builder $teams) use ($filters): void {
+                    foreach ($filters['team'] as $team) {
+                        $teams->orWhereJsonContains('team', $team);
+                    }
+                });
+            })
             ->when($filters['email_purchased'] !== '', function (Builder $q) use ($filters): void {
                 $this->emailPurchases->applyPurchaseFilter($q, $filters['email_purchased'] === '1');
             })
@@ -168,12 +180,27 @@ class FashionStoreAnalyticsController extends Controller
 
         return ['shop_name' => trim((string) $request->input('shop_name')), 'domain' => trim((string) $request->input('domain')),
             'platform' => array_key_exists((string) $request->input('platform'), $platformOptions) ? (string) $request->input('platform') : '',
-            'team' => trim((string) $request->input('team')), 'owner_assignment' => in_array($request->input('owner_assignment'), ['assigned','unassigned'], true) ? $request->input('owner_assignment') : '',
+            'team' => $this->stringList($request->input('team', [])), 'owner_assignment' => in_array($request->input('owner_assignment'), ['assigned','unassigned'], true) ? $request->input('owner_assignment') : '',
             'email_purchased' => in_array((string) $request->input('email_purchased'), ['0','1'], true) ? (string) $request->input('email_purchased') : '',
             'timezone' => $timezone, 'from_date' => $from, 'to_date' => $to,
             'sort' => in_array($sort, $allowedSorts, true) ? $sort : 'total_sales',
             'direction' => strtolower((string) $request->input('direction')) === 'asc' ? 'asc' : 'desc',
             'per_page' => in_array($perPage, [20,50,100], true) ? $perPage : 20];
+    }
+
+    /** @return list<string> */
+    private function stringList(mixed $value): array
+    {
+        $values = is_array($value) ? $value : [$value];
+
+        return collect($values)
+            ->filter(static fn (mixed $item): bool => is_scalar($item))
+            ->map(static fn (mixed $item): string => trim((string) $item))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->take(50)
+            ->values()
+            ->all();
     }
 
     /** @return array<string,string> */

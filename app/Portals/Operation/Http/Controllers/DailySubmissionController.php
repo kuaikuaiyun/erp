@@ -466,18 +466,29 @@ class DailySubmissionController extends Controller
 
         // The advertising rows in operation reports are the authoritative account source.
         // They take precedence over recharge history, which may itself contain a typo.
-        OperationReport::query()->orderBy('id')->get(['advertising_rows'])->each(function (OperationReport $report) use (&$matches, $agencyIdsByName): void {
-            foreach ($report->advertising_rows ?? [] as $entry) {
-                $agencyId = $agencyIdsByName->get(mb_strtolower(trim((string) ($entry['agency'] ?? ''))));
-                $name = trim((string) ($entry['account_name'] ?? ''));
-                $number = trim((string) ($entry['account_number'] ?? ''));
-                if (! $agencyId || $name === '' || $number === '') continue;
-                $matches[$agencyId]['by_number'][mb_strtolower($number)][] = $name;
-            }
-        });
+        OperationReport::query()
+            ->where('status', OperationReport::STATUS_APPROVED)
+            ->orderBy('id')
+            ->get(['advertising_rows'])
+            ->each(function (OperationReport $report) use (&$matches, $agencyIdsByName): void {
+                foreach ($report->advertising_rows ?? [] as $entry) {
+                    $agencyId = $agencyIdsByName->get(mb_strtolower(trim((string) ($entry['agency'] ?? ''))));
+                    $name = trim((string) ($entry['account_name'] ?? ''));
+                    $number = trim((string) ($entry['account_number'] ?? ''));
+                    if (! $agencyId || $name === '' || $number === '') continue;
+                    $matches[$agencyId]['by_number'][mb_strtolower($number)][] = $name;
+                }
+            });
 
-        DailyAdvertisingRecharge::query()->orderBy('id')->get(['entries'])->each(function (DailyAdvertisingRecharge $submission) use (&$matches, $allowed): void {
+        DailyAdvertisingRecharge::query()->orderBy('id')->get(['entries', 'status'])->each(function (DailyAdvertisingRecharge $submission) use (&$matches, $allowed): void {
             foreach ($submission->entries ?? [] as $entry) {
+                $entryStatus = (string) ($entry['status'] ?? (
+                    $submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED
+                        ? DailyAdvertisingRecharge::STATUS_PROCESSED
+                        : DailyAdvertisingRecharge::STATUS_PENDING
+                ));
+                if ($entryStatus !== DailyAdvertisingRecharge::STATUS_PROCESSED) continue;
+
                 $agencyId = (string) (int) ($entry['agency_id'] ?? 0);
                 $name = trim((string) ($entry['account_name'] ?? ''));
                 $number = trim((string) ($entry['account_number'] ?? ''));
