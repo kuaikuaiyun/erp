@@ -12,7 +12,7 @@
 .ad-screenshot{width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #d6e3eb;cursor:zoom-in}.ad-account{white-space:nowrap;color:#405f74}.ad-summary-table{min-width:1480px}
 .ad-summary-kpis{grid-template-columns:repeat(3,minmax(145px,1fr))}
 </style>
-<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261123-4">
+<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261124-2">
 @endpush
 
 @section('content')
@@ -53,5 +53,5 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261123-3"></script>
+<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-1"></script>
 @endpush

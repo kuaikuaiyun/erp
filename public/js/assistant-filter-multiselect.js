@@ -19,26 +19,41 @@
         var searchPlaceholder = select.dataset.searchPlaceholder || ('搜索' + fieldLabel);
         var noResults = select.dataset.noResults || '没有找到匹配选项';
         var clearText = select.dataset.clearText || '清空选择';
+        var selectAllText = select.dataset.selectAllText || '全选';
         var options = Array.prototype.slice.call(select.options);
         var details = element('details', 'flt-picker assistant-filter-multiselect ' + (multiple ? 'is-multiple' : 'is-single'));
         var summary = element('summary', '', placeholder);
         var panel = element('div', 'flt-picker-panel');
         var search = element('input', 'assistant-filter-multiselect-search');
         var list = element('div', 'flt-picker-options');
+        var actions = element('div', 'flt-picker-actions');
+        var selectAll = multiple ? element('button', 'flt-picker-select-all', selectAllText) : null;
         var clear = element('button', 'flt-picker-clear', clearText);
 
         summary.id = 'assistant-filter-multiselect-' + index;
         search.type = 'search';
         search.placeholder = searchPlaceholder;
         search.setAttribute('aria-label', searchPlaceholder);
+        if (selectAll) {
+            selectAll.type = 'button';
+            actions.append(selectAll);
+        }
         clear.type = 'button';
-        panel.append(search, list, clear);
+        actions.append(clear);
+        panel.append(search, list, actions);
         details.append(summary, panel);
         select.insertAdjacentElement('afterend', details);
         select.hidden = true;
 
         function selectedOptions() {
             return options.filter(function (option) { return option.selected; });
+        }
+
+        function visibleOptions() {
+            var keyword = search.value.trim().toLocaleLowerCase();
+            return options.filter(function (option) {
+                return !option.disabled && (!keyword || option.text.toLocaleLowerCase().includes(keyword));
+            });
         }
 
         function updateSummary() {
@@ -56,10 +71,7 @@
         }
 
         function draw() {
-            var keyword = search.value.trim().toLocaleLowerCase();
-            var visible = options.filter(function (option) {
-                return !keyword || option.text.toLocaleLowerCase().includes(keyword);
-            });
+            var visible = visibleOptions();
             list.replaceChildren();
             if (!visible.length) {
                 list.appendChild(element('p', '', noResults));
@@ -92,6 +104,15 @@
         }
 
         search.addEventListener('input', draw);
+        if (selectAll) {
+            selectAll.addEventListener('click', function () {
+                visibleOptions().forEach(function (option) { option.selected = true; });
+                draw();
+                updateSummary();
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                search.focus();
+            });
+        }
         clear.addEventListener('click', function () {
             if (multiple) {
                 options.forEach(function (option) { option.selected = false; });
