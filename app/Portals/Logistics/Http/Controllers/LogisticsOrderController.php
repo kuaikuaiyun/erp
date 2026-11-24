@@ -82,30 +82,7 @@ class LogisticsOrderController extends Controller
 
         $this->requireSharedOrders();
         $filters = $this->filters($request);
-        $orders = $this->orderQuery($filters)
-            ->select([
-                'id', 'assistant_domain_store_id', 'assigned_owner_name', 'bill_number', 'buyer_email',
-                'buyer_name', 'collection_account', 'collection_account_email', 'created_at',
-                'data_status', 'destination', 'group_names', 'is_add_on', 'logistics_status',
-                'operator_name', 'order_created_at', 'paid_amount_usd', 'paid_at', 'payment_gateway',
-                'payment_method', 'payment_status', 'sale_product_weight', 'sale_quantity',
-                'shipping_company', 'shopify_order_id', 'shopify_order_number', 'sku_exception_reason',
-                'source_shop_domain', 'store_name', 'subscription_origin_order_id', 'subscription_status',
-                'subscription_type', 'tongtu_order_number', 'tongtu_product_code', 'tongtu_product_name',
-                'tongtu_sku', 'total_shipping_usd', 'tracking_number', 'tracking_sync_status',
-                'transaction_id', 'updated_at', 'total_amount', 'currency',
-            ])
-            ->with([
-                'items' => fn ($query) => $query->orderBy('id'),
-                'store:id,domain',
-                'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
-                'creditCardRefunds' => fn ($query) => $query->orderByDesc('occurred_at')->orderByDesc('id'),
-                'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
-            ])
-            ->orderByDesc('order_created_at')
-            ->orderByDesc('id')
-            ->paginate($filters['per_page'])
-            ->withQueryString();
+        $orders = $this->paginatedOrders($filters);
         $trackingBatch = $this->currentTrackingBatch($request, (int) $context['user']->getKey());
         $nonRunnableProductKeys = $this->nonRunnableProductKeys();
 
@@ -124,6 +101,61 @@ class LogisticsOrderController extends Controller
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
             'nonRunnableProductKeys' => $nonRunnableProductKeys,
         ]);
+    }
+
+    private function paginatedOrders(array $filters): LengthAwarePaginator
+    {
+        return (new SharedLogisticsOrder())->getConnection()->transaction(function () use ($filters): LengthAwarePaginator {
+            $hasFilters = collect($filters)->except('per_page')->contains(static fn ($value): bool => $value !== '');
+            $query = $hasFilters ? $this->orderQuery($filters) : $this->unfilteredOrderIds();
+            $page = $query->select(['id', 'order_created_at'])
+                ->orderByDesc('order_created_at')->orderByDesc('id')
+                ->paginate($filters['per_page'])->withQueryString();
+            $ids = $page->getCollection()->modelKeys();
+            if ($ids === []) {
+                return $page;
+            }
+
+            $records = SharedLogisticsOrder::query()->whereKey($ids)
+                ->select([
+                    'id', 'assistant_domain_store_id', 'assigned_owner_name', 'bill_number', 'buyer_email',
+                    'buyer_name', 'collection_account', 'collection_account_email', 'created_at',
+                    'data_status', 'destination', 'group_names', 'is_add_on', 'logistics_status',
+                    'operator_name', 'order_created_at', 'paid_amount_usd', 'paid_at', 'payment_gateway',
+                    'payment_method', 'payment_status', 'sale_product_weight', 'sale_quantity',
+                    'shipping_company', 'shopify_order_id', 'shopify_order_number', 'sku_exception_reason',
+                    'source_shop_domain', 'store_name', 'subscription_origin_order_id', 'subscription_status',
+                    'subscription_type', 'tongtu_order_number', 'tongtu_product_code', 'tongtu_product_name',
+                    'tongtu_sku', 'total_shipping_usd', 'tracking_number', 'tracking_sync_status',
+                    'transaction_id', 'updated_at', 'total_amount', 'currency',
+                ])
+                ->with([
+                    'items' => fn ($query) => $query->orderBy('id'),
+                    'store:id,domain',
+                    'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
+                    'creditCardRefunds' => fn ($query) => $query->orderByDesc('occurred_at')->orderByDesc('id'),
+                    'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
+                ])
+                ->get()->keyBy('id');
+            $page->setCollection($page->getCollection()->map(
+                static fn (LogisticsOrder $order): SharedLogisticsOrder => $records->get($order->getKey())
+            ));
+
+            return $page;
+        });
+    }
+
+    private function unfilteredOrderIds(): Builder
+    {
+        return $this->listedOrders(LogisticsOrder::query()->from('shop_order_logistics as logistics_orders'))
+            ->whereExists(function (QueryBuilder $source): void {
+                $source->selectRaw('1')->from('shop_order_source_map as source')
+                    ->join('shop_order_list as shared', 'shared.id', '=', 'source.order_id')
+                    ->whereColumn('source.source_id', 'logistics_orders.id')
+                    ->where('source.source_table', 'logistics_orders')
+                    ->where('shared.source_platform', 'shopify')
+                    ->where('shared.source_system', 'logistics');
+            });
     }
 
     private function sharedShopifyAmounts(Collection $orders): Collection
