@@ -1,6 +1,6 @@
 @extends('portal.layout')
 
-@section('page_title', '运营报表详情')
+@section('page_title', $pageTitle ?? '运营报表详情')
 
 @push('styles')
 <style>
@@ -10,7 +10,7 @@
 @endpush
 
 @section('content')
-<section class="content-header"><div class="detail-head"><h1>运营报表详情</h1><div><a class="btn btn-default" href="{{ $backUrl ?? route('operation.reports.index') }}"><i class="fa fa-arrow-left"></i> 返回</a>@if($canEdit)<a class="btn btn-primary" href="{{ $editUrl ?? route('operation.advertising-reports.index',['edit_report'=>$report->id,'report_date'=>$report->report_date->format('Y-m-d'),'operator_user_id'=>$report->operator_user_id]) }}"><i class="fa fa-edit"></i> 重新编辑</a>@endif @if($report->status==='pending'&&$canReview)<form method="post" action="{{ $approveUrl ?? route('operation.reports.approve',$report) }}" style="display:inline">@csrf<button class="btn btn-success" onclick="return confirm('确认审核通过该运营报表？')"><i class="fa fa-check"></i> 审核通过</button></form> <button class="btn btn-danger" type="button" onclick="document.getElementById('reject-report-box').style.display='block'"><i class="fa fa-times"></i> 审核不通过</button>@endif</div></div></section>
+<section class="content-header"><div class="detail-head"><h1>{{ $pageTitle ?? '运营报表详情' }}</h1><div><a class="btn btn-default" href="{{ $backUrl ?? route('operation.reports.index') }}"><i class="fa fa-arrow-left"></i> 返回</a>@if($canEdit)<a class="btn btn-primary" href="{{ $editUrl ?? route('operation.advertising-reports.index',['edit_report'=>$report->id,'report_date'=>$report->report_date->format('Y-m-d'),'operator_user_id'=>$report->operator_user_id]) }}"><i class="fa fa-edit"></i> 重新编辑</a>@endif @if($report->status==='pending'&&$canReview)<form method="post" action="{{ $approveUrl ?? route('operation.reports.approve',$report) }}" style="display:inline">@csrf<button class="btn btn-success" onclick="return confirm('确认审核通过该运营报表？')"><i class="fa fa-check"></i> 审核通过</button></form> <button class="btn btn-danger" type="button" onclick="document.getElementById('reject-report-box').style.display='block'"><i class="fa fa-times"></i> 审核不通过</button>@endif</div></div></section>
 <section class="content report-detail">
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
     @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
