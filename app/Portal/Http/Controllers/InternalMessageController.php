@@ -107,11 +107,13 @@ class InternalMessageController extends Controller
     {
         $context = $this->operationContext($request);
         if ($context instanceof Response) return $context;
-        $recipientRows = InternalMessageRecipient::query()
-            ->where('recipient_user_id', $context['user']->getKey())->whereNull('read_at')
+        $unreadQuery = InternalMessageRecipient::query()
+            ->where('recipient_user_id', $context['user']->getKey())->whereNull('read_at');
+        $unreadCount = (clone $unreadQuery)->count();
+        $recipientRows = $unreadQuery
             ->with(['message.images'])->orderBy('id')->limit(30)->get();
 
-        return response()->json(['messages' => $recipientRows->map(function (InternalMessageRecipient $recipient): array {
+        return response()->json(['unread_count' => $unreadCount, 'messages' => $recipientRows->map(function (InternalMessageRecipient $recipient): array {
             $message = $recipient->message;
             return [
                 'id' => (int) $message->getKey(), 'title' => $message->title, 'content' => $message->content,
@@ -136,7 +138,7 @@ class InternalMessageController extends Controller
             ->where('recipient_user_id', $context['user']->getKey())
             ->when($status === 'pending', fn ($query) => $query->whereNull('processed_at'))
             ->when($status === 'processed', fn ($query) => $query->whereNotNull('processed_at'))
-            ->with(['message.images', 'managerListingTask.product', 'managerListingTask.department', 'assigneeListingTask.product'])
+            ->with(['message.images', 'processedByUser', 'managerListingTask.product', 'managerListingTask.department', 'assigneeListingTask.product'])
             ->orderByDesc('id')
             ->paginate(20)
             ->withQueryString();
@@ -239,7 +241,7 @@ class InternalMessageController extends Controller
         if ($context instanceof Response) return $context;
         $isSender = in_array($context['portal']->code, self::SENDER_PORTALS, true)
             && $message->sender_portal_code === $context['portal']->code;
-        $isRecipient = in_array($context['portal']->code, ['yunying', 'daily-report', 'fuzhuang'], true) && InternalMessageRecipient::query()
+        $isRecipient = InternalMessageRecipient::query()
             ->where('internal_message_id', $message->getKey())->where('recipient_user_id', $context['user']->getKey())->exists();
         abort_unless($isSender || $isRecipient, 403);
         abort_unless(Storage::disk('public')->exists($image->path), 404);
@@ -274,13 +276,8 @@ class InternalMessageController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
-        abort_unless(in_array($context['portal']->code, ['yunying', 'daily-report', 'fuzhuang'], true), 403);
-
-        // portalContext() has already verified that the active account can enter
-        // the current operation portal and access its visible menu. Do not apply
-        // the legacy fixed department-tree check here: it excluded valid users
-        // of other operation systems (for example Shopify subscription teams).
-        // All message queries below remain scoped to the current recipient user.
+        // All authenticated portal users can receive station messages. Message,
+        // read and processing queries remain strictly scoped to the current user.
         return $context;
     }
 }

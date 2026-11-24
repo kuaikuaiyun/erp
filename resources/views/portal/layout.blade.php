@@ -20,6 +20,9 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/sidebar-layout.css?v=20261111-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/admin-notifications.css?v=20260929-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/portal-shell.css?v=20261006-2">
+    <style>
+        .portal-message-bell>a{position:relative;font-size:17px}.portal-message-bell .label{position:absolute;top:8px;right:5px;min-width:18px;padding:2px 5px;border-radius:9px;font-size:10px}.portal-message-menu{width:360px!important;padding:0!important;border:0!important;border-radius:8px!important;overflow:hidden;box-shadow:0 10px 30px rgba(26,55,78,.22)!important}.portal-message-menu .message-menu-title{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;background:#eef6fb;color:#274b64;font-weight:700}.portal-message-menu .message-menu-list{max-height:330px;overflow-y:auto}.portal-message-menu .message-menu-item{display:block;padding:11px 15px;border-bottom:1px solid #edf1f4;color:#35536a}.portal-message-menu .message-menu-item:hover{background:#f3f9fc}.portal-message-menu .message-menu-item strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#21445d}.portal-message-menu .message-menu-item small{display:block;margin-top:4px;color:#8294a2}.portal-message-menu .message-menu-empty{padding:32px 15px;text-align:center;color:#91a1ad}.portal-message-menu .message-menu-all{display:block;padding:11px;text-align:center;background:#fafcfd;color:#2682b6;font-weight:600}
+    </style>
     @if(($portal->code ?? null) === 'wuliu')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/shopify-store-alerts.css?v=20261124-1">
     @endif
@@ -78,6 +81,16 @@
                             <span class="sr-only">{{ __('admin.refresh') }}</span>
                         </a>
                     </li>
+                    <li class="dropdown portal-message-bell">
+                        <a href="#" class="dropdown-toggle" data-toggle="dropdown" title="站内消息" aria-label="站内消息">
+                            <i class="fa fa-bell-o"></i><span id="portal-message-unread-count" class="label label-danger" style="display:none">0</span>
+                        </a>
+                        <div class="dropdown-menu portal-message-menu">
+                            <div class="message-menu-title"><span><i class="fa fa-bell"></i> 站内消息</span><small id="portal-message-summary">暂无未读</small></div>
+                            <div id="portal-message-list" class="message-menu-list"><div class="message-menu-empty"><i class="fa fa-check-circle"></i> 暂无未读消息</div></div>
+                            <a class="message-menu-all" href="{{ route('operation.internal-messages.index', ['status' => 'all']) }}">查看全部消息 <i class="fa fa-angle-right"></i></a>
+                        </div>
+                    </li>
                     <li class="portal-header-user" aria-label="{{ $greeting }}">
                         <span>
                             <span class="hidden-xs">{{ $greeting }}</span>
@@ -118,22 +131,6 @@
     </footer>
 </div>
 
-@if(in_array($portal->code, ['yunying', 'daily-report', 'fuzhuang'], true))
-<div class="modal fade" id="internal-message-popup" tabindex="-1" role="dialog" aria-labelledby="internal-message-title">
-    <div class="modal-dialog" role="document" style="max-width:760px"><div class="modal-content" style="border:0;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.28)">
-        <div class="modal-header" style="background:linear-gradient(135deg,#173b5e,#2f7fae);color:#fff;padding:17px 20px"><h4 class="modal-title" id="internal-message-title"><i class="fa fa-bullhorn"></i> 站内消息</h4></div>
-        <div class="modal-body" style="padding:22px 24px">
-            <div id="internal-message-counter" style="font-size:12px;color:#7890a3;margin-bottom:7px"></div>
-            <h3 id="internal-message-subject" style="margin:0 0 8px;color:#173d5f;font-size:21px"></h3>
-            <div id="internal-message-meta" style="font-size:12px;color:#7a8d9d;margin-bottom:16px"></div>
-            <div id="internal-message-content" style="white-space:pre-wrap;line-height:1.8;color:#344f64;font-size:14px"></div>
-            <div id="internal-message-images" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px"></div>
-        </div>
-        <div class="modal-footer" style="background:#f6f9fb;padding:13px 20px"><span class="text-muted pull-left" style="font-size:12px;line-height:34px">未标记已读的消息会在下次进入系统时继续显示</span><button type="button" class="btn btn-primary" id="internal-message-read"><i class="fa fa-check"></i> 标记已读</button></div>
-    </div></div>
-</div>
-@endif
-
 <button id="totop" title="{{ __('admin.back') }}" style="display: none;"><i class="fa fa-chevron-up"></i></button>
 
 <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/bootstrap/js/bootstrap.min.js"></script>
@@ -146,10 +143,9 @@
 @if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
 <script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261026-1"></script>
 @endif
-@if(in_array($portal->code, ['yunying', 'daily-report', 'fuzhuang'], true))
 <script>
 (function($){
-    var messages=[],index=0,modal=$('#internal-message-popup'),readButton=$('#internal-message-read');
+    var messageList=$('#portal-message-list'),unreadBadge=$('#portal-message-unread-count'),messageSummary=$('#portal-message-summary');
     function updatePendingBadge(){
         var badge=$('#operation-internal-message-badge');if(!badge.length)return;
         $.get(@json(route('operation.internal-messages.pending-count'))).done(function(response){badge.text(response.count||0);});
@@ -169,31 +165,29 @@
             badges.text(count).show().toggleClass('bg-yellow',count>0).toggleClass('bg-gray',count===0);
         });
     }
-    function show(){
-        if(index>=messages.length){modal.modal('hide');return;}
-        var item=messages[index];
-        $('#internal-message-counter').text('未读消息 '+(index+1)+' / '+messages.length);
-        $('#internal-message-subject').text(item.title||'站内消息');
-        $('#internal-message-meta').text((item.sender_portal_name||'')+' · '+(item.sender_name||'')+' · '+(item.published_at||''));
-        $('#internal-message-content').text(item.content||'');
-        var box=$('#internal-message-images').empty();
-        (item.images||[]).forEach(function(url){$('<img>',{src:url,alt:'消息图片','class':'erp-zoomable'}).css({width:'150px',height:'110px',objectFit:'cover',borderRadius:'7px',border:'1px solid #d9e4eb',cursor:'zoom-in'}).appendTo(box);});
-        readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 标记已读');
-        modal.modal({backdrop:'static',keyboard:false,show:true});
+    function loadUnreadMessages(){
+        $.get(@json(route('internal-messages.unread'))).done(function(response){
+            var messages=response.messages||[],count=parseInt(response.unread_count,10)||messages.length;
+            unreadBadge.text(count).toggle(count>0);messageSummary.text(count>0?count+' 条未读':'暂无未读');messageList.empty();
+            if(!count){messageList.html('<div class="message-menu-empty"><i class="fa fa-check-circle"></i> 暂无未读消息</div>');return;}
+            messages.slice(0,10).forEach(function(item){
+                var link=$('<a>',{'class':'message-menu-item','href':@json(route('operation.internal-messages.index', ['status'=>'all']))+'#message-'+item.id,'data-read-url':item.read_url});
+                $('<strong>').text(item.title||'站内消息').appendTo(link);
+                $('<small>').text((item.sender_name||'')+' · '+(item.published_at||'')).appendTo(link);
+                link.appendTo(messageList);
+            });
+        });
     }
-    readButton.on('click',function(){
-        var item=messages[index];if(!item)return;
-        readButton.prop('disabled',true).html('<i class="fa fa-spinner fa-spin"></i> 正在处理');
-        $.ajax({url:item.read_url,type:'POST',headers:{'X-CSRF-TOKEN':$('meta[name="csrf-token"]').attr('content')}})
-            .done(function(){index++;show();})
-            .fail(function(){readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 重新标记已读');});
+    messageList.on('click','.message-menu-item',function(event){
+        event.preventDefault();var link=$(this),target=link.attr('href');
+        $.ajax({url:link.data('read-url'),type:'POST',headers:{'X-CSRF-TOKEN':$('meta[name="csrf-token"]').attr('content')}})
+            .always(function(){window.location.href=target;});
     });
-    $.get(@json(route('internal-messages.unread'))).done(function(response){messages=response.messages||[];if(messages.length)show();});
+    loadUnreadMessages();
     updatePendingBadge();updateAbnormalOrderBadge();updateAppLovinGiftBadge();
-    setInterval(function(){updatePendingBadge();updateAbnormalOrderBadge();updateAppLovinGiftBadge();},60000);
+    setInterval(function(){loadUnreadMessages();updatePendingBadge();updateAbnormalOrderBadge();updateAppLovinGiftBadge();},60000);
 })(jQuery);
 </script>
-@endif
 @stack('scripts')
 @if ($watermarkScript !== null)
     <script>{!! $watermarkScript !!}</script>
