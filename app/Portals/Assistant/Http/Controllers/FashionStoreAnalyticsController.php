@@ -38,11 +38,7 @@ class FashionStoreAnalyticsController extends Controller
         abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
 
-        $platformOptions = $this->platformOptions($project);
-        $filters = $this->filters($request, $platformOptions);
-        if ($projectCode === 'fuzhuang') {
-            $filters['platform'] = '';
-        }
+        $filters = $this->filters($request);
         $query = $this->stores($context['user'], $filters, $project);
         $metrics = $this->orderMetrics($filters);
         $query->leftJoinSub($metrics, 'fashion_metrics', fn ($join) => $join
@@ -87,7 +83,6 @@ class FashionStoreAnalyticsController extends Controller
             'reportProject' => $project,
             'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
-            'platformOptions' => $platformOptions,
             'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
                 'active_stores_count' => (int) ($summaryRow?->active_stores_count ?? 0),
@@ -105,10 +100,7 @@ class FashionStoreAnalyticsController extends Controller
         $projectCode = (string) $request->query('project_code', 'fuzhuang');
         abort_unless(array_key_exists($projectCode, OperationProjectCatalog::all()), 404);
         $project = OperationProjectCatalog::get($projectCode);
-        $filters = $this->filters($request, $this->platformOptions($project));
-        if ($projectCode === 'fuzhuang') {
-            $filters['platform'] = '';
-        }
+        $filters = $this->filters($request);
         $groupBy = in_array($request->input('group_by'), ['store', 'date'], true) ? (string) $request->input('group_by') : 'store';
 
         return $this->csvExporter->download(
@@ -164,7 +156,7 @@ class FashionStoreAnalyticsController extends Controller
     }
 
     /** @return array<string,mixed> */
-    private function filters(Request $request, array $platformOptions): array
+    private function filters(Request $request): array
     {
         $requestedTimezone = (string) $request->input('timezone');
         $timezone = array_key_exists($requestedTimezone, $this->timezoneOptions())
@@ -179,7 +171,7 @@ class FashionStoreAnalyticsController extends Controller
         $perPage = (int) $request->input('per_page', 20);
 
         return ['shop_name' => trim((string) $request->input('shop_name')), 'domain' => trim((string) $request->input('domain')),
-            'platform' => array_key_exists((string) $request->input('platform'), $platformOptions) ? (string) $request->input('platform') : '',
+            'platform' => '',
             'team' => $this->stringList($request->input('team', [])), 'owner_assignment' => in_array($request->input('owner_assignment'), ['assigned','unassigned'], true) ? $request->input('owner_assignment') : '',
             'email_purchased' => in_array((string) $request->input('email_purchased'), ['0','1'], true) ? (string) $request->input('email_purchased') : '',
             'timezone' => $timezone, 'from_date' => $from, 'to_date' => $to,
@@ -201,29 +193,6 @@ class FashionStoreAnalyticsController extends Controller
             ->take(50)
             ->values()
             ->all();
-    }
-
-    /** @return array<string,string> */
-    private function platformOptions(array $project): array
-    {
-        return AssistantDomainStore::query()
-            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
-            ->whereNotNull('site_builder')
-            ->pluck('site_builder')
-            ->map(function ($platform): string {
-                $platform = mb_strtolower(trim((string) $platform));
-
-                return $platform === 'xshopy' ? 'xshoppy' : $platform;
-            })
-            ->filter()->unique()->sort()->mapWithKeys(fn (string $platform): array => [
-                $platform => match ($platform) {
-                    'xshoppy' => 'XShoppy',
-                    'shopline' => 'Shopline',
-                    'nbc' => 'NBC',
-                    'shopyy' => 'ShopYY',
-                    default => $platform,
-                },
-            ])->all();
     }
 
     /** @return array<string,string> */

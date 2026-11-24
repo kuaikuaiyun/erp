@@ -31,6 +31,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
             'operation_department_ids.*' => ['integer', 'distinct'],
             'status' => ['nullable', 'in:pending,processing,processed,rejected'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $query = DailyAdvertisingAccountAuthorization::query();
         $allDepartments = $this->storeOwners->boundBusinessDepartments();
@@ -48,7 +49,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         return view('portals.assistant.daily-submissions.advertising-account-authorization', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'filters' => $filters, 'departments' => $departments,
-            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
+            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString(),
         ]);
     }
 

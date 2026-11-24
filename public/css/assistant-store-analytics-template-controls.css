@@ -153,6 +153,30 @@
 .assistant-fashion-store-analytics-page .assistant-filter-multiselect.is-single .flt-picker-actions {
     display: none;
 }
+@media (min-width: 1401px) {
+    .assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout {
+        grid-template-columns: repeat(5, minmax(170px, 1fr));
+    }
+}
+@media (min-width: 1101px) {
+    .assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .fashion-filter-period {
+        grid-template-columns: minmax(230px, 280px) 220px 220px minmax(274px, 1fr);
+        justify-content: start;
+    }
+    .assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .fashion-filter-actions {
+        min-width: 274px;
+        justify-content: flex-start;
+    }
+}
+.assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .form-control,
+.assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .assistant-filter-multiselect summary,
+.assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .fashion-filter-actions .btn {
+    height: 36px;
+    min-height: 36px;
+}
+.assistant-fashion-store-analytics-page .fashion-filter-grid.is-five-column-layout .fashion-filter-actions {
+    padding-bottom: 0;
+}
 @media (max-width: 767px) {
     .assistant-shopify-analytics-page .assistant-filter-multiselect .flt-picker-panel,
     .assistant-fashion-store-analytics-page .assistant-filter-multiselect .flt-picker-panel {

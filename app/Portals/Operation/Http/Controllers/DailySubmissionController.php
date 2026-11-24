@@ -375,7 +375,7 @@ class DailySubmissionController extends Controller
             'rechargeSubmissionCutoff' => $now->copy()->setTime(15, 0)->format('Y-m-d H:i'),
             'history' => DailyAdvertisingRecharge::query()
                 ->where('operator_user_id', $operator->getKey())
-                ->latest('report_date')->latest('id')->paginate(15)->withQueryString(),
+                ->latest('report_date')->latest('id')->paginate($this->historyPerPage($request))->withQueryString(),
         ]);
     }
 
@@ -399,7 +399,7 @@ class DailySubmissionController extends Controller
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $operator,
             'advertisingAgencyGroups' => AssistantAdvertisingAgency::enabledGroups($assistantDepartmentIds),
-            'history' => DailyAccountOpening::query()->where('operator_user_id', $operator->getKey())->latest('id')->paginate(15)->withQueryString(),
+            'history' => DailyAccountOpening::query()->where('operator_user_id', $operator->getKey())->latest('id')->paginate($this->historyPerPage($request))->withQueryString(),
         ]);
     }
 
@@ -418,7 +418,7 @@ class DailySubmissionController extends Controller
         return view('portals.operation.daily-submissions.store-launch', [
             'portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,
             'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'projects'=>$projects,
-            'history'=>DailyStoreLaunch::query()->where('operator_user_id',$operator->id)->latest('id')->paginate(15)->withQueryString(),
+            'history'=>DailyStoreLaunch::query()->where('operator_user_id',$operator->id)->latest('id')->paginate($this->historyPerPage($request))->withQueryString(),
         ]);
     }
 
@@ -426,7 +426,7 @@ class DailySubmissionController extends Controller
     {
         $user=$context['user'];$isBoss=$this->isBoss($user);$operatorOptions=$isBoss?$this->operatorOptions():collect([$user]);$operatorId=$isBoss?(int)($request->integer('operator_user_id')?:$operatorOptions->first()?->id):(int)$user->id;$operator=$operatorOptions->firstWhere('id',$operatorId)?:$user;
         $department=$this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);$assistantIds=$department?$this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int)$department->id):($user->isAdministrator()?null:[]);
-        return view('portals.operation.daily-submissions.advertising-account-authorization',['portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'advertisingAgencyGroups'=>AssistantAdvertisingAgency::enabledGroups($assistantIds),'history'=>DailyAdvertisingAccountAuthorization::query()->where('operator_user_id',$operator->id)->latest('id')->paginate(15)->withQueryString()]);
+        return view('portals.operation.daily-submissions.advertising-account-authorization',['portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'advertisingAgencyGroups'=>AssistantAdvertisingAgency::enabledGroups($assistantIds),'history'=>DailyAdvertisingAccountAuthorization::query()->where('operator_user_id',$operator->id)->latest('id')->paginate($this->historyPerPage($request))->withQueryString()]);
     }
 
     private function accountStoreTransfer(Request $request, array $context): View
@@ -441,8 +441,15 @@ class DailySubmissionController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $user, 'isBoss' => $isBoss,
             'operatorOptions' => $operatorOptions, 'selectedOperator' => $operator,
             'advertisingAgencyGroups' => AssistantAdvertisingAgency::enabledGroups($assistantIds), 'projects' => $projects,
-            'history' => DailyAccountStoreTransfer::query()->where('operator_user_id', $operator->id)->latest('id')->paginate(15)->withQueryString(),
+            'history' => DailyAccountStoreTransfer::query()->where('operator_user_id', $operator->id)->latest('id')->paginate($this->historyPerPage($request))->withQueryString(),
         ]);
+    }
+
+    private function historyPerPage(Request $request): int
+    {
+        $perPage = (int) $request->input('per_page', 20);
+
+        return in_array($perPage, [20, 50, 100], true) ? $perPage : 20;
     }
 
     private function accountOpeningMediaType(string $media): string

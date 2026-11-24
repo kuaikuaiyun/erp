@@ -36,6 +36,7 @@ class AdvertisingRechargeReviewController extends Controller
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
         $query = DailyAdvertisingRecharge::query();
@@ -125,7 +126,7 @@ class AdvertisingRechargeReviewController extends Controller
                 'amount' => $todayTotalAmount,
             ],
             'submissions' => $query->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
-                ->latest('report_date')->latest('id')->paginate(20)->withQueryString(),
+                ->latest('report_date')->latest('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString(),
         ]);
     }
 

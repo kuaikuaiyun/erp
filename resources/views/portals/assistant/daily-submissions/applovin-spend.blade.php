@@ -1,4 +1,5 @@
 @extends('portal.layout')
+@include('portals.assistant.daily-submissions.partials.template-assets')
 @section('page_title', 'AppLovin账号消耗')
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
@@ -9,7 +10,7 @@
 @endpush
 @section('content')
 <section class="content-header"><h1>AppLovin账号消耗 <small>自动汇总已审核通过的运营广告费用</small></h1></section>
-<section class="content applovin-list-template">
+<section class="content applovin-list-template daily-submission-template-page">
 @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
 <div class="box review-box review-filter-box"><div class="box-body"><form class="filters" method="get">
 @include('portals.assistant.partials.operation-department-multi-filter',['departments'=>$departmentOptions,'selectedIds'=>$selectedDepartmentIds,'inputName'=>'department_ids','label'=>'运营部门'])
