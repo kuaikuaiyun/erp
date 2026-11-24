@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -195,13 +196,24 @@ class OperationReportReviewController extends Controller
         if ($context instanceof Response) return $context;
         abort_unless($this->canAccessReport($report, $context['user']), 403);
         $rows = $report->metric_rows ?: [];
+        $advertisingRows = $report->advertising_rows ?: [];
+        $cacheVersion = $report->updated_at?->getTimestamp() ?? 0;
+        $detailMetrics = Cache::remember(
+            'assistant:operation-report-review:'.$report->getKey().':'.$cacheVersion,
+            now()->addHour(),
+            fn (): array => [
+                'totals' => $this->sumRows($rows),
+                'rowspans' => $this->identityRowspans($rows),
+                'media_roi' => $this->metrics->mediaRoiSummary($rows, $advertisingRows),
+            ],
+        );
 
         return view('portals.operation.reports.show', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'report' => $report,
-            'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
-            'metricRowspans' => $this->identityRowspans($rows),
-            'advertisingRows' => $report->advertising_rows ?: [],
-            'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
+            'metricRows' => $rows, 'metricTotals' => $detailMetrics['totals'],
+            'metricRowspans' => $detailMetrics['rowspans'],
+            'advertisingRows' => $advertisingRows,
+            'mediaRoiRows' => $detailMetrics['media_roi'],
             'canReview' => ! $report->trashed(),
             'canEdit' => ! $report->trashed() && $report->status === OperationReport::STATUS_APPROVED,
             'editUrl' => route('assistant.operation-report-reviews.edit', $report),
@@ -411,7 +423,9 @@ class OperationReportReviewController extends Controller
         abort_unless($belongsToReport, 404);
         abort_unless(Storage::disk('public')->exists($validated['path']), 404);
 
-        return Storage::disk('public')->response($validated['path']);
+        return Storage::disk('public')->response($validated['path'], null, [
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
     }
 
     private function context(Request $request): array|Response
