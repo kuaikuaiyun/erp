@@ -59,7 +59,7 @@ return [
     ],
     'link_issues' => [
         'title' => '审核链接问题',
-        'subtitle' => '记录投放链接审核失败的需求提报，按提报编号唯一展示。',
+        'subtitle' => '普通账号仅显示本人提报的数据，Boss 账号可查看全部投放链接审核失败记录。',
     ],
     'warehouse_issues' => [
         'title' => '仓库问题',

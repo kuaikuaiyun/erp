@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ProductRequest extends Model
 {
@@ -59,6 +60,15 @@ class ProductRequest extends Model
     public function placementReviews(): HasMany
     {
         return $this->hasMany(ProductRequestPlacementReview::class)->latest('id');
+    }
+
+    public function latestRejectedPlacementReview(): HasOne
+    {
+        return $this->hasOne(ProductRequestPlacementReview::class)
+            ->ofMany(['id' => 'max'], static fn ($query) => $query->where(
+                'status',
+                ProductRequestPlacementReview::STATUS_REJECTED,
+            ));
     }
 
     public function logs(): HasMany

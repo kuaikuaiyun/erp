@@ -213,27 +213,69 @@ class ProductRequestController extends Controller
             return $context;
         }
 
-        [$keyword, $perPage] = $this->issueFilters($request);
-        $requests = $this->access->applyOperationVisibility(ProductRequest::query(), $context['user'])
+        $filters = $this->linkIssueFilters($request);
+        $canViewAll = $context['user']->isAdministrator()
+            || strcasecmp((string) $context['user']->username, 'kky_boss') === 0;
+        $requests = ProductRequest::query()
+            ->when(! $canViewAll, fn (Builder $query) => $query->where(
+                'operation_user_id',
+                $context['user']->getKey(),
+            ))
             ->where('placement_review_status', ProductRequest::REVIEW_REJECTED)
-            ->when($keyword !== '', function ($query) use ($keyword): void {
+            ->when($filters['keyword'] !== '', function ($query) use ($filters): void {
+                $keyword = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['keyword']).'%';
                 $query->where(function ($sub) use ($keyword): void {
-                    $sub->where('report_no', 'like', '%'.$keyword.'%')
-                        ->orWhere('skus', 'like', '%'.$keyword.'%')
-                        ->orWhere('procurement_skus', 'like', '%'.$keyword.'%')
-                        ->orWhere('supplier_url', 'like', '%'.$keyword.'%')
-                        ->orWhere('operation_supplier_url', 'like', '%'.$keyword.'%');
+                    $sub->where('report_no', 'like', $keyword)
+                        ->orWhere('skus', 'like', $keyword)
+                        ->orWhere('procurement_skus', 'like', $keyword)
+                        ->orWhere('supplier_url', 'like', $keyword)
+                        ->orWhere('operation_supplier_url', 'like', $keyword);
                 });
             })
-            ->with(['attachments', 'placementReviews'])
+            ->when($filters['operator'] !== '', function ($query) use ($filters): void {
+                $operator = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['operator']).'%';
+                $query->where(function ($operatorQuery) use ($operator): void {
+                    $operatorQuery->where('operation_user_name', 'like', $operator)
+                        ->orWhere('operation_display_name', 'like', $operator);
+                });
+            })
+            ->when($filters['department'] !== '', function ($query) use ($filters): void {
+                $department = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['department']).'%';
+                $query->where('operation_department_name', 'like', $department);
+            })
+            ->when(
+                $filters['reviewer'] !== '' || $filters['reviewed_from'] !== '' || $filters['reviewed_to'] !== '',
+                function ($query) use ($filters): void {
+                    $query->whereHas('latestRejectedPlacementReview', function ($reviewQuery) use ($filters): void {
+                        if ($filters['reviewer'] !== '') {
+                            $reviewer = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['reviewer']).'%';
+                            $reviewQuery->where('reviewer_name', 'like', $reviewer);
+                        }
+                        if ($filters['reviewed_from'] !== '') {
+                            $reviewQuery->where('reviewed_at', '>=', $filters['reviewed_from'].' 00:00:00');
+                        }
+                        if ($filters['reviewed_to'] !== '') {
+                            $reviewQuery->where('reviewed_at', '<=', $filters['reviewed_to'].' 23:59:59');
+                        }
+                    });
+                },
+            )
+            ->with([
+                'attachments' => static fn ($query) => $query->whereIn('stage', [
+                    ProductRequestAttachment::STAGE_OPERATION,
+                    ProductRequestAttachment::STAGE_REVIEW,
+                ]),
+                'latestRejectedPlacementReview',
+            ])
             ->latest('id')
-            ->paginate($perPage)
+            ->paginate($filters['per_page'])
             ->withQueryString();
 
         return view('portals.product-requests.operation.link-issues', [
             ...$this->viewContext($context),
             'requests' => $requests,
-            'filters' => ['keyword' => $keyword, 'per_page' => $perPage],
+            'filters' => $filters,
+            'canViewAll' => $canViewAll,
         ]);
     }
 
@@ -256,7 +298,10 @@ class ProductRequestController extends Controller
                         ->orWhere('standard_chinese_name', 'like', '%'.$keyword.'%');
                 });
             })
-            ->with('attachments')
+            ->with(['attachments' => static fn ($query) => $query->whereIn('stage', [
+                ProductRequestAttachment::STAGE_OPERATION,
+                ProductRequestAttachment::STAGE_WAREHOUSE_REMARK,
+            ])])
             ->latest('id')
             ->paginate($perPage)
             ->withQueryString();
@@ -276,6 +321,30 @@ class ProductRequestController extends Controller
         $perPage = (int) $request->query('per_page', 20);
 
         return [$keyword, in_array($perPage, [20, 50, 100], true) ? $perPage : 20];
+    }
+
+    /** @return array{keyword:string,operator:string,department:string,reviewer:string,reviewed_from:string,reviewed_to:string,per_page:int} */
+    private function linkIssueFilters(Request $request): array
+    {
+        [, $perPage] = $this->issueFilters($request);
+        $reviewedFrom = trim((string) $request->query('reviewed_from', ''));
+        $reviewedTo = trim((string) $request->query('reviewed_to', ''));
+        $reviewedFrom = Validator::make(['date' => $reviewedFrom], ['date' => ['nullable', 'date_format:Y-m-d']])->passes()
+            ? $reviewedFrom
+            : '';
+        $reviewedTo = Validator::make(['date' => $reviewedTo], ['date' => ['nullable', 'date_format:Y-m-d']])->passes()
+            ? $reviewedTo
+            : '';
+
+        return [
+            'keyword' => trim((string) $request->query('keyword', '')),
+            'operator' => trim((string) $request->query('operator', '')),
+            'department' => trim((string) $request->query('department', '')),
+            'reviewer' => trim((string) $request->query('reviewer', '')),
+            'reviewed_from' => $reviewedFrom,
+            'reviewed_to' => $reviewedTo,
+            'per_page' => $perPage,
+        ];
     }
 
     public function operationCreate(Request $request): Response|View

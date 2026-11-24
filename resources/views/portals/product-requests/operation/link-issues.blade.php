@@ -18,35 +18,65 @@
         'loadFailed' => $t('common.modal_load_failed'), 'submitFailed' => $t('common.modal_submit_failed'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261022-01">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-20"></script>@endpush
+
+@push('styles')
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261103-06">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-22">
+    <style>
+        .product-request-link-issues-template{padding:15px}.product-request-link-issues-template>.content-header{padding:0 0 15px}.product-request-link-issues-template>.content-header h1{margin:0}.product-request-link-issues-template>.content-header p{margin:6px 0 0;color:#718697}.product-request-link-issues-filters{margin-bottom:15px;padding:18px 20px 15px}.product-request-link-issues-filter-grid{display:grid;grid-template-columns:minmax(260px,1.5fr) repeat(3,minmax(170px,1fr));gap:14px 18px;align-items:start}.product-request-link-issues-filter-grid>label>input{margin-top:8px}.product-request-link-issues-filter-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:14px}.product-request-link-issues-records{overflow:hidden}.product-request-link-issues-records .flt-toolbar{padding:12px 18px}.product-request-link-issues-table-scroll{max-height:calc(100vh - 285px);overflow:auto}.product-request-link-issues-table{width:100%!important;min-width:1280px!important;margin:0!important;border-collapse:separate!important;border-spacing:0!important;table-layout:fixed!important}.product-request-link-issues-table th:nth-child(1){width:145px}.product-request-link-issues-table th:nth-child(2){width:105px}.product-request-link-issues-table th:nth-child(3){width:165px}.product-request-link-issues-table th:nth-child(4){width:245px}.product-request-link-issues-table th:nth-child(5){width:275px}.product-request-link-issues-table th:nth-child(6){width:125px}.product-request-link-issues-table th:nth-child(7){width:145px}.product-request-link-issues-table th:nth-child(8){width:95px}.product-request-link-issues-table thead th{position:sticky;top:0;z-index:4;padding:11px 10px!important;background:#eaf4fa!important;color:#345c75!important;border-right:1px solid #dce8ef!important;white-space:nowrap}.product-request-link-issues-table tbody td{padding:11px 10px!important;border-right:1px solid #e7eef3!important;border-bottom:1px solid #e7eef3!important;vertical-align:middle!important}.product-request-link-issues-table tbody tr:nth-child(odd)>td{background:#fff}.product-request-link-issues-table tbody tr:nth-child(even)>td{background:#f3f9fd}.product-request-link-issues-table tbody tr:hover>td{background:#eaf5fb!important}.product-request-link-issues-table .product-request-sticky-left,.product-request-link-issues-table .product-request-sticky-right{background:inherit!important}.product-request-link-issues-table .product-request-remark-text{display:block;overflow:hidden;max-width:100%;margin-bottom:5px;text-overflow:ellipsis;white-space:nowrap}.product-request-link-issues-table .product-request-ellipsis>a{display:block;overflow:hidden;max-width:100%;text-overflow:ellipsis;white-space:nowrap}.product-request-link-issues-actions{display:flex;align-items:center;justify-content:center}.product-request-link-issues-actions .flt-row-action{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.product-request-operation-pagination{border-top:1px solid #e3edf4}.product-request-operation-pagination .pagination-total{margin-right:auto}.product-request-operation-pagination form{display:flex;align-items:center;gap:8px;margin:0}.product-request-operation-pagination form input[type=hidden]{display:none}.product-request-operation-pagination .page-jump input{width:64px!important}.product-request-operation-pagination .is-disabled{pointer-events:none;opacity:.45}@media(max-width:1200px){.product-request-link-issues-filter-grid{grid-template-columns:repeat(3,minmax(170px,1fr))}}@media(max-width:850px){.product-request-link-issues-filter-grid{grid-template-columns:repeat(2,minmax(170px,1fr))}}@media(max-width:600px){.product-request-link-issues-template{padding:10px}.product-request-link-issues-filter-grid{grid-template-columns:1fr}.product-request-link-issues-filter-actions{justify-content:flex-start}.product-request-operation-pagination{justify-content:center}.product-request-operation-pagination .pagination-total,.product-request-operation-pagination .page-size{width:100%;margin:0;justify-content:center}}
+    </style>
+@endpush
+
+@push('scripts')
+    <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261124-03"></script>
+@endpush
 
 @section('content')
-<section class="content product-request-page">
+<section class="content product-request-page product-request-link-issues-template flt">
     <header class="content-header"><h1>{{ $t('link_issues.title') }}</h1><p>{{ $t('link_issues.subtitle') }}</p></header>
-    <div class="box box-solid product-request-filter-box"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters.keyword') }}</h3></div><div class="box-body"><form class="product-request-filter-form" method="get" action="{{ route('product-requests.link-issues.index') }}" data-loading="region" data-loading-target=".product-request-table-box"><div class="product-request-filter-grid"><div class="product-request-filter-field"><label>{{ $t('filters.keyword') }}</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ $t('filters.keyword_placeholder') }}"></div><div class="product-request-filter-field"><label>{{ $t('filters.per_page') }}</label><select class="form-control" name="per_page">@foreach([20, 50, 100] as $perPage)<option value="{{ $perPage }}" @selected($filters['per_page'] === $perPage)>{{ $perPage }}</option>@endforeach</select></div></div><div class="product-request-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="btn btn-default" href="{{ route('product-requests.link-issues.index') }}">{{ $t('common.reset') }}</a></div></form></div></div>
-    <div class="box box-solid product-request-table-box"><div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('link_issues.title') }}</h3></div><div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table"><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.reviewer') }}</th><th>{{ $t('table.reviewed_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>
-        @forelse($requests as $productRequest)
-            @php
-                $cover = $coverFor($productRequest);
-                $rejectedReview = $productRequest->placementReviews->first(fn ($review) => $review->status === \App\Models\ProductRequestPlacementReview::STATUS_REJECTED);
-                $reviewRemarkText = $rejectedReview ? $remarkText($rejectedReview->remark) : '';
-                $reviewRemarkImages = $rejectedReview
-                    ? $productRequest->attachments->where('stage', \App\Models\ProductRequestAttachment::STAGE_REVIEW)->take(3)
-                    : collect();
-            @endphp
-            <tr><td class="product-request-sticky-left">{{ $productRequest->report_no }}</td><td>@if($cover)<img class="product-request-thumbnail" src="{{ route('product-requests.attachments.show', [$productRequest, $cover]) }}" alt="{{ $cover->original_name }}" data-product-request-image-preview data-product-request-image-alt="{{ $cover->original_name }}">@else{{ $t('common.not_available') }}@endif</td><td class="product-request-sku-cell">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => $t('common.not_available')])</td><td class="product-request-ellipsis" title="{{ $productRequest->operation_supplier_url }}">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ $t('common.not_available') }}@endif</td><td class="product-request-remark-cell">
-                @if($rejectedReview)
-                    @if($reviewRemarkText !== '')<span class="product-request-remark-text">{{ $reviewRemarkText }}</span> @endif
-                    @foreach($reviewRemarkImages as $reviewRemarkImage)<img class="product-request-thumbnail" src="{{ route('product-requests.attachments.show', [$productRequest, $reviewRemarkImage]) }}" alt="{{ $reviewRemarkImage->original_name }}" data-product-request-image-preview data-product-request-image-alt="{{ $reviewRemarkImage->original_name }}"> @endforeach
-                @else
-                    {{ $t('common.not_available') }}
-                @endif
-            </td><td>{{ $rejectedReview->reviewer_name ?? $t('common.not_available') }}</td><td class="product-request-nowrap-cell">{{ $rejectedReview && $rejectedReview->reviewed_at ? $rejectedReview->reviewed_at->timezone('Asia/Shanghai')->format('Y-m-d H:i') : $t('common.not_available') }}</td><td class="product-request-sticky-right product-request-actions"><a class="btn btn-default btn-xs product-request-action-button product-request-action-view" href="{{ route('product-requests.show', $productRequest) }}" data-product-request-modal-url="{{ route('product-requests.show', ['productRequest' => $productRequest, 'modal' => 1]) }}"><i class="fa fa-eye"></i> {{ $t('common.view') }}</a></td></tr>
-        @empty
-            <tr><td colspan="8" class="product-request-empty">{{ $t('common.no_records') }}</td></tr>
-        @endforelse
-    </tbody></table></div>{{ $requests->links('portals.product-requests.partials.pagination') }}</div>
+
+    <form class="flt-card flt-filters product-request-link-issues-filters" method="get" action="{{ route('product-requests.link-issues.index') }}" data-loading="region" data-loading-target=".product-request-link-issues-records">
+        <div class="product-request-link-issues-filter-grid">
+            <label>{{ $t('filters.keyword') }}<input type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ $t('filters.keyword_placeholder') }}" autocomplete="off"></label>
+            <label>运营人员<input type="search" name="operator" value="{{ $filters['operator'] }}" placeholder="输入运营人员姓名" autocomplete="off"></label>
+            <label>运营部门<input type="search" name="department" value="{{ $filters['department'] }}" placeholder="输入运营部门名称" autocomplete="off"></label>
+            <label>审核人<input type="search" name="reviewer" value="{{ $filters['reviewer'] }}" placeholder="输入审核人姓名" autocomplete="off"></label>
+            <label>审核开始日期<input type="date" name="reviewed_from" value="{{ $filters['reviewed_from'] }}"></label>
+            <label>审核结束日期<input type="date" name="reviewed_to" value="{{ $filters['reviewed_to'] }}"></label>
+            <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
+        </div>
+        <div class="product-request-link-issues-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="flt-btn" href="{{ route('product-requests.link-issues.index') }}"><i class="fa fa-refresh"></i> {{ $t('common.reset') }}</a></div>
+    </form>
+
+    <div class="flt-card flt-records product-request-table-box product-request-link-issues-records">
+        <div class="flt-toolbar"><div class="flt-selection"><strong>{{ $t('link_issues.title') }}</strong><span class="flt-toolbar-divider"></span><span>共 {{ $requests->total() }} 条记录</span></div></div>
+        <div class="flt-table-scroll product-request-link-issues-table-scroll"><table class="product-request-table product-request-link-issues-table"><caption class="flt-sr-only">{{ $t('link_issues.title') }}</caption><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.reviewer') }}</th><th>{{ $t('table.reviewed_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>
+            @forelse($requests as $productRequest)
+                @php
+                    $cover = $coverFor($productRequest);
+                    $rejectedReview = $productRequest->latestRejectedPlacementReview;
+                    $reviewRemarkText = $rejectedReview ? $remarkText($rejectedReview->remark) : '';
+                    $reviewRemarkImages = $rejectedReview
+                        ? $productRequest->attachments->where('stage', \App\Models\ProductRequestAttachment::STAGE_REVIEW)->take(3)
+                        : collect();
+                @endphp
+                <tr>
+                    <td class="product-request-sticky-left"><strong>{{ $productRequest->report_no }}</strong></td>
+                    <td class="product-request-image-cell">@if($cover)<img class="product-request-thumbnail" loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $cover]) }}?w=240" alt="" data-product-request-image-preview data-product-request-image-alt="{{ $cover->original_name }}" onerror="this.classList.add('is-image-missing')"><span class="product-request-image-missing" title="图片暂不可用"><i class="fa fa-picture-o"></i></span>@else{{ $t('common.not_available') }}@endif</td>
+                    <td class="product-request-sku-cell">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => $t('common.not_available'), 'collapse' => true, 'collapseLimit' => 2])</td>
+                    <td class="product-request-ellipsis" title="{{ $productRequest->operation_supplier_url }}">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ $t('common.not_available') }}@endif</td>
+                    <td class="product-request-remark-cell">@if($rejectedReview)@if($reviewRemarkText !== '')<span class="product-request-remark-text" title="{{ $reviewRemarkText }}">{{ \Illuminate\Support\Str::limit($reviewRemarkText, 80) }}</span>@endif @foreach($reviewRemarkImages as $reviewRemarkImage)<img class="product-request-thumbnail" loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $reviewRemarkImage]) }}?w=240" alt="" data-product-request-image-preview data-product-request-image-alt="{{ $reviewRemarkImage->original_name }}" onerror="this.classList.add('is-image-missing')"><span class="product-request-image-missing" title="图片暂不可用"><i class="fa fa-picture-o"></i></span> @endforeach @else{{ $t('common.not_available') }}@endif</td>
+                    <td>{{ $rejectedReview->reviewer_name ?? $t('common.not_available') }}</td>
+                    <td class="product-request-nowrap-cell">{{ $rejectedReview && $rejectedReview->reviewed_at ? $rejectedReview->reviewed_at->timezone('Asia/Shanghai')->format('Y-m-d H:i') : $t('common.not_available') }}</td>
+                    <td class="product-request-sticky-right product-request-link-issues-actions"><a class="flt-row-action" href="{{ route('product-requests.show', $productRequest) }}" data-product-request-modal-url="{{ route('product-requests.show', ['productRequest' => $productRequest, 'modal' => 1]) }}"><i class="fa fa-eye"></i> {{ $t('common.view') }}</a></td>
+                </tr>
+            @empty
+                <tr><td colspan="8"><div class="flt-empty"><i class="fa fa-inbox"></i><h4>{{ $t('common.no_records') }}</h4><p>可调整关键词后重新查询</p></div></td></tr>
+            @endforelse
+        </tbody></table></div>
+        @include('portals.product-requests.operation.partials.pagination', ['paginator' => $requests])
+    </div>
     @include('portals.product-requests.partials.modal')
 </section>
 @endsection

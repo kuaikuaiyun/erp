@@ -62,21 +62,39 @@ class AppLovinSpendReviewController extends Controller
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
+        $accountNumberNeedle = mb_strtolower($accountNumber);
+        $accountNumberLike = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $accountNumber).'%';
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if ($isDashboard || ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
-        $rows = $query->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
-            ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
+        if ($accountNumber !== '') {
+            // advertising_rows is historical JSON data. Filtering it before hydration avoids
+            // decoding and aggregating every approved report for an account search.
+            $query->where('advertising_rows', 'like', $accountNumberLike);
+        }
+        $rows = $query->select(['id', 'report_date', 'operator_user_id', 'operator_name', 'operation_department_id', 'operation_department_name', 'advertising_rows'])
+            ->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
+            ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin'
+                && ($accountNumberNeedle === '' || str_contains(mb_strtolower((string) ($row['account_number'] ?? '')), $accountNumberNeedle)))
             ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => $report->operator_name, 'department_id' => (int) $report->operation_department_id, 'department' => $report->operation_department_name]));
         $operationProjects = OperationProjectCatalog::all();
         $projectDepartmentIds = collect(array_keys($operationProjects))->mapWithKeys(
             fn (string $code): array => [$code => OperationProjectCatalog::departmentIds($code)->all()]
         );
+        $fashionEntryFilter = function ($query) use ($accountNumber, $accountNumberLike): void {
+            $query->whereRaw('LOWER(TRIM(media)) = ?', ['applovin']);
+            if ($accountNumber !== '') {
+                $query->where('account_number', 'like', $accountNumberLike);
+            }
+        };
         $fashionQuery = FashionAdvertisingReport::query()
             ->whereIn('project_code', array_keys($operationProjects))
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
-            ->with(['adSpendEntries', 'submitter.departments']);
+            ->whereHas('adSpendEntries', $fashionEntryFilter)
+            ->with(['adSpendEntries' => $fashionEntryFilter, 'submitter.departments'])
+            ->select(['id', 'project_code', 'report_date', 'submitter_id', 'submitter_name']);
         if ($isDashboard || ! $context['user']->isAdministrator()) {
             $visibleIds === []
                 ? $fashionQuery->whereRaw('1=0')
@@ -90,9 +108,7 @@ class AppLovinSpendReviewController extends Controller
                 $department = $departments->first(fn ($item) => in_array((int) $item->id, $reportProjectDepartmentIds, true)
                     && (! $restrictToVisibleDepartments || in_array((int) $item->id, $visibleIds, true)));
 
-                return $report->adSpendEntries
-                    ->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
-                    ->map(fn ($entry): array => [
+                return $report->adSpendEntries->map(fn ($entry): array => [
                         'agency' => (string) $entry->agency,
                         'media_source' => (string) $entry->media,
                         'account_name' => (string) $entry->account_name,
@@ -190,30 +206,6 @@ class AppLovinSpendReviewController extends Controller
                     'details' => $ordered,
                 ];
             })->sortByDesc('total')->values();
-        $allAccountKeys = $accounts->pluck('account_keys')->flatten()->unique()->values();
-        $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
-        $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
-        $historicalStoreIds = AssistantDomainStoreOwnerHistory::query()->whereNotNull('owner_user_id')
-            ->pluck('assistant_domain_store_id')->unique();
-        $stores = AssistantDomainStore::query()
-            ->whereNotNull('domain')->where('domain', '!=', '')
-            ->where(fn ($query) => $query->whereNotNull('owner_user_id')->orWhereIn('id', $historicalStoreIds))
-            ->orderBy('domain')->get(['id', 'owner_user_id', 'shop_name', 'domain']);
-        $historicalOwners = AssistantDomainStoreOwnerHistory::query()->whereIn('assistant_domain_store_id', $stores->pluck('id'))
-            ->whereNotNull('owner_user_id')->get(['assistant_domain_store_id', 'owner_user_id'])
-            ->groupBy('assistant_domain_store_id');
-        $stores->each(function (AssistantDomainStore $store) use ($historicalOwners): void {
-            $ownerIds = collect([(int) $store->owner_user_id])
-                ->merge($historicalOwners->get($store->getKey(), collect())->pluck('owner_user_id'))
-                ->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
-            $store->setAttribute('eligible_owner_ids', $ownerIds);
-        });
-        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings): array {
-            $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()->first();
-            $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
-
-            return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding];
-        });
         if ($selectedDepartmentIds !== []) {
             $accounts = $accounts->filter(fn (array $account): bool => collect($account['department_ids'])
                 ->intersect($selectedDepartmentIds)->isNotEmpty())->values();
@@ -226,13 +218,44 @@ class AppLovinSpendReviewController extends Controller
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', 5000)->values();
         }
-        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
         if ($accountNumber !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => str_contains(
                 mb_strtolower((string) ($account['account_number'] ?? '')),
-                mb_strtolower($accountNumber)
+                $accountNumberNeedle
             ))->values();
         }
+
+        $allAccountKeys = $accounts->pluck('account_keys')->flatten()->unique()->values();
+        $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
+        $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
+        $eligibleOperatorIds = $accounts->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
+        $stores = $eligibleOperatorIds->isEmpty()
+            ? collect()
+            : AssistantDomainStore::query()
+                ->whereNotNull('domain')->where('domain', '!=', '')
+                ->where(function ($query) use ($eligibleOperatorIds): void {
+                    $query->whereIn('owner_user_id', $eligibleOperatorIds)
+                        ->orWhereHas('ownerHistories', fn ($history) => $history->whereIn('owner_user_id', $eligibleOperatorIds));
+                })
+                ->orderBy('domain')->get(['id', 'owner_user_id', 'shop_name', 'domain']);
+        $historicalOwners = $stores->isEmpty()
+            ? collect()
+            : AssistantDomainStoreOwnerHistory::query()->whereIn('assistant_domain_store_id', $stores->pluck('id'))
+                ->whereIn('owner_user_id', $eligibleOperatorIds)
+                ->get(['assistant_domain_store_id', 'owner_user_id'])
+                ->groupBy('assistant_domain_store_id');
+        $stores->each(function (AssistantDomainStore $store) use ($historicalOwners): void {
+            $ownerIds = collect([(int) $store->owner_user_id])
+                ->merge($historicalOwners->get($store->getKey(), collect())->pluck('owner_user_id'))
+                ->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+            $store->setAttribute('eligible_owner_ids', $ownerIds);
+        });
+        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings): array {
+            $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()->first();
+            $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
+
+            return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding];
+        });
         $page = max(1, (int) $request->query('page', 1));
         $perPage = (int) ($filters['per_page'] ?? 20);
         $accounts = new LengthAwarePaginator($accounts->forPage($page, $perPage)->values(), $accounts->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
