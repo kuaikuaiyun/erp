@@ -212,6 +212,15 @@
     margin-top: 3px;
     color: #60788f;
 }
+.payment-product-risk-page .payment-product-grouped-table > tbody > tr > td.payment-product-value-with-formula {
+    position: relative;
+    padding-bottom: 36px;
+}
+.payment-product-risk-page .payment-product-value-with-formula > [data-payment-risk-formula] {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+}
 .payment-product-risk-page .payment-product-grouped-table .payment-product-info-cell {
     box-sizing: border-box;
     width: 220px;

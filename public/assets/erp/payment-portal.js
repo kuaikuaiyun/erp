@@ -68,6 +68,26 @@
             button.find('span').text(collapsed ? String(button.data('expandText') || '') : String(button.data('collapseText') || ''));
         });
 
+        var formulaModal = page.find('#payment-risk-formula-modal');
+        if (formulaModal.length) {
+            var formulaBody = formulaModal.find('[data-payment-risk-formula-body]');
+            var formulaTrigger = null;
+            page.on('click', '[data-payment-risk-formula]', function () {
+                var template = this.nextElementSibling;
+                if (!template || !template.matches('[data-payment-risk-formula-content]')) return;
+
+                formulaTrigger = this;
+                formulaModal.find('#payment-risk-formula-title').text(this.dataset.formulaTitle);
+                formulaBody.empty().append(template.content.cloneNode(true)).scrollTop(0);
+                formulaModal.modal('show');
+            });
+            formulaModal.on('hidden.bs.modal', function () {
+                formulaBody.empty();
+                if (formulaTrigger) formulaTrigger.focus();
+                formulaTrigger = null;
+            });
+        }
+
         var riskExportModal = page.find('#payment-risk-export-modal');
         var riskPanel = page.find('.payment-product-risk-primary-panel');
         var riskChecks = riskPanel.find('[data-payment-risk-check]');

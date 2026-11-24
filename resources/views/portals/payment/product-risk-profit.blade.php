@@ -34,7 +34,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-21">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table9">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table10">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush
@@ -143,6 +143,21 @@
         @include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])
     </div>
 
+    <div class="modal fade" id="payment-risk-formula-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="payment-risk-formula-title">
+        <div class="modal-dialog" role="document" style="display: flex; align-items: center; height: calc(100vh - 40px); margin-block: 20px;">
+            <div class="modal-content" style="width: 100%;">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button>
+                    <h4 id="payment-risk-formula-title" class="modal-title"></h4>
+                </div>
+                <div class="modal-body" data-payment-risk-formula-body style="max-height: 65vh; overflow-y: auto;"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">{{ __($translationPrefix.'.detail.close') }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal fade" id="payment-risk-export-modal" tabindex="-1" role="dialog" aria-labelledby="payment-risk-export-title">
         <div class="modal-dialog modal-sm" role="document">
             <form class="modal-content" method="post" action="{{ route('payment.product-risk-profit.export-list') }}" data-payment-risk-export-form>
@@ -182,6 +197,6 @@
 @push('scripts')
 <script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=5" defer></script>
-<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-export7"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-formula10"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

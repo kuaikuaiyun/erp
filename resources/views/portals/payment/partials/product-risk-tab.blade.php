@@ -31,6 +31,39 @@
         ],
     ];
     $columnCount = array_sum(array_map('count', $columnGroups));
+    $formulaText = $translationPrefix.'.formula_details';
+    $formulaScopes = [
+        'selected' => __($formulaText.'.selected_dates', ['from' => $filters['date_from'] ?? '-', 'to' => $filters['date_to'] ?? '-']),
+        'history' => __($formulaText.'.historical'),
+    ];
+    $formulaLabels = [
+        'combined_refund_rate' => 'table.combined_refund',
+        'paypal_refund_rate' => 'compact.refund_rate',
+        'paypal_dispute_rate' => 'compact.dispute_rate',
+        'paypal_description_mismatch_rate' => 'compact.description_mismatch_rate',
+        'paypal_initial_dispute_rate' => 'compact.initial_dispute_rate',
+        'paypal_delivered_dispute_rate' => 'compact.delivered_dispute_rate',
+        'paypal_initial_refund_amount_rate' => 'compact.initial_refund_amount_rate',
+        'credit_card_refund_rate' => 'compact.refund_rate',
+        'credit_card_dispute_rate' => 'compact.dispute_rate',
+        'credit_card_delivered_dispute_rate' => 'compact.delivered_dispute_rate',
+        'credit_card_initial_refund_amount_rate' => 'compact.initial_refund_amount_rate',
+    ];
+    $refundOrderRates = ['combined_refund_rate', 'paypal_refund_rate', 'credit_card_refund_rate'];
+    $formulaDetails = [];
+    if (\Illuminate\Support\Facades\Lang::has($formulaText.'.expression') && \Illuminate\Support\Facades\Lang::has($formulaText.'.substitution')) {
+        foreach ($formulaScopes as $scope => $description) {
+            $definitions = __($formulaText.'.'.$scope);
+            if (!is_array($definitions)) {
+                continue;
+            }
+            foreach ($definitions as $metric => $terms) {
+                if (isset($formulaLabels[$metric]) && is_array($terms) && is_string($terms[0] ?? null) && is_string($terms[1] ?? null)) {
+                    $formulaDetails[$metric] = [$scope, $description, $terms[0], $terms[1]];
+                }
+            }
+        }
+    }
 @endphp
 
 @if(($tab ?? 'risk_metrics') === 'refund_reason')
@@ -82,16 +115,18 @@
     </thead>
     <tbody>
         @forelse($dashboard['products'] as $product)
-            @php($abnormal = (float)$product['combined_refund_rate'] > 0 || (int)$product['paypal_dispute_count'] > 0)
-            @php($refundTone = (float)$product['combined_refund_rate'] >= 5 ? 'is-danger' : ((float)$product['combined_refund_rate'] > 0 ? 'is-warning' : 'is-success'))
-            @php($displayName = trim((string)$product['tongtu_product_name']) !== '' ? $product['tongtu_product_name'] : (trim((string)$product['source_product_name']) !== '' ? $product['source_product_name'] : $product['name']))
-            @php($paypalRefundOrderCount = $product['paypal_refund_order_count'] ?? $product['paypal_refund_count'] ?? 0)
-            @php($paypalOrderCount = $product['paypal_order_count'] ?? 0)
-            @php($paypalDisputeOrderCount = $product['paypal_dispute_order_count'] ?? $product['paypal_dispute_count'] ?? 0)
-            @php($creditCardRefundOrderCount = $product['credit_card_refund_order_count'] ?? $product['credit_card_refund_count'] ?? 0)
-            @php($creditCardOrderCount = $product['credit_card_order_count'] ?? 0)
-            @php($combinedRefundOrderCount = $product['combined_refund_order_count'] ?? 0)
-            @php($paidOrderCount = $product['paid_order_count'] ?? $product['order_count'] ?? 0)
+            @php
+                $abnormal = (float)$product['combined_refund_rate'] > 0 || (int)$product['paypal_dispute_count'] > 0;
+                $refundTone = (float)$product['combined_refund_rate'] >= 5 ? 'is-danger' : ((float)$product['combined_refund_rate'] > 0 ? 'is-warning' : 'is-success');
+                $displayName = trim((string)$product['tongtu_product_name']) !== '' ? $product['tongtu_product_name'] : (trim((string)$product['source_product_name']) !== '' ? $product['source_product_name'] : $product['name']);
+                $paypalRefundOrderCount = $product['paypal_refund_order_count'] ?? $product['paypal_refund_count'] ?? 0;
+                $paypalOrderCount = $product['paypal_order_count'] ?? 0;
+                $paypalDisputeOrderCount = $product['paypal_dispute_order_count'] ?? $product['paypal_dispute_count'] ?? 0;
+                $creditCardRefundOrderCount = $product['credit_card_refund_order_count'] ?? $product['credit_card_refund_count'] ?? 0;
+                $creditCardOrderCount = $product['credit_card_order_count'] ?? 0;
+                $combinedRefundOrderCount = $product['combined_refund_order_count'] ?? 0;
+                $paidOrderCount = $product['paid_order_count'] ?? $product['order_count'] ?? 0;
+            @endphp
             @continue($filters['only_abnormal'] === '1' && !$abnormal)
             <tr class="payment-product-clickable-row" tabindex="0" role="button" data-payment-product-row data-payment-product-detail data-product-id="{{ $product['id'] }}" data-product-name="{{ $displayName }}" data-abnormal="{{ $abnormal ? '1' : '0' }}">
                 <td class="payment-risk-check-cell">
@@ -107,56 +142,80 @@
                         <div>
                             <strong title="{{ $displayName }}">{{ $displayName }}</strong>
                             <small title="{{ $product['product_code'] ?: $product['sku'] }}">{{ $product['product_code'] ?: $product['sku'] }}</small>
-                            <small>{{ $product['latest_paid_at'] }}</small>
+                            <small>{{ __($translationPrefix.'.layout.latest_paid_line', ['value' => $product['latest_paid_at']]) }}</small>
                         </div>
                     </div>
                 </td>
                 <td class="payment-product-value">{{ $number($product['order_count'] ?? 0) }}{{ __($translationPrefix.'.compact.order_unit') }}</td>
                 <td class="payment-product-value">{{ $money($product['revenue']) }}</td>
-                <td class="payment-product-value">
-                    <span class="payment-product-rate-card {{ $refundTone }}">{{ $rate($product['combined_refund_rate']) }} <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.combined_refund_rate') }}"></i></span>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($combinedRefundOrderCount), 'denominator' => $number($paidOrderCount)]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_refund_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($paypalRefundOrderCount), 'denominator' => $number($paypalOrderCount)]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($paypalDisputeOrderCount), 'denominator' => $number($paypalOrderCount)]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_description_mismatch_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.layout.mismatch_formula') }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_initial_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['paypal_initial_dispute_count']), 'denominator' => $number($product['paypal_initial_order_count'])]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_delivered_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['paypal_delivered_dispute_count']), 'denominator' => $number($product['paypal_delivered_order_count'])]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['paypal_initial_refund_amount_rate']) }}</strong>
-                    <small>{{ $money($product['paypal_initial_refund_amount']) }} ÷ {{ $money($product['paypal_initial_received_amount']) }} × 100%</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['credit_card_refund_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($creditCardRefundOrderCount), 'denominator' => $number($creditCardOrderCount)]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['credit_card_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['credit_card_dispute_count']), 'denominator' => $number($product['credit_card_initial_order_count'] ?? 0)]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['credit_card_delivered_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['credit_card_delivered_dispute_count']), 'denominator' => $number($product['credit_card_delivered_order_count'])]) }}</small>
-                </td>
-                <td class="payment-product-value">
-                    <strong>{{ $rate($product['credit_card_initial_refund_amount_rate']) }}</strong>
-                    <small>{{ $money($product['credit_card_initial_refund_amount']) }} ÷ {{ $money($product['credit_card_initial_received_amount']) }} × 100%</small>
-                </td>
+                @php
+                    $operands = [
+                        'combined_refund_rate' => [$combinedRefundOrderCount, $paidOrderCount],
+                        'paypal_refund_rate' => [$paypalRefundOrderCount, $paypalOrderCount],
+                        'paypal_dispute_rate' => [$paypalDisputeOrderCount, $paypalOrderCount],
+                        'paypal_description_mismatch_rate' => [$product['paypal_description_mismatch_amount'] ?? 0, $product['paypal_initial_dispute_amount'] ?? 0, true],
+                        'paypal_initial_dispute_rate' => [$product['paypal_initial_dispute_count'], $product['paypal_initial_order_count']],
+                        'paypal_delivered_dispute_rate' => [$product['paypal_delivered_dispute_count'], $product['paypal_delivered_order_count']],
+                        'paypal_initial_refund_amount_rate' => [$product['paypal_initial_refund_amount'], $product['paypal_initial_received_amount'], true],
+                        'credit_card_refund_rate' => [$creditCardRefundOrderCount, $creditCardOrderCount],
+                        'credit_card_dispute_rate' => [$product['credit_card_dispute_count'], $product['credit_card_initial_order_count'] ?? 0],
+                        'credit_card_delivered_dispute_rate' => [$product['credit_card_delivered_dispute_count'], $product['credit_card_delivered_order_count']],
+                        'credit_card_initial_refund_amount_rate' => [$product['credit_card_initial_refund_amount'], $product['credit_card_initial_received_amount'], true],
+                    ];
+                @endphp
+                @foreach($operands as $metric => $parts)
+                    @php
+                        [$numerator, $denominator] = $parts;
+                        $isAmount = $parts[2] ?? false;
+                        $format = $isAmount ? $money : $number;
+                        $values = ['numerator' => $format($numerator), 'denominator' => $format($denominator), 'rate' => $rate($product[$metric])];
+                    @endphp
+                    <td @class(['payment-product-value', 'payment-product-value-with-formula' => isset($formulaDetails[$metric])])>
+                        @if($metric === 'combined_refund_rate')
+                            <span class="payment-product-rate-card {{ $refundTone }}">{{ $values['rate'] }}</span>
+                        @else
+                            <strong>{{ $values['rate'] }}</strong>
+                        @endif
+                        <small>
+                            @if($isAmount)
+                                {{ $values['numerator'] }} ÷ {{ $values['denominator'] }} × 100%
+                            @else
+                                {{ __($translationPrefix.'.metric_filters.order_ratio_formula', $values) }}
+                            @endif
+                        </small>
+                        @if(isset($formulaDetails[$metric]))
+                            @php
+                                [$scope, $description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
+                                $title = __($translationPrefix.'.'.$formulaLabels[$metric]);
+                                $channel = match (true) {
+                                    str_starts_with($metric, 'paypal_') => __($translationPrefix.'.table.paypal_fee_info'),
+                                    str_starts_with($metric, 'credit_card_') => __($translationPrefix.'.table.card_fee_info'),
+                                    default => '',
+                                };
+                                $heading = __($formulaText.'.heading', ['metric' => trim($channel.' '.$title)]);
+                            @endphp
+                            <button type="button" class="btn btn-link btn-xs" data-payment-risk-formula data-formula-title="{{ $heading }}" aria-haspopup="dialog" aria-controls="payment-risk-formula-modal">{{ __($formulaText.'.open') }}</button>
+                            <template data-payment-risk-formula-content>
+                                    <p>{{ __($formulaText.'.expression', ['numerator' => $numeratorLabel, 'denominator' => $denominatorLabel]) }}</p>
+                                    <p><strong>{{ (float) $denominator === 0.0 ? __($formulaText.'.zero') : __($formulaText.'.substitution', $values) }}</strong></p>
+                                    <p>{{ __($formulaText.'.scope', ['value' => $description]) }}</p>
+                                    @if($scope === 'selected')
+                                        <p>{{ __($formulaText.'.store', ['value' => ($filters['store'] ?? '') ?: __($translationPrefix.'.filters.all_stores')]) }}</p>
+                                    @endif
+                                    @if(in_array($metric, $refundOrderRates, true))
+                                        <p>{{ __($formulaText.'.refund_link') }}</p>
+                                    @endif
+                                    @if(str_starts_with($metric, 'paypal_'))
+                                        <p>{{ __($formulaText.'.paypal_link') }}</p>
+                                    @elseif($metric === 'credit_card_refund_rate')
+                                        <p>{{ __($formulaText.'.card_refund_link') }}</p>
+                                    @elseif(str_starts_with($metric, 'credit_card_'))
+                                        <p>{{ __($formulaText.'.card_link') }}</p>
+                                    @endif
+                            </template>
+                        @endif
+                    </td>
+                @endforeach
             </tr>
         @empty<tr><td colspan="{{ $columnCount + 1 }}" class="payment-product-empty">{{ __($translationPrefix.'.empty_results') }}</td></tr>@endforelse
 </tbody></table></div>

@@ -41,7 +41,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:product-risk-dashboard:v4:'.sha1((string) json_encode(
+        $cacheKey = 'payment:product-risk-dashboard:v5:'.sha1((string) json_encode(
             $filters,
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
@@ -72,7 +72,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function tab(array $filters, string $tab): array
     {
-        $cacheKey = 'payment:product-risk-tab:v4:'.sha1((string) json_encode([
+        $cacheKey = 'payment:product-risk-tab:v5:'.sha1((string) json_encode([
             'filters' => $filters,
             'tab' => $tab,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -240,6 +240,7 @@ class PaymentProductRiskService
             $product['paypal_delivered_dispute_count'] = (int) ($paypal['delivered_dispute_order_count'] ?? 0);
             $product['paypal_delivered_dispute_rate'] = (float) ($paypal['delivered_dispute_rate'] ?? 0);
             $product['paypal_description_mismatch_amount'] = (float) ($paypal['description_mismatch_amount'] ?? 0);
+            $product['paypal_initial_dispute_amount'] = (float) ($paypal['dispute_amount'] ?? 0);
             $product['paypal_description_mismatch_rate'] = (float) ($paypal['description_mismatch_rate'] ?? 0);
             $product['credit_card_initial_order_count'] = (int) ($card['eligible_order_count'] ?? 0);
             $product['credit_card_complaint_count'] = (int) ($card['complaint_count'] ?? 0);
