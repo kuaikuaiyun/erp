@@ -34,7 +34,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-21">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table8">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table9">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush

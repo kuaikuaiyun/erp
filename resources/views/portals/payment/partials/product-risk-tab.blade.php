@@ -147,7 +147,7 @@
                 </td>
                 <td class="payment-product-value">
                     <strong>{{ $rate($product['credit_card_dispute_rate']) }}</strong>
-                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['credit_card_dispute_count']), 'denominator' => $number($creditCardOrderCount)]) }}</small>
+                    <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($product['credit_card_dispute_count']), 'denominator' => $number($product['credit_card_initial_order_count'] ?? 0)]) }}</small>
                 </td>
                 <td class="payment-product-value">
                     <strong>{{ $rate($product['credit_card_delivered_dispute_rate']) }}</strong>

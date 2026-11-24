@@ -158,11 +158,16 @@
     max-width: 100%;
     overflow-x: auto;
 }
-.payment-product-risk-page .payment-product-grouped-table { min-width: 1800px; }
+.payment-product-risk-page .payment-product-grouped-table {
+    min-width: 1800px;
+    border-collapse: separate;
+    border-spacing: 0;
+}
 .payment-product-risk-page .payment-product-grouped-table thead {
     position: sticky;
     top: 0;
     z-index: 3;
+    background: #e3eff8;
 }
 .payment-product-risk-page .payment-product-grouped-table .payment-product-group-headings th {
     background: #e3eff8;
