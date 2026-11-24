@@ -1,0 +1,107 @@
+.shopify-stores-list .flt-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopify-stores-list .shopify-filter-dates {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px 24px;
+    margin-top: 18px;
+}
+
+.shopify-stores-list .flt-picker-options label {
+    margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+    .shopify-stores-list .flt-filter-grid,
+    .shopify-stores-list .shopify-filter-dates {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .shopify-stores-list .flt-filter-grid,
+    .shopify-stores-list .shopify-filter-dates {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.shopify-stores-list .flt-filter-grid .flt-field-label {
+    margin-bottom: 8px;
+}
+
+.shopify-stores-list .shopify-store-table {
+    min-width: 2734px;
+}
+
+.shopify-stores-list .shopify-store-table th:nth-child(1) { width: 44px; }
+.shopify-stores-list .shopify-store-table th:nth-child(2) { width: 180px; }
+.shopify-stores-list .shopify-store-table th:nth-child(3) { width: 260px; }
+.shopify-stores-list .shopify-store-table th:nth-child(4) { width: 150px; }
+.shopify-stores-list .shopify-store-table th:nth-child(5) { width: 150px; }
+.shopify-stores-list .shopify-store-table th:nth-child(6) { width: 155px; }
+.shopify-stores-list .shopify-store-table th:nth-child(7) { width: 170px; }
+.shopify-stores-list .shopify-store-table th:nth-child(8) { width: 175px; }
+.shopify-stores-list .shopify-store-table th:nth-child(9) { width: 175px; }
+.shopify-stores-list .shopify-store-table th:nth-child(10) { width: 340px; }
+.shopify-stores-list .shopify-store-table th:nth-child(11) { width: 130px; }
+.shopify-stores-list .shopify-store-table th:nth-child(12) { width: 175px; }
+.shopify-stores-list .shopify-store-table th:nth-child(13) { width: 340px; }
+.shopify-stores-list .shopify-store-table th:nth-child(14) { width: 290px; }
+
+.shopify-stores-list .shopify-store-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.shopify-stores-list .shopify-store-table td.logistics-message-cell {
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.shopify-stores-list .shopify-filter-field > label {
+    margin-bottom: 8px;
+}
+
+.shopify-stores-list .shopify-date-range .form-control {
+    font-size: 13px;
+}
+
+.shopify-stores-list .shopify-store-table tr[data-selected="1"]:not(.logistics-row-failed) {
+    --flt-row-bg: #edf7fe;
+    background: var(--flt-row-bg);
+}
+
+.shopify-stores-list .shopify-store-table tr.logistics-row-failed > td:not(.logistics-actions) {
+    background-color: #ffe4e1;
+}
+
+.shopify-stores-list .shopify-store-table td.logistics-actions {
+    text-overflow: clip;
+}
+
+.shopify-stores-list .shopify-store-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+
+.shopify-stores-list .shopify-store-table .logistics-inline-form {
+    margin: 0;
+}
+
+.shopify-stores-list .shopify-store-actions .flt-btn {
+    min-height: 28px;
+    padding: 4px 8px;
+    white-space: nowrap;
+}
+
+.shopify-stores-list .shopify-store-empty {
+    min-height: 220px;
+    display: grid;
+    place-content: center;
+}

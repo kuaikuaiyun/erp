@@ -55,7 +55,19 @@ class NbcOrderController extends Controller
             ->orderBy('shop_name')
             ->get(['id', 'shop_name', 'site_builder', 'owner_user_id', 'user_name']);
         $query = FashionLogisticsOrder::query()
-            ->with(['items', 'store.ownerUser:id,name,username'])
+            ->select([
+                'id', 'assistant_domain_store_id', 'source_platform', 'order_number', 'external_order_id', 'order_created_at',
+                'store_name', 'source_domain', 'status', 'fulfillment_status', 'marketing_source',
+                'customer_name', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'discount_amount',
+            ])
+            ->with([
+                'items' => static fn ($items) => $items
+                    ->select(['id', 'fashion_logistics_order_id', 'product_name', 'sku', 'quantity'])
+                    ->orderBy('id')->limit(2),
+                'store:id,owner_user_id,user_name,team',
+                'store.ownerUser:id,name,username',
+            ])
+            ->withCount('items')
             ->whereIn('source_platform', self::PLATFORMS)
             ->where('payment_status', '230')
             ->whereHas('store', function (Builder $stores) use ($user): void {

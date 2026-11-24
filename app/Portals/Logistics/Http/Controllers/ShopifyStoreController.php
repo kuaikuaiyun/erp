@@ -10,17 +10,22 @@ use App\Models\LogisticsShopifySyncTask;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\ShopifyOrderSyncService;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
 class ShopifyStoreController extends Controller
 {
     private const MANUAL_SYNC_DAYS = 180;
+    private const SEARCH_COLUMNS = ['shop_name', 'shop_login_url', 'store_prefix', 'tongtu_prefix', 'user_name', 'team'];
+    private const DATE_COLUMNS = ['sync' => 'last_synced_at', 'webhook' => 'webhook_registered_at'];
 
     public function __construct(
         private readonly PortalEntryController $portalEntries,
@@ -40,15 +45,23 @@ class ShopifyStoreController extends Controller
         if (!in_array($perPage, [20, 50, 100], true)) {
             $perPage = 20;
         }
-        $search = $request->validate([
-            'shop_name' => ['nullable', 'string', 'max:2000'],
-            'store_prefix' => ['nullable', 'string', 'max:2000'],
-        ], [], [
-            'shop_name' => __('logistics.shopify_stores.shop_name'),
-            'store_prefix' => __('logistics.shopify_stores.store_prefix'),
-        ]);
-        $search = array_map(static fn ($value): string => trim((string) $value), $search);
-        $search += ['shop_name' => '', 'store_prefix' => ''];
+        $rules = array_fill_keys(self::SEARCH_COLUMNS, ['nullable', 'string', 'max:2000']);
+        $attributes = [];
+        foreach (self::SEARCH_COLUMNS as $column) {
+            $attributes[$column] = __('logistics.shopify_stores.'.$column);
+        }
+        foreach (array_keys(self::DATE_COLUMNS) as $prefix) {
+            $from = $prefix.'_from';
+            $to = $prefix.'_to';
+            $rules[$from] = ['nullable', 'date_format:Y-m-d'];
+            $rules[$to] = ['nullable', 'date_format:Y-m-d', Rule::when($request->filled($from), 'after_or_equal:'.$from)];
+            $attributes[$from] = __('logistics.shopify_stores.'.$from);
+            $attributes[$to] = __('logistics.shopify_stores.'.$to);
+        }
+        $rules['token_status'] = ['nullable', Rule::in(['valid', 'expired', 'missing'])];
+        $attributes['token_status'] = __('logistics.shopify_stores.token_status');
+        $search = array_map(static fn ($value): string => trim((string) $value), $request->validate($rules, [], $attributes));
+        $search += array_fill_keys(array_keys($rules), '');
 
         $webhookStatus = $request->input('webhook_status', '');
         if (!in_array($webhookStatus, ['', 'active', 'failed', 'not_registered'], true)) {
@@ -63,6 +76,7 @@ class ShopifyStoreController extends Controller
             ->where('site_builder', 'shopify')
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
             ->tap(fn ($query) => $this->applyStoreSearch($query, $search))
+            ->tap(fn ($query) => $this->applyConnectionFilters($query, $search))
             ->when($webhookStatus !== '', function ($query) use ($webhookStatus) {
                 if ($webhookStatus === 'not_registered') {
                     $query->where(function ($query) {
@@ -108,15 +122,69 @@ class ShopifyStoreController extends Controller
         ]);
     }
 
-    private function applyStoreSearch(\Illuminate\Database\Eloquent\Builder $query, array $search): void
+    private function applyStoreSearch(Builder $query, array $search): void
     {
-        foreach (['shop_name', 'store_prefix'] as $column) {
-            $terms = array_values(array_unique(array_filter(array_map('trim', preg_split('/[,，]+/u', $search[$column]) ?: []), static fn (string $term): bool => $term !== '')));
+        foreach (self::SEARCH_COLUMNS as $column) {
+            $terms = array_values(array_unique(array_filter(array_map('trim', preg_split('/[,，]+/u', $search[$column] ?? '') ?: []), static fn (string $term): bool => $term !== '')));
             if ($terms === []) continue;
             $query->where(function ($group) use ($terms, $column): void {
                 foreach ($terms as $term) {
                     $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
+                    if ($column === 'team') {
+                        $this->applyTeamSearch($group, $like);
+                        continue;
+                    }
                     $group->orWhereRaw($group->getQuery()->getGrammar()->wrap($column)." LIKE ? ESCAPE '!'", [$like]);
+                }
+            });
+        }
+    }
+
+    private function applyTeamSearch(Builder $query, string $like): void
+    {
+        if ($query->getConnection()->getDriverName() === 'sqlite') {
+            $query->orWhereRaw(
+                "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(team) THEN team ELSE json_quote(team) END) AS team_option WHERE team_option.value LIKE ? ESCAPE '!')",
+                [$like],
+            );
+            return;
+        }
+
+        $query->orWhereRaw(
+            "JSON_SEARCH(CASE WHEN JSON_VALID(team) THEN team ELSE JSON_QUOTE(team) END, 'one', ?, '!') IS NOT NULL",
+            [$like],
+        );
+    }
+
+    private function applyConnectionFilters(Builder $query, array $filters): void
+    {
+        $tokenStatus = $filters['token_status'];
+        if ($tokenStatus === 'missing') {
+            $query->whereDoesntHave('shopifyConnection', fn (Builder $connection) => $connection->whereNotNull('token_obtained_at'));
+        } elseif ($tokenStatus !== '') {
+            $now = now();
+            $query->whereHas('shopifyConnection', function (Builder $connection) use ($tokenStatus, $now): void {
+                $connection->whereNotNull('token_obtained_at');
+                if ($tokenStatus === 'valid') {
+                    $connection->where('token_expires_at', '>', $now);
+                } else {
+                    $connection->where(fn (Builder $expiry) => $expiry->whereNull('token_expires_at')->orWhere('token_expires_at', '<=', $now));
+                }
+            });
+        }
+
+        foreach (self::DATE_COLUMNS as $prefix => $column) {
+            $from = $filters[$prefix.'_from'];
+            $to = $filters[$prefix.'_to'];
+            if ($from === '' && $to === '') {
+                continue;
+            }
+            $query->whereHas('shopifyConnection', function (Builder $connection) use ($column, $from, $to): void {
+                if ($from !== '') {
+                    $connection->where($column, '>=', CarbonImmutable::parse($from, 'Asia/Shanghai')->startOfDay()->utc());
+                }
+                if ($to !== '') {
+                    $connection->where($column, '<', CarbonImmutable::parse($to, 'Asia/Shanghai')->startOfDay()->addDay()->utc());
                 }
             });
         }

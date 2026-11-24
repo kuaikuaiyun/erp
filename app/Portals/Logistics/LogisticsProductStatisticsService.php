@@ -9,6 +9,7 @@ use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsTongtuSkuMapping;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -96,6 +97,100 @@ class LogisticsProductStatisticsService
                 'last_page' => $lastPage,
                 'from' => $total === 0 ? 0 : $offset + 1,
                 'to' => min($offset + $perPage, $total),
+            ],
+        ];
+    }
+
+    /**
+     * Cache the matching product keys, sort values and totals together so later
+     * pages only need to hydrate the selected products.
+     *
+     * @param array<string,array{min?:float,max?:float}> $ranges
+     * @param list<string> $extraMetrics
+     * @param Closure(Builder, Builder): void $addMetrics
+     */
+    public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics): array
+    {
+        $sort = (string) $filters['sort'];
+        $baseSort = in_array($sort, $extraMetrics, true) ? '' : $sort;
+        $useFullQuery = !$this->canUseLightweightPageQuery([...$filters, 'sort' => $baseSort])
+            || array_diff(array_keys($ranges), $extraMetrics) !== [];
+        $baseMetrics = $useFullQuery ? [
+            'paypal_refund_amount', 'paypal_refund_rate', 'paypal_dispute_count',
+            'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate',
+        ] : [];
+        $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v1', $filters)
+            .'.'.sha1(json_encode([$ranges, $extraMetrics, $useFullQuery, $filters['only_abnormal']]));
+
+        $selection = Cache::flexible($cacheKey, [120, 600], function () use ($filters, $ranges, $baseMetrics, $useFullQuery, $addMetrics): array {
+            $base = $useFullQuery ? $this->productStatisticsQuery($filters, false) : $this->metricCandidateQuery($filters);
+            $query = $this->database()->query()->fromSub($base, 'base')
+                ->select([
+                    'base.product_key', 'base.first_item_id', 'base.latest_order_at', 'base.product_title',
+                    'base.tongtu_product_name', 'base.tongtu_product_code', 'base.shop_count', 'base.sales', 'base.revenue',
+                ])->addSelect(array_map(static fn (string $column): string => 'base.'.$column, $baseMetrics));
+            $candidateKeys = $this->baseItemQuery($filters)
+                ->selectRaw($this->productKeyExpression('items', 'sku_mappings'))
+                ->distinct();
+            $addMetrics($query, $candidateKeys);
+
+            $matching = $this->database()->query()->fromSub($query, 'product_statistics');
+            foreach ($ranges as $metric => $bounds) {
+                // Rate thresholds are applied to the same two decimals shown in the list.
+                $column = 'product_statistics.'.$metric;
+                $value = $metric === 'order_count' ? $column : "ROUND({$column}, 2)";
+                if (isset($bounds['min'])) {
+                    $matching->whereRaw("{$value} > ?", [$bounds['min']]);
+                }
+                if (isset($bounds['max'])) {
+                    $matching->whereRaw("{$value} < ?", [$bounds['max']]);
+                }
+            }
+            if (!empty($filters['only_abnormal'])) {
+                $matching->where(function (Builder $query): void {
+                    $query->whereRaw('ROUND(product_statistics.combined_refund_rate, 2) > 0')
+                        ->orWhere('product_statistics.paypal_dispute_count', '>', 0);
+                });
+            }
+
+            $candidates = $matching->get();
+            $refunds = ['paypal' => 0.0, 'credit_card' => 0.0];
+            if ($candidates->isNotEmpty()) {
+                $keys = $candidates->count() <= 500 ? $candidates->pluck('product_key')->all() : null;
+                $refunds = $ranges !== [] || !empty($filters['only_abnormal'])
+                    ? $this->uniqueRefundSummary($matching, $filters, $keys)
+                    : $this->uniqueRefundSummaryForBaseFilters($filters);
+            }
+
+            return [
+                'rows' => $candidates->map(static fn (object $row): array => (array) $row)->all(),
+                'summary' => $this->overallSummaryFromCandidates($candidates, $filters, $refunds),
+            ];
+        });
+
+        $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
+        $total = $candidates->count();
+        $perPage = (int) $filters['per_page'];
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($lastPage, max(1, (int) $filters['page']));
+        $offset = ($page - 1) * $perPage;
+        $keys = $this->sortLightweightCandidates($candidates, $sort, $filters['direction'], [...$baseMetrics, ...$extraMetrics])
+            ->slice($offset, $perPage)->pluck('product_key')->all();
+        $rows = collect();
+        if ($keys !== []) {
+            $fullRows = $this->productStatisticsQuery($filters, false, $keys)->get()->keyBy('product_key');
+            $rows = collect($keys)->map(static fn (string $key) => $fullRows->get($key))->filter()->values();
+        }
+        $this->hydrateTongtuProductMetadata($rows);
+        $products = $rows->map(fn (object $row): array => $this->listProduct($row))->all();
+        $this->fillVariantSkuWeights($products);
+
+        return [
+            'products' => $products,
+            'summary' => $selection['summary'],
+            'pagination' => [
+                'current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total,
+                'from' => $total === 0 ? 0 : $offset + 1, 'to' => min($offset + $perPage, $total),
             ],
         ];
     }
@@ -396,9 +491,9 @@ class LogisticsProductStatisticsService
      * @param array<string,mixed> $filters
      * @return array<string,mixed>
      */
-    private function overallSummaryFromCandidates(Collection $candidates, array $filters): array
+    private function overallSummaryFromCandidates(Collection $candidates, array $filters, ?array $refunds = null): array
     {
-        $refunds = $this->uniqueRefundSummaryForBaseFilters($filters);
+        $refunds ??= $this->uniqueRefundSummaryForBaseFilters($filters);
         $sales = round((float) $candidates->sum(static fn (object $row): float => (float) $row->sales), 4);
         $revenue = round((float) $candidates->sum(static fn (object $row): float => (float) $row->revenue), 4);
         $actualRefunds = round((float) $refunds['paypal'] + (float) $refunds['credit_card'], 4);
@@ -416,13 +511,14 @@ class LogisticsProductStatisticsService
      * @param Collection<int,object> $candidates
      * @return Collection<int,object>
      */
-    private function sortLightweightCandidates(Collection $candidates, string $sort, string $direction): Collection
+    private function sortLightweightCandidates(Collection $candidates, string $sort, string $direction, array $numericMetrics = []): Collection
     {
         $descending = $sort === '' || $direction === 'desc';
+        $isMetric = in_array($sort, $numericMetrics, true);
         $rows = $candidates->all();
-        usort($rows, function (object $left, object $right) use ($sort, $descending): int {
-            $leftValue = $this->lightweightCandidateSortValue($left, $sort);
-            $rightValue = $this->lightweightCandidateSortValue($right, $sort);
+        usort($rows, function (object $left, object $right) use ($sort, $descending, $isMetric): int {
+            $leftValue = $isMetric ? (float) $left->{$sort} : $this->lightweightCandidateSortValue($left, $sort);
+            $rightValue = $isMetric ? (float) $right->{$sort} : $this->lightweightCandidateSortValue($right, $sort);
             $numeric = is_int($leftValue) || is_float($leftValue) || is_int($rightValue) || is_float($rightValue);
             $comparison = $numeric
                 ? ((float) $leftValue <=> (float) $rightValue)
@@ -434,6 +530,8 @@ class LogisticsProductStatisticsService
             if ($comparison !== 0) {
                 return $comparison;
             }
+
+            if ($isMetric) return (int) $left->first_item_id <=> (int) $right->first_item_id;
 
             return $descending
                 ? ((int) $right->first_item_id <=> (int) $left->first_item_id)
@@ -1805,6 +1903,23 @@ class LogisticsProductStatisticsService
             ->selectRaw("COALESCE(NULLIF(TRIM(first_item.product_image_url), ''), NULLIF(TRIM(image_item.product_image_url), '')) as product_image_url");
     }
 
+    private function metricCandidateQuery(array $filters): Builder
+    {
+        $key = $this->productKeyExpression('items', 'sku_mappings');
+        $items = $this->baseItemQuery($filters)
+            ->selectRaw("{$key} as product_key")
+            ->selectRaw('MIN(items.id) as first_item_id')
+            ->selectRaw('MAX(COALESCE(orders.order_created_at, orders.paid_at, orders.created_at)) as latest_order_at')
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
+            ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
+            ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
+            ->groupByRaw($key);
+
+        return $this->database()->query()->fromSub($items, 'items')
+            ->join('logistics_order_items as first_item', 'first_item.id', '=', 'items.first_item_id')
+            ->select(['items.*', 'first_item.product_title', 'first_item.tongtu_product_name', 'first_item.tongtu_product_code']);
+    }
+
     /**
      * @param array<string,mixed> $filters
      * @param list<string>|null $productKeys
@@ -2260,13 +2375,15 @@ class LogisticsProductStatisticsService
      * @param array<string,mixed> $filters
      * @return array{paypal:float,credit_card:float}
      */
-    private function uniqueRefundSummary(Builder $products, array $filters): array
+    private function uniqueRefundSummary(Builder $products, array $filters, ?array $keys = null): array
     {
-        $productKeys = (clone $products)->select('product_statistics.product_key');
+        $orders = $this->productOrderQuery($filters, false, $keys);
         $selectedOrders = $this->database()->query()
-            ->fromSub($this->productOrderQuery($filters, false), 'product_orders')
-            ->joinSub($productKeys, 'product_statistics', 'product_statistics.product_key', '=', 'product_orders.product_key')
-            ->select('product_orders.order_id')
+            ->fromSub($orders, 'product_orders');
+        if ($keys === null) {
+            $selectedOrders->joinSub((clone $products)->select('product_statistics.product_key'), 'product_statistics', 'product_statistics.product_key', '=', 'product_orders.product_key');
+        }
+        $selectedOrders->select('product_orders.order_id')
             ->selectRaw('MAX(product_orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(product_orders.paypal_association_source) as paypal_association_source')
             ->groupBy('product_orders.order_id');

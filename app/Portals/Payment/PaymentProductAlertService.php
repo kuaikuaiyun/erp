@@ -7,6 +7,7 @@ use App\Models\PaymentProductAlertAssignmentLog;
 use App\Models\AdminUser;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Database\Connection;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -185,6 +186,98 @@ class PaymentProductAlertService
         return $this->cachedMetricRows(false, $productKeys, $filters)->groupBy('product_key')->map(
             fn (Collection $rows): array => $rows->keyBy('channel_type')->all()
         )->all();
+    }
+
+    /** @param list<string> $metrics */
+    public function listDisputeRatesQuery(array $metrics, Builder $candidateKeys): Builder
+    {
+        $database = $this->database();
+        $key = $this->productKeyExpression('items');
+        $pairs = $this->initialPaidProductOrders()
+            ->whereIn(DB::raw($key), $candidateKeys)
+            ->selectRaw("{$key} as product_key")
+            ->addSelect('orders.id as order_id')
+            ->distinct();
+        $query = $database->query()->fromSub($pairs, 'product_orders')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'product_orders.order_id')
+            ->select('product_orders.product_key')
+            ->groupBy('product_orders.product_key');
+
+        $delivered = $database->getPdo()->quote(\App\Models\LogisticsOrder::LOGISTICS_DELIVERED);
+        if (in_array('paypal_delivered_dispute_rate', $metrics, true)) {
+            $disputes = $this->paypalDisputesByOrder();
+            $query->leftJoinSub($disputes, 'paypal_disputes', function ($join): void {
+                $join->on('paypal_disputes.logistics_order_id', '=', 'orders.id')
+                    ->on('paypal_disputes.logistics_paypal_account_id', '=', 'orders.paypal_account_id');
+            });
+            $eligible = "orders.paypal_account_id IS NOT NULL AND orders.paypal_association_source = 'actual_transaction' AND orders.logistics_status = {$delivered}";
+            $this->selectDisputeRate($query, 'paypal_delivered_dispute_rate', $eligible, 'COALESCE(paypal_disputes.dispute_count, 0) > 0', true);
+        }
+
+        $cardMetrics = array_intersect(['credit_card_dispute_rate', 'credit_card_delivered_dispute_rate'], $metrics);
+        if ($cardMetrics !== []) {
+            $cardDisputes = $database->table('logistics_credit_card_refunds as refund')
+                ->whereRaw($this->creditCardReasonExpression().' IN ('.$this->creditCardReasonList(LogisticsCreditCardRefundReason::DISPUTE).')')
+                ->select('refund.logistics_order_id')
+                ->selectRaw('COUNT(*) as dispute_count')
+                ->groupBy('refund.logistics_order_id');
+            $query->leftJoinSub($cardDisputes, 'card_risk', 'card_risk.logistics_order_id', '=', 'orders.id');
+            $eligible = $this->creditCardTagExpression('orders');
+            if (in_array('credit_card_dispute_rate', $cardMetrics, true)) {
+                $this->selectDisputeRate($query, 'credit_card_dispute_rate', $eligible, 'COALESCE(card_risk.dispute_count, 0)');
+            }
+            if (in_array('credit_card_delivered_dispute_rate', $cardMetrics, true)) {
+                $this->selectDisputeRate($query, 'credit_card_delivered_dispute_rate', "{$eligible} AND orders.logistics_status = {$delivered}", 'COALESCE(card_risk.dispute_count, 0) > 0', true);
+            }
+        }
+
+        return $query;
+    }
+
+    private function selectDisputeRate(Builder $query, string $alias, string $eligible, string $disputes, bool $countOrders = false): void
+    {
+        $denominator = "SUM(CASE WHEN {$eligible} THEN 1 ELSE 0 END)";
+        $numerator = $countOrders
+            ? "SUM(CASE WHEN {$eligible} AND {$disputes} THEN 1 ELSE 0 END)"
+            : "SUM(CASE WHEN {$eligible} THEN {$disputes} ELSE 0 END)";
+        $query->selectRaw("COALESCE(ROUND(100.0000 * {$numerator} / NULLIF({$denominator}, 0), 2), 0) as {$alias}");
+    }
+
+    private function initialPaidProductOrders(): Builder
+    {
+        return $this->database()->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->whereRaw('(orders.paid_at IS NOT NULL OR COALESCE(orders.paid_amount_usd, 0) > 0)')
+            ->whereRaw("(orders.subscription_origin_order_id IS NULL OR TRIM(orders.subscription_origin_order_id) = '')");
+    }
+
+    private function paypalDisputesByOrder(): Builder
+    {
+        return $this->database()->table('logistics_paypal_disputes as dispute')
+            ->whereNotNull('dispute.logistics_order_id')
+            ->select(['dispute.logistics_order_id', 'dispute.logistics_paypal_account_id'])
+            ->selectRaw('COUNT(DISTINCT dispute.id) as dispute_count')
+            ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
+    }
+
+    private function creditCardTagExpression(string $alias): string
+    {
+        return "(CASE WHEN JSON_VALID(COALESCE({$alias}.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT({$alias}.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+    }
+
+    private function creditCardReasonExpression(): string
+    {
+        return "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(refund.refund_reason, ''), '（', ''), '）', ''), '(', ''), ')', ''), ' ', ''))";
+    }
+
+    private function creditCardReasonList(array $reasons): string
+    {
+        $pdo = $this->database()->getPdo();
+
+        return implode(', ', array_map(
+            static fn (string $reason): string => $pdo->quote(LogisticsCreditCardRefundReason::normalize($reason)),
+            $reasons,
+        ));
     }
 
     public function updateStatus(string $alertCode, string $status, string $operation, string $remark, AdminUser $actor): void
@@ -369,16 +462,11 @@ class PaymentProductAlertService
     {
         $database = $this->database();
         $productKey = $this->productKeyExpression('items');
-        $paidOrder = '(orders.paid_at IS NOT NULL OR COALESCE(orders.paid_amount_usd, 0) > 0)';
-        $initialOrder = "(orders.subscription_origin_order_id IS NULL OR TRIM(orders.subscription_origin_order_id) = '')";
 
         // One row represents one product in one paid order. This is the key
         // de-duplication boundary: quantity does not increase the order count,
         // while an order containing several products belongs once to each one.
-        $productOrders = $database->table('logistics_order_items as items')
-            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
-            ->whereRaw($paidOrder)
-            ->whereRaw($initialOrder)
+        $productOrders = $this->initialPaidProductOrders()
             ->selectRaw("{$productKey} as product_key")
             ->addSelect('orders.id as order_id')
             ->selectRaw('MIN(items.id) as first_item_id')
@@ -396,13 +484,9 @@ class PaymentProductAlertService
             $productOrders->whereIn(DB::raw($productKey), array_values(array_unique($productKeys)));
         }
 
-        $disputes = $database->table('logistics_paypal_disputes as dispute')
-            ->whereNotNull('dispute.logistics_order_id')
-            ->select(['dispute.logistics_order_id', 'dispute.logistics_paypal_account_id'])
-            ->selectRaw('COUNT(DISTINCT dispute.id) as dispute_count')
+        $disputes = $this->paypalDisputesByOrder()
             ->selectRaw("SUM(COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END)) as dispute_amount")
-            ->selectRaw("SUM(CASE WHEN UPPER(COALESCE(dispute.reason, '')) LIKE '%NOT_AS_DESCRIBED%' OR UPPER(COALESCE(dispute.reason, '')) LIKE '%MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED%' THEN COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END) ELSE 0 END) as description_mismatch_amount")
-            ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
+            ->selectRaw("SUM(CASE WHEN UPPER(COALESCE(dispute.reason, '')) LIKE '%NOT_AS_DESCRIBED%' OR UPPER(COALESCE(dispute.reason, '')) LIKE '%MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED%' THEN COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END) ELSE 0 END) as description_mismatch_amount");
         $this->applyPayPalEventDateFilters($disputes, $filters, 'dispute.dispute_created_at');
 
         $paypalRefunds = $database->table('logistics_paypal_refunds as refund')
@@ -413,16 +497,10 @@ class PaymentProductAlertService
             ->groupBy('refund.logistics_order_id', 'refund.logistics_paypal_account_id');
         $this->applyPayPalEventDateFilters($paypalRefunds, $filters, 'refund.refunded_at');
 
-        $reasonExpression = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(refund.refund_reason, ''), '（', ''), '）', ''), '(', ''), ')', ''), ' ', ''))";
-        $reasonList = function (array $reasons) use ($database): string {
-            return implode(', ', array_map(
-                fn (string $reason): string => $database->getPdo()->quote(LogisticsCreditCardRefundReason::normalize($reason)),
-                $reasons,
-            ));
-        };
-        $alertReasons = $reasonList(LogisticsCreditCardRefundReason::ALERT);
-        $serviceReasons = $reasonList(LogisticsCreditCardRefundReason::CUSTOMER_SERVICE);
-        $disputeReasons = $reasonList(LogisticsCreditCardRefundReason::DISPUTE);
+        $reasonExpression = $this->creditCardReasonExpression();
+        $alertReasons = $this->creditCardReasonList(LogisticsCreditCardRefundReason::ALERT);
+        $serviceReasons = $this->creditCardReasonList(LogisticsCreditCardRefundReason::CUSTOMER_SERVICE);
+        $disputeReasons = $this->creditCardReasonList(LogisticsCreditCardRefundReason::DISPUTE);
         $cardRisk = $database->table('logistics_credit_card_refunds as refund')
             ->select('refund.logistics_order_id')
             ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$alertReasons}) THEN 1 ELSE 0 END) as complaint_count")
@@ -434,7 +512,7 @@ class PaymentProductAlertService
             ->groupBy('refund.logistics_order_id');
 
         $actualPayPal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
-        $creditCard = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+        $creditCard = $this->creditCardTagExpression('product_orders');
         $payload = "LOWER(COALESCE(product_orders.shopify_payload, ''))";
         $yunhui = "({$creditCard} AND ({$payload} LIKE '%yunhui%' OR {$payload} LIKE '%云汇%'))";
         $qianhai = "({$creditCard} AND ({$payload} LIKE '%qianhai%' OR {$payload} LIKE '%oceanpayment%' OR {$payload} LIKE '%钱海%'))";

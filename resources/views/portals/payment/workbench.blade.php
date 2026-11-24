@@ -21,19 +21,22 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-workbench.css?v=20261026-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-workbench.css?v=20261124-1">
 @endpush
 
 @section('content')
     <section class="content-header payment-workbench-header">
         <div class="payment-workbench-heading">
             <h1>{{ __($headerTranslationPrefix.'.title', ['portal' => $portal->name]) }} <small>{{ __($headerTranslationPrefix.'.subtitle', ['portal' => $portal->name]) }}</small></h1>
-            <div class="payment-workbench-welcome"><h2>{{ __($headerTranslationPrefix.'.greeting.'.$greetingKey, ['name' => $user->name]) }}</h2><p>{{ __($headerTranslationPrefix.'.today', ['date' => now('Asia/Shanghai')->format('Y-m-d')]) }}</p></div>
+            <div class="payment-workbench-context" role="group" aria-label="{{ __($headerTranslationPrefix.'.context_label') }}">
+                <span class="payment-filter-chip"><strong>{{ __('payment.common.scope') }}</strong> {{ __($translationPrefix.'.scope.'.$dashboard['scope_key']) }}</span>
+                <span class="payment-filter-chip"><strong>{{ __('payment.common.currency') }}</strong> {{ $dashboard['currency'] }}</span>
+                <span class="payment-filter-chip"><strong>{{ __('payment.common.cutoff') }}</strong> {{ $dashboard['cutoff'] }}</span>
+            </div>
         </div>
-        <div class="payment-workbench-context" aria-label="{{ __($headerTranslationPrefix.'.context_label') }}">
-            <span class="payment-filter-chip"><strong>{{ __('payment.common.scope') }}</strong>{{ __($translationPrefix.'.scope.'.$dashboard['scope_key']) }}</span>
-            <span class="payment-filter-chip"><strong>{{ __('payment.common.currency') }}</strong>{{ $dashboard['currency'] }}</span>
-            <span class="payment-filter-chip"><strong>{{ __('payment.common.cutoff') }}</strong>{{ $dashboard['cutoff'] }}</span>
+        <div class="payment-workbench-welcome">
+            <h2>{{ __($headerTranslationPrefix.'.greeting.'.$greetingKey, ['name' => $user->name]) }}</h2>
+            <p>{{ __($headerTranslationPrefix.'.today', ['date' => now('Asia/Shanghai')->format('Y-m-d')]) }}</p>
         </div>
     </section>
 
@@ -54,8 +57,40 @@
         </div>
 
         <div class="payment-dashboard-grid payment-dashboard-grid-bottom">
-            <article class="payment-panel payment-todo-panel"><h2>{{ __($translationPrefix.'.todos.title') }}</h2><div class="payment-todo-list">@forelse ($dashboard['todos'] as $todo)<div class="payment-todo-item"><span class="payment-status-dot payment-tone-{{ $todo['tone'] }}"></span><div><strong>{{ $todo['title'] }}</strong><small>{{ $todo['description'] }}</small></div><a class="payment-text-action" href="{{ $todo['url'] }}">{{ __($translationPrefix.'.todos.open') }} <i class="fa fa-angle-right" aria-hidden="true"></i></a></div>@empty<p class="payment-workbench-empty">{{ __($translationPrefix.'.real.no_todos') }}</p>@endforelse</div></article>
-            <article class="payment-panel payment-quick-search-panel"><h2>{{ __($translationPrefix.'.quick_search.title') }}</h2><p>{{ __($translationPrefix.'.quick_search.description') }}</p><form data-payment-quick-search><label class="sr-only" for="payment-quick-search">{{ __($translationPrefix.'.quick_search.placeholder') }}</label><div class="input-group"><input id="payment-quick-search" class="form-control" name="keyword" type="search" placeholder="{{ __($translationPrefix.'.quick_search.placeholder') }}"><span class="input-group-btn"><button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i><span class="sr-only">{{ __('payment.common.search') }}</span></button></span></div></form><div class="payment-system-status"><p class="payment-positive">{{ $dashboard['status']['payments'] }}</p><p>{{ $dashboard['status']['risk'] }}</p><p class="payment-primary">{{ $dashboard['status']['alerts'] }}</p></div></article>
+            <article class="payment-panel payment-todo-panel">
+                <h2>{{ __($translationPrefix.'.todos.title') }}</h2>
+                <div class="payment-todo-list">
+                    @forelse ($dashboard['todos'] as $todo)
+                        <div class="payment-todo-item">
+                            <span class="payment-status-dot payment-tone-{{ $todo['tone'] }}" aria-hidden="true"></span>
+                            <div><strong>{{ $todo['title'] }}</strong><small>{{ $todo['description'] }}</small></div>
+                            <a class="payment-todo-open" href="{{ $todo['url'] }}" aria-label="{{ __($translationPrefix.'.todos.open') }} {{ $todo['title'] }}">
+                                {{ __($translationPrefix.'.todos.open') }} <i class="fa fa-angle-right" aria-hidden="true"></i>
+                            </a>
+                        </div>
+                    @empty
+                        <p class="payment-workbench-empty">{{ __($translationPrefix.'.real.no_todos') }}</p>
+                    @endforelse
+                </div>
+            </article>
+            <article class="payment-panel payment-quick-search-panel">
+                <h2>{{ __($translationPrefix.'.quick_search.title') }}</h2>
+                <p>{{ __($translationPrefix.'.quick_search.description') }}</p>
+                <form data-payment-quick-search>
+                    <label class="sr-only" for="payment-quick-search">{{ __($translationPrefix.'.quick_search.placeholder') }}</label>
+                    <div class="payment-workbench-search-field">
+                        <input id="payment-quick-search" class="form-control" name="keyword" type="search" placeholder="{{ __($translationPrefix.'.quick_search.placeholder') }}">
+                        <button class="btn btn-primary" type="submit">
+                            <i class="fa fa-search" aria-hidden="true"></i><span class="sr-only">{{ __('payment.common.search') }}</span>
+                        </button>
+                    </div>
+                </form>
+                <div class="payment-system-status">
+                    <p class="payment-positive">{{ $dashboard['status']['payments'] }}</p>
+                    <p>{{ $dashboard['status']['risk'] }}</p>
+                    <p class="payment-primary">{{ $dashboard['status']['alerts'] }}</p>
+                </div>
+            </article>
         </div>
     </section>
 @endsection

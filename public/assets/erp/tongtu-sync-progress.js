@@ -18,8 +18,10 @@
                 if (response.ok) {
                     const data = await response.json();
                     coverage.textContent = `${data.synced_days} / ${data.total_days}`;
-                    active.textContent = data.active ? `正在抓取 ${data.active.date}，已获取 ${data.active.orders} 条订单。` : '';
-                    lastSync.textContent = data.last_sync ? `最近同步 ${data.last_sync}` : '最近同步';
+                    active.textContent = data.active
+                        ? progress.dataset.activeTemplate.replace('__date__', data.active.date).replace('__orders__', data.active.orders)
+                        : '';
+                    lastSync.textContent = progress.dataset.lastSyncTemplate.replace('__time__', data.last_sync || '').trim();
                     lastSync.hidden = !data.last_sync;
                     refresh.hidden = data.synced_days === initialDays && lastSync.textContent === initialSync;
                     progress.hidden = data.synced_days >= data.total_days && !data.active && refresh.hidden;

@@ -2,12 +2,20 @@
     'use strict';
 
     var config = window.ErpLogisticsProductStatistics || {};
-    var products = Array.isArray(config.products) ? config.products : [];
-    var overallSummary = config.summary || {};
-    var refundReasonReport = config.refundReasonReport || {};
-    var pagination = config.pagination || { current_page: 1, per_page: 10, total: products.length, last_page: 1, from: 0, to: products.length };
+    var products = [];
+    var overallSummary = {};
+    var refundReasonReport = null;
+    var pagination = {};
     var labels = config.labels || {};
-    var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {}, reasonReportExpanded: false };
+    var state = { page: 1, sort: config.sort || '', direction: config.direction || '', selected: {}, reasonReportExpanded: false };
+    var appliedParams = new URLSearchParams();
+    var listReady = false;
+    var listRequest;
+    var storesRequest;
+    var reportRequest;
+    var storesKey = null;
+    var reportKey = null;
+    var reportFailed = false;
     var detailState = { product: null, overviewLoaded: false, loadingTabs: {}, tabData: {}, sorts: {}, filters: {}, pages: {}, perPages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var tableScroll = document.querySelector('.product-statistics-table-scroll');
@@ -117,6 +125,15 @@
         var label = product && product.match_status_label ? product.match_status_label : t('pendingTongtuMatch');
         return '<span class="product-statistics-match-status is-' + escapeHtml(status) + '">' + escapeHtml(label) + '</span>';
     }
+    var listRegion = document.getElementById('product-statistics-list-region');
+    var listLoading = document.getElementById('product-statistics-list-loading');
+    var clearSelection = document.getElementById('product-statistics-clear-selection');
+
+    function setListLoading(loading) {
+        listRegion.setAttribute('aria-busy', String(loading));
+        listLoading.hidden = !loading;
+    }
+
     function parentRow(product) {
         var subtitle = product.matched_name || product.category || '';
         return '<tr class="product-statistics-product-row" data-product-id="' + escapeHtml(product.id) + '">'
@@ -128,14 +145,13 @@
             + '<td>' + formatNumber(product.sales) + '</td><td>' + formatMoney(product.revenue) + '</td>'
             + '<td>' + formatMoney(product.paypal_refund_amount) + '</td><td>' + formatRate(product.paypal_refund_rate) + '</td><td>' + formatNumber(product.paypal_dispute_count) + '</td><td>' + formatRate(product.paypal_dispute_rate) + '</td>'
             + '<td>' + formatMoney(product.credit_card_refund_amount) + '</td><td>' + formatRate(product.credit_card_refund_rate) + '</td><td>' + formatRate(product.combined_refund_rate) + '</td>'
-            + '<td><button class="btn btn-primary btn-xs product-statistics-view" type="button" data-product-id="' + escapeHtml(product.id) + '"><i class="fa fa-eye"></i> ' + escapeHtml(t('view')) + '</button></td></tr>';
+            + '<td><button class="flt-btn product-statistics-view" type="button" data-product-id="' + escapeHtml(product.id) + '">' + escapeHtml(t('view')) + '</button></td></tr>';
     }
     function renderSummary() {
         document.getElementById('product-statistics-summary-products').textContent = formatNumber(overallSummary.product_count);
         document.getElementById('product-statistics-summary-sales').textContent = formatNumber(overallSummary.sales);
         document.getElementById('product-statistics-summary-revenue').textContent = formatMoney(overallSummary.revenue);
         document.getElementById('product-statistics-summary-refunds').textContent = formatMoney(overallSummary.actual_refunds);
-        document.getElementById('product-statistics-total-label').textContent = (t('totalProducts') || '').replace(':count', formatNumber(overallSummary.product_count));
     }
     function reasonReportLabel(row) {
         if (!row || row.reason === '__empty__') return t('noReason');
@@ -156,38 +172,51 @@
         if (!container) return;
         var expanded = Boolean(state.reasonReportExpanded);
         var actionLabel = expanded ? t('reasonReportCollapse') : t('reasonReportExpand');
+        var reportBody = '';
+        if (expanded && refundReasonReport) {
+            reportBody = reasonReportPanel(t('reasonReportSource'), refundReasonReport.source_reason || [])
+                + reasonReportPanel(t('reasonReportManual'), refundReasonReport.manual_reason || []);
+        } else if (expanded && reportFailed) {
+            reportBody = '<div class="product-statistics-load-error" role="alert">' + escapeHtml(t('reasonLoadFailed'))
+                + '<button type="button" class="flt-btn product-statistics-reason-retry">' + escapeHtml(t('retryLoad')) + '</button></div>';
+        } else if (expanded) {
+            reportBody = '<div class="product-statistics-loading product-statistics-report-loading" role="status">'
+                + '<i class="fa fa-circle-o-notch fa-spin" aria-hidden="true"></i><span>' + escapeHtml(t('reasonLoading')) + '</span></div>';
+        }
+        var focused = container.contains(document.activeElement);
         container.classList.toggle('is-expanded', expanded);
         container.innerHTML = '<header><button type="button" class="product-statistics-reason-toggle" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="product-statistics-reason-report-content">'
             + '<span class="product-statistics-reason-heading"><strong><i class="fa fa-pie-chart"></i> ' + escapeHtml(t('reasonReportTitle')) + '</strong><small>' + escapeHtml(t('reasonReportHint')) + '</small></span>'
-            + '<span class="product-statistics-reason-total">' + escapeHtml((t('reasonReportTotal') || '').replace(':count', formatNumber(refundReasonReport.record_count)).replace(':amount', formatMoney(refundReasonReport.amount))) + '</span>'
+            + (refundReasonReport ? '<span class="product-statistics-reason-total">' + escapeHtml(t('reasonReportTotal').replace(':count', formatNumber(refundReasonReport.record_count)).replace(':amount', formatMoney(refundReasonReport.amount))) + '</span>' : '<span></span>')
             + '<span class="product-statistics-reason-toggle-label"><span>' + escapeHtml(actionLabel) + '</span><i class="fa ' + (expanded ? 'fa-angle-up' : 'fa-angle-down') + '" aria-hidden="true"></i></span>'
             + '</button></header>'
-            + '<div id="product-statistics-reason-report-content" class="product-statistics-reason-panels"' + (expanded ? '' : ' hidden') + '>'
-            + reasonReportPanel(t('reasonReportSource'), refundReasonReport.source_reason || [])
-            + reasonReportPanel(t('reasonReportManual'), refundReasonReport.manual_reason || [])
-            + '</div>';
+            + '<div id="product-statistics-reason-report-content" class="flt product-statistics-reason-panels"' + (expanded ? '' : ' hidden') + '>' + reportBody + '</div>';
+        if (focused) container.querySelector('.product-statistics-reason-toggle').focus();
     }
     function renderPagination() {
-        var pageNumbers = document.getElementById('product-statistics-page-numbers');
         var totalPages = Number(pagination.last_page) || 1;
-        var total = Number(pagination.total) || 0;
-        var pages = [];
-        var start = Math.max(1, state.page - 2);
-        var end = Math.min(totalPages, start + 4);
-        start = Math.max(1, end - 4);
-        for (var page = start; page <= end; page++) {
-            pages.push('<button type="button" class="btn btn-default btn-sm product-statistics-page-button ' + (page === state.page ? 'is-active' : '') + '" data-page="' + page + '">' + page + '</button>');
-        }
-        pageNumbers.innerHTML = pages.join('');
-        document.getElementById('product-statistics-prev-page').disabled = state.page <= 1;
-        document.getElementById('product-statistics-next-page').disabled = state.page >= totalPages;
-        document.getElementById('product-statistics-page-summary').textContent = total === 0 ? t('pageEmpty') : (t('pageSummary') || '').replace(':from', pagination.from).replace(':to', pagination.to).replace(':total', total);
+        var total = formatNumber(Number(pagination.total) || 0);
+        var totalLabel = document.getElementById('product-statistics-total-label');
+        totalLabel.textContent = listReady ? totalLabel.dataset.template.replace('__count__', total) : blank();
+        document.getElementById('product-statistics-page-position').textContent = listReady ? state.page + ' / ' + totalPages : blank();
+        var jump = document.getElementById('product-statistics-page-jump');
+        var pageInput = document.getElementById('product-statistics-page-input');
+        pageInput.max = totalPages;
+        pageInput.value = '';
+        pageInput.disabled = !listReady || !Number(pagination.total);
+        jump.querySelector('button').disabled = pageInput.disabled;
+        document.getElementById('product-statistics-prev-page').disabled = !listReady || state.page <= 1;
+        document.getElementById('product-statistics-next-page').disabled = !listReady || state.page >= totalPages;
+        document.getElementById('product-statistics-page-summary').textContent = listReady
+            ? t('pageSummary').replace(':from', formatNumber(pagination.from || 0)).replace(':to', formatNumber(pagination.to || 0)).replace(':total', total)
+            : blank();
     }
     function selectedProductIds() { return Object.keys(state.selected).filter(function (id) { return state.selected[id]; }); }
     function refreshSelection() {
         var selected = products.filter(function (product) { return state.selected[product.id]; });
         Array.prototype.slice.call(document.querySelectorAll('.product-statistics-check')).forEach(function (checkbox) {
             checkbox.checked = Boolean(state.selected[checkbox.value]);
+            checkbox.closest('tr').dataset.selected = checkbox.checked ? '1' : '0';
         });
         if (checkAll) {
             checkAll.checked = products.length > 0 && selected.length === products.length;
@@ -195,7 +224,8 @@
             checkAll.disabled = products.length === 0;
         }
         if (exportSelectedCount) exportSelectedCount.textContent = (t('selectedCount') || '').replace(':count', selected.length);
-        if (selectedCountLabel) selectedCountLabel.textContent = (t('selectedCount') || '').replace(':count', selected.length);
+        if (selectedCountLabel) selectedCountLabel.textContent = selectedCountLabel.dataset.template.replace('__count__', selected.length);
+        clearSelection.disabled = selected.length === 0;
         if (retryTongtuButton) retryTongtuButton.disabled = selected.length === 0;
         if (exportFilteredCount) exportFilteredCount.textContent = (t('filteredCount') || '').replace(':products', Number(overallSummary.product_count) || 0).replace(':variants', 0);
         if (exportSelectedScope && exportFilteredScope) {
@@ -229,9 +259,7 @@
     function findProduct(id) { return products.filter(function (product) { return product.id === id; })[0] || null; }
     function detailRequestUrl(productId, tab) {
         var url = new URL(config.detailUrl || window.location.href, window.location.origin);
-        Array.prototype.slice.call(filterForm.querySelectorAll('input[name], select[name]')).forEach(function (field) {
-            if (field.name && field.value !== '') url.searchParams.set(field.name, field.value);
-        });
+        queryFilters(appliedParams).forEach(function (value, key) { url.searchParams.set(key, value); });
         url.searchParams.set('product_id', productId);
         url.searchParams.set('detail_tab', tab || detailState.activeTab || 'overview');
         if ((tab || detailState.activeTab) !== 'overview') {
@@ -254,7 +282,7 @@
     function showDetailTabLoading(tab) {
         var container = detailTabElement(tab);
         if (!container) return;
-        container.innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
+        container.innerHTML = '<div class="product-statistics-loading" role="status"><i class="fa fa-circle-o-notch fa-spin" aria-hidden="true"></i><span>' + escapeHtml(t('detailLoading')) + '</span></div>';
     }
     function clearDeferredDetailTabs() {
         ['paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'].forEach(function (tab) {
@@ -292,6 +320,7 @@
             showDetailTabLoading(tab);
             return;
         }
+        var requestedDetail = detailState;
         detailState.loadingTabs[tab] = true;
         document.getElementById('product-statistics-detail-filters').hidden = true;
         showDetailTabLoading(tab);
@@ -304,6 +333,7 @@
                 return payload;
             });
         }).then(function (payload) {
+            if (detailState !== requestedDetail) return;
             if (tab === 'overview') {
                 if (!payload.product) throw new Error(t('detailLoadFailed'));
                 detailState.product = payload.product;
@@ -314,9 +344,12 @@
                 detailState.tabData[tab] = payload.detail;
             }
             detailState.loadingTabs[tab] = false;
-            renderDetailFilters();
-            renderDetailTables();
+            if (detailState.activeTab === tab) {
+                renderDetailFilters();
+                renderDetailTables();
+            }
         }).catch(function (error) {
+            if (detailState !== requestedDetail) return;
             detailState.loadingTabs[tab] = false;
             showDetailLoadFailure(tab, error && error.message ? error.message : t('detailLoadFailed'));
         });
@@ -454,34 +487,40 @@
     }
     function detailSelect(name, label, values, selected) {
         if (!values.length) return '';
-        return '<label><span>' + escapeHtml(label) + '</span><select class="form-control input-sm" name="' + escapeHtml(name) + '"><option value="">' + escapeHtml(t('detailFilterAll')) + '</option>' + values.map(function (item) {
+        var id = 'product-statistics-detail-filter-' + name;
+        var searchable = values.length > 8 || name === 'source_reason' || name === 'manual_reason';
+        return '<div><label class="flt-field-label" for="' + id + '">' + escapeHtml(label) + '</label><select id="' + id + '" name="' + escapeHtml(name) + '"' + (searchable ? ' data-filter-searchable' : '') + '><option value="">' + escapeHtml(t('detailFilterAll')) + '</option>' + values.map(function (item) {
             var value = typeof item === 'object' ? String(item.value || '') : String(item || '');
             var text = typeof item === 'object' ? String(item.label || item.value || '') : value;
             return '<option value="' + escapeHtml(value) + '"' + (String(selected || '') === value ? ' selected' : '') + '>' + escapeHtml(text) + '</option>';
-        }).join('') + '</select></label>';
+        }).join('') + '</select></div>';
     }
     function detailPagination(table, pageData) {
         pageData = pageData || {};
         var currentPage = Number(pageData.current_page) || 1;
         var lastPage = Number(pageData.last_page) || 1;
-        var pages = [];
-        var start = Math.max(1, currentPage - 2);
-        var end = Math.min(lastPage, start + 4);
-        start = Math.max(1, end - 4);
-        for (var page = start; page <= end; page++) {
-            pages.push('<button type="button" class="btn btn-default btn-sm product-statistics-detail-page' + (page === currentPage ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
-        }
-        var summary = Number(pageData.total) ? (t('detailPageSummary') || '').replace(':from', pageData.from).replace(':to', pageData.to).replace(':total', pageData.total) : (t('detailPageEmpty') || '');
+        var total = Number(pageData.total) || 0;
+        var summary = t('detailPageSummary').replace(':from', formatNumber(pageData.from || 0))
+            .replace(':to', formatNumber(pageData.to || 0)).replace(':total', formatNumber(total));
         var perPage = detailPerPage(table);
-        return '<div class="product-statistics-detail-pagination">'
-            + '<span class="product-statistics-detail-page-summary">' + escapeHtml(summary) + '</span>'
-            + '<div class="product-statistics-detail-page-controls">'
-            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.max(1, currentPage - 1) + '" aria-label="' + escapeHtml(t('previousPage')) + '"' + (currentPage <= 1 ? ' disabled' : '') + '><i class="fa fa-angle-left"></i></button>'
-            + pages.join('')
-            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.min(lastPage, currentPage + 1) + '" aria-label="' + escapeHtml(t('nextPage')) + '"' + (currentPage >= lastPage ? ' disabled' : '') + '><i class="fa fa-angle-right"></i></button>'
-            + '</div>'
-            + '<label class="product-statistics-detail-page-size"><span>' + escapeHtml(t('perPage')) + '</span><select class="form-control input-sm product-statistics-detail-page-size-select" data-detail-table="' + escapeHtml(table) + '"><option value="5"' + (perPage === 5 ? ' selected' : '') + '>5</option><option value="10"' + (perPage === 10 ? ' selected' : '') + '>10</option><option value="20"' + (perPage === 20 ? ' selected' : '') + '>20</option></select><span>' + escapeHtml(t('items')) + '</span></label>'
-            + '</div>';
+        var tableAttr = ' data-detail-table="' + escapeHtml(table) + '"';
+        function pageButton(page, label, disabled) {
+            return '<button type="button" class="flt-btn product-statistics-detail-page"' + tableAttr
+                + ' data-detail-page="' + page + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</button>';
+        }
+        var pageOptions = [5, 10, 20].map(function (size) {
+            return '<option value="' + size + '"' + (perPage === size ? ' selected' : '') + '>' + size + '</option>';
+        }).join('');
+        return '<div class="flt-pagination product-statistics-detail-pagination">'
+            + '<span>' + escapeHtml(summary) + '</span><div class="product-statistics-detail-pagination-actions">'
+            + '<label>' + escapeHtml(t('perPage')) + '<select class="product-statistics-detail-page-size-select"' + tableAttr + '>' + pageOptions + '</select></label>'
+            + '<nav class="product-statistics-detail-page-links" aria-label="' + escapeHtml(t('detailPaginationLabel')) + '">'
+            + pageButton(currentPage - 1, t('previousPage'), currentPage <= 1)
+            + '<span>' + currentPage + ' / ' + lastPage + '</span>'
+            + pageButton(currentPage + 1, t('nextPage'), currentPage >= lastPage) + '</nav>'
+            + '<form class="product-statistics-detail-jump" data-loading="off"' + tableAttr + '><label><span class="flt-sr-only">' + escapeHtml(t('detailPageInput'))
+            + '</span><input type="number" name="page" min="1" max="' + lastPage + '" required placeholder="' + escapeHtml(t('detailPageInput')) + '"></label>'
+            + '<button type="submit" class="flt-btn flt-primary">' + escapeHtml(t('detailPageJump')) + '</button></form></div></div>';
     }
     function renderDetailFilters() {
         var container = document.getElementById('product-statistics-detail-filters');
@@ -506,12 +545,21 @@
         }
         if (table === 'paypal_orders' || table === 'credit_card_orders' || table === 'orders') selects += detailSelect('logistics_status', t('detailFilterLogisticsStatus'), options.logistics_status || [], filters.logistics_status);
         container.hidden = false;
-        container.innerHTML = '<form class="product-statistics-detail-filter-form" data-detail-table="' + escapeHtml(table) + '"><label class="is-keyword"><span>' + escapeHtml(t('detailFilterKeyword')) + '</span><input type="search" class="form-control input-sm" name="keyword" value="' + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></label>' + selects + '<div class="product-statistics-detail-filter-actions"><button type="submit" class="btn btn-primary btn-sm"><i class="fa fa-filter"></i> ' + escapeHtml(t('detailFilterSearch')) + '</button><button type="button" class="btn btn-default btn-sm product-statistics-detail-filter-reset" data-detail-table="' + escapeHtml(table) + '">' + escapeHtml(t('detailFilterReset')) + '</button></div></form>';
+        container.innerHTML = '<form class="flt-card flt-filters product-statistics-detail-filter-form" data-loading="off" data-logistics-filters'
+            + ' data-search-options="' + escapeHtml(t('filterSearchOptions')) + '" data-no-options="' + escapeHtml(t('filterNoOptions'))
+            + '" data-clear-choice="' + escapeHtml(t('filterClearChoice')) + '" data-detail-table="' + escapeHtml(table) + '">'
+            + '<div class="flt-filter-grid"><div><label class="flt-field-label" for="product-statistics-detail-keyword">'
+            + escapeHtml(t('detailFilterKeyword')) + '</label><input id="product-statistics-detail-keyword" type="search" name="keyword" value="'
+            + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></div>' + selects + '</div>'
+            + '<div class="flt-filter-actions"><button type="submit" class="flt-btn flt-primary"><i class="fa fa-search" aria-hidden="true"></i> '
+            + escapeHtml(t('detailFilterSearch')) + '</button><button type="button" class="flt-btn product-statistics-detail-filter-reset" data-detail-table="'
+            + escapeHtml(table) + '">' + escapeHtml(t('detailFilterReset')) + '</button></div></form>';
+        container.firstElementChild.dispatchEvent(new Event('logistics:initialize-filters', { bubbles: true }));
     }
     function detailEmptyRow(columns) { return '<tr><td colspan="' + columns + '" class="text-center text-muted">' + escapeHtml(t('emptyRows') || blank()) + '</td></tr>'; }
     function orderLink(row) {
         var label = escapeHtml(row.shopify_order_number || blank());
-        return row.order_id && row.detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(row.detail_url) + '">' + label + '</button>' : label;
+        return row.order_id && row.detail_url ? '<button type="button" class="flt-row-action js-logistics-order-detail" data-order-detail-url="' + escapeHtml(row.detail_url) + '">' + label + '</button>' : label;
     }
     function orderColumns(table) {
         var columns = [
@@ -539,16 +587,37 @@
             return '<tr>' + columns.map(function (column) { return '<td>' + orderCell(order, column[0]) + '</td>'; }).join('') + '</tr>';
         }).join('');
     }
+    function detailRecords(table, headings, rows, pagination) {
+        var widths = {
+            shopify_order_number: 136, store: 144, tongtu_product_codes: 210,
+            tongtu_skus: 245, shopify_skus: 245, bill_number: 206, tracking_number: 190,
+            order_created_at: 170, imported_at: 170, updated_at: 170, seller_response_due_at: 170,
+            refund_number: 206, dispute_id: 206, linked_disputes: 206, linked_refunds: 240,
+            source_reason: 250, manual_reason: 250, reason: 250, outcome: 156,
+            payment_method: 112, payment_method_label: 112, status: 112, logistics_status: 124,
+            quantity: 108, revenue: 144, amount: 116
+        };
+        var columns = headings.map(function (heading) { return widths[heading[0]] || 112; });
+        var totalWidth = columns.reduce(function (sum, width) { return sum + width; }, 0);
+        return '<div class="flt-card flt-records product-statistics-detail-records">'
+            + '<div class="flt-table-scroll product-statistics-detail-table-wrap" tabindex="0">'
+            + '<table class="table product-statistics-detail-table" style="width:' + totalWidth + 'px"><colgroup>'
+            + columns.map(function (width) { return '<col style="width:' + width + 'px">'; }).join('')
+            + '</colgroup><thead><tr>' + headings.map(function (heading) {
+                return '<th scope="col">' + detailSortButton(table, heading[0], heading[1]) + '</th>';
+            }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+            + detailPagination(table, pagination) + '</div>';
+    }
     function renderOrdersTable(id, table, payload) {
         var headings = orderColumns(table);
         var rows = payload.rows || [];
-        document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(rows, headings) + '</tbody></table></div>' + detailPagination(table, payload.pagination);
+        document.getElementById(id).innerHTML = detailRecords(table, headings, orderRows(rows, headings), payload.pagination);
     }
     function refundRows(rows) {
         if (!rows.length) return detailEmptyRow(10);
         return rows.map(function (refund) {
             var disputeText = (refund.linked_disputes || []).join('、') || blank();
-            var order = refund.order_id && refund.order_detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(refund.order_detail_url) + '">' + escapeHtml(refund.shopify_order_number || blank()) + '</button>' : escapeHtml(refund.shopify_order_number || blank());
+            var order = refund.order_id && refund.order_detail_url ? '<button type="button" class="flt-row-action js-logistics-order-detail" data-order-detail-url="' + escapeHtml(refund.order_detail_url) + '">' + escapeHtml(refund.shopify_order_number || blank()) + '</button>' : escapeHtml(refund.shopify_order_number || blank());
             return '<tr><td>' + escapeHtml(refund.payment_method_label || blank()) + '</td><td>' + order + '</td><td>' + escapeHtml(refund.bill_number || blank()) + '</td><td>' + escapeHtml(refund.refund_number || blank()) + '</td><td>' + formatMoney(refund.amount) + '</td><td title="' + escapeHtml(refund.source_reason || '') + '">' + escapeHtml(refund.source_reason || blank()) + '</td><td title="' + escapeHtml(refund.manual_reason || '') + '">' + escapeHtml(refund.manual_reason || blank()) + '</td><td>' + escapeHtml(refund.status || blank()) + '</td><td>' + escapeHtml(disputeText) + '</td><td>' + escapeHtml(refund.imported_at || blank()) + '</td></tr>';
         }).join('');
     }
@@ -556,7 +625,7 @@
         if (!rows.length) return detailEmptyRow(11);
         return rows.map(function (dispute) {
             var refunds = (dispute.linked_refunds || []).map(function (refund) { return String(refund.refund_number || '') + ' (' + formatMoney(refund.amount) + ')'; }).join('、') || blank();
-            var order = dispute.order_id && dispute.order_detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(dispute.order_detail_url) + '">' + escapeHtml(dispute.shopify_order_number || blank()) + '</button>' : escapeHtml(dispute.shopify_order_number || blank());
+            var order = dispute.order_id && dispute.order_detail_url ? '<button type="button" class="flt-row-action js-logistics-order-detail" data-order-detail-url="' + escapeHtml(dispute.order_detail_url) + '">' + escapeHtml(dispute.shopify_order_number || blank()) + '</button>' : escapeHtml(dispute.shopify_order_number || blank());
             return '<tr><td>' + escapeHtml(dispute.dispute_id || blank()) + '</td><td>' + order + '</td><td>' + escapeHtml(dispute.bill_number || blank()) + '</td><td>' + formatMoney(dispute.amount) + '</td><td>' + escapeHtml(dispute.reason || blank()) + '</td><td>' + escapeHtml(dispute.stage || blank()) + '</td><td>' + escapeHtml(dispute.status || blank()) + '</td><td>' + escapeHtml(dispute.outcome || blank()) + '</td><td>' + escapeHtml(dispute.seller_response_due_at || blank()) + '</td><td>' + escapeHtml(refunds) + '</td><td>' + escapeHtml(dispute.updated_at || blank()) + '</td></tr>';
         }).join('');
     }
@@ -569,11 +638,11 @@
             + '<article><span>' + escapeHtml(t('reasonSelectionCountRatio')) + '</span><strong>' + formatRate(summary.count_ratio) + '</strong></article>'
             + '<article><span>' + escapeHtml(t('reasonSelectionAmountRatio')) + '</span><strong>' + formatRate(summary.amount_ratio) + '</strong></article>'
             + '</div></section>';
-        document.getElementById('product-statistics-refunds').innerHTML = summaryHtml + '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + refundHeadings.map(function (heading) { return '<th>' + detailSortButton('refunds', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + refundRows(payload.rows || []) + '</tbody></table></div>' + detailPagination('refunds', payload.pagination);
+        document.getElementById('product-statistics-refunds').innerHTML = summaryHtml + detailRecords('refunds', refundHeadings, refundRows(payload.rows || []), payload.pagination);
     }
     function renderDisputes(payload) {
         var disputeHeadings = [['dispute_id', t('paypalDisputes')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['amount', t('amount')], ['reason', t('reason')], ['stage', t('disputeType')], ['status', t('status')], ['outcome', t('disputeOutcome')], ['seller_response_due_at', t('responseDueAt')], ['linked_refunds', t('linkedRefunds')], ['updated_at', t('updatedAt')]];
-        document.getElementById('product-statistics-disputes').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + disputeHeadings.map(function (heading) { return '<th>' + detailSortButton('disputes', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + disputeRows(payload.rows || []) + '</tbody></table></div>' + detailPagination('disputes', payload.pagination);
+        document.getElementById('product-statistics-disputes').innerHTML = detailRecords('disputes', disputeHeadings, disputeRows(payload.rows || []), payload.pagination);
     }
     function renderVariants(payload) {
         var variants = payload.rows || [];
@@ -606,69 +675,306 @@
         if (!rows.length) {
             return '<section class="product-statistics-current-pcl-data is-empty"><header><i class="fa fa-cubes"></i> ' + escapeHtml(t('currentPclProductData')) + '</header><p>' + escapeHtml(t('currentPclProductDataEmpty')) + '</p></section>';
         }
-        var headings = [
-            ['tongtu_sku', t('currentSkuData')], ['shopify_sku', t('shopifySkus')], ['product_name', t('tongtuProductName')],
-            ['goods_weight_gram', t('productWeight')], ['package_weight_gram', t('packageWeight')],
-            ['goods_current_cost_cny', t('currentCostCny')], ['goods_average_cost_cny', t('averageCostCny')], ['package_cost_cny', t('packageCostCny')], ['product_guide_cost_cny', t('guideCostCny')],
-            ['product_dimensions', t('productDimensions')], ['package_dimensions', t('packageDimensions')], ['tongtu_updated_at', t('tongtuUpdatedAt')], ['last_synced_at', t('syncedAt')]
+        var groups = [
+            [t('pclBasic'), [
+                [t('currentSkuData'), 'tongtu_sku'], [t('shopifySku'), 'shopify_sku'], [t('tongtuProductName'), 'product_name']
+            ]],
+            [t('pclCosts'), [
+                [t('currentCostCny'), 'goods_current_cost_cny', formatMappingCny], [t('averageCostCny'), 'goods_average_cost_cny', formatMappingCny],
+                [t('packageCostCny'), 'package_cost_cny', formatMappingCny], [t('guideCostCny'), 'product_guide_cost_cny', formatMappingCny]
+            ]],
+            [t('pclShipping'), [
+                [t('productDimensions'), 'product_dimensions'], [t('packageDimensions'), 'package_dimensions'],
+                [t('productWeight'), 'goods_weight_gram', formatMappingWeight], [t('packageWeight'), 'package_weight_gram', formatMappingWeight]
+            ]],
+            [t('pclTimes'), [
+                [t('tongtuUpdatedAt'), 'tongtu_updated_at'], [t('syncedAt'), 'last_synced_at']
+            ]]
         ];
         var body = rows.map(function (row) {
-            return '<tr><td><code>' + escapeHtml(row.tongtu_sku || blank()) + '</code></td><td><code>' + escapeHtml(row.shopify_sku || blank()) + '</code></td><td title="' + escapeHtml(row.product_name || '') + '">' + escapeHtml(row.product_name || blank()) + '</td><td>' + formatMappingWeight(row.goods_weight_gram) + '</td><td>' + formatMappingWeight(row.package_weight_gram) + '</td><td>' + formatMappingCny(row.goods_current_cost_cny) + '</td><td>' + formatMappingCny(row.goods_average_cost_cny) + '</td><td>' + formatMappingCny(row.package_cost_cny) + '</td><td>' + formatMappingCny(row.product_guide_cost_cny) + '</td><td>' + escapeHtml(row.product_dimensions || blank()) + '</td><td>' + escapeHtml(row.package_dimensions || blank()) + '</td><td>' + escapeHtml(row.tongtu_updated_at || blank()) + '</td><td>' + escapeHtml(row.last_synced_at || blank()) + '</td></tr>';
+            return '<tr>' + groups.map(function (group) {
+                return '<td><dl>' + group[1].map(function (field) {
+                    var value = field[2] ? field[2](row[field[1]]) : (row[field[1]] || blank());
+                    return '<div><dt>' + escapeHtml(field[0]) + '：</dt><dd>' + escapeHtml(value) + '</dd></div>';
+                }).join('') + '</dl></td>';
+            }).join('') + '</tr>';
         }).join('');
-        return '<section class="product-statistics-current-pcl-data"><header><i class="fa fa-cubes"></i> ' + escapeHtml(t('currentPclProductData')) + '</header><div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + escapeHtml(heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div></section>';
+        return '<section class="product-statistics-current-pcl-data"><header><i class="fa fa-cubes" aria-hidden="true"></i> '
+            + escapeHtml(t('currentPclProductData')) + '</header><div class="table-responsive product-statistics-detail-table-wrap">'
+            + '<table class="table product-statistics-detail-table product-statistics-pcl-groups"><thead><tr>'
+            + groups.map(function (group) { return '<th scope="col">' + escapeHtml(group[0]) + '</th>'; }).join('')
+            + '</tr></thead><tbody>' + body + '</tbody></table></div></section>';
     }
     function renderOverview(product) {
         var overviewModules = product.overview_modules || {};
-        document.getElementById('product-statistics-overview').innerHTML = currentPclProductData(product) + '<div class="product-statistics-overview-modules">'
+        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-overview-modules">'
             + overviewModule(t('overviewOverall'), overviewModules.overall, 'is-overall')
             + overviewModule(t('overviewPayPal'), overviewModules.paypal, 'is-paypal')
             + overviewModule(t('overviewCreditCard'), overviewModules.credit_card, 'is-credit-card')
-            + '</div>' + (detailState.overviewLoaded ? detailStoreOrderDistribution(product) : '');
+            + '</div>' + currentPclProductData(product) + (detailState.overviewLoaded ? detailStoreOrderDistribution(product) : '');
     }
     function appendHiddenInput(container, name, value) { var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; container.appendChild(input); }
-    function navigate(params) {
-        var url = new URL(window.location.href);
-        Object.keys(params).forEach(function (key) {
-            var value = params[key];
-            if (value === null || value === undefined || value === '') url.searchParams.delete(key); else url.searchParams.set(key, value);
+    var filterFields = Array.from(filterForm.elements).filter(function (field) { return Boolean(field.name); });
+    var storeSelect = document.getElementById('product-statistics-store');
+    var storesStatus = document.getElementById('product-statistics-stores-status');
+    var storesLoading = document.getElementById('product-statistics-stores-loading');
+    var storesMessage = document.getElementById('product-statistics-stores-message');
+    var storesRetry = document.getElementById('product-statistics-stores-retry');
+    var storesLoadingText = storesMessage.textContent;
+    var listError = document.getElementById('product-statistics-list-error');
+    var exportButton = document.getElementById('product-statistics-export-button');
+
+    function queryFilters(params) {
+        var filters = new URLSearchParams(params);
+        ['page', 'per_page', 'sort', 'direction'].forEach(function (key) { filters.delete(key); });
+        return filters;
+    }
+
+    function fetchJson(endpoint, params, signal) {
+        var url = new URL(endpoint, window.location.origin);
+        url.search = params.toString();
+        return window.fetch(url.toString(), {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            signal: signal
+        }).then(function (response) {
+            if (!response.ok || response.redirected) throw new Error();
+            return response.json();
         });
-        window.location.assign(url.toString());
     }
-    function populateExportPayload() {
-        if (!exportPayload) return;
-        exportPayload.innerHTML = '';
-        [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['match_status', document.getElementById('product-statistics-match-status').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(exportPayload, item[0], item[1]); });
-        selectedProductIds().forEach(function (id) { appendHiddenInput(exportPayload, 'selected_ids[]', id); });
+
+    function setStoreOptions(stores, selected) {
+        var values = Array.from(new Set(stores));
+        if (selected && !values.includes(selected)) values.unshift(selected);
+        storeSelect.replaceChildren(storeSelect.options[0]);
+        values.forEach(function (store) { storeSelect.add(new Option(store, store)); });
+        storeSelect.value = selected;
+        var picker = storeSelect.nextElementSibling;
+        if (picker && picker.classList.contains('flt-picker')) picker.open = false;
+        storeSelect.dispatchEvent(new Event('change'));
     }
-    function populateRetryTongtuPayload() {
-        if (!retryTongtuPayload) return;
-        retryTongtuPayload.innerHTML = '';
-        [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['match_status', document.getElementById('product-statistics-match-status').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(retryTongtuPayload, item[0], item[1]); });
-        selectedProductIds().forEach(function (id) { appendHiddenInput(retryTongtuPayload, 'selected_ids[]', id); });
+
+    function showStoresLoading() {
+        if (document.activeElement === storesRetry) {
+            var trigger = storeSelect.parentElement.querySelector('.flt-picker > summary');
+            (trigger || storeSelect).focus();
+        }
+        storesStatus.hidden = false;
+        storesLoading.hidden = false;
+        storesRetry.hidden = true;
+        storesMessage.textContent = storesLoadingText;
     }
-    filterForm.addEventListener('submit', function () { state.selected = {}; });
-    pageSizeInput.addEventListener('change', function () { navigate({ per_page: pageSizeInput.value, page: 1 }); });
-    document.getElementById('product-statistics-prev-page').addEventListener('click', function () { if (state.page > 1) navigate({ page: state.page - 1 }); });
-    document.getElementById('product-statistics-next-page').addEventListener('click', function () { if (state.page < Number(pagination.last_page || 1)) navigate({ page: state.page + 1 }); });
+
+    function loadStores(params, force) {
+        var filters = storeFilters(params);
+        var key = filters.toString();
+        if (!force && key === storesKey) return;
+        if (storesRequest) storesRequest.abort();
+        var request = new AbortController();
+        storesRequest = request;
+        storesKey = key;
+        showStoresLoading();
+        fetchJson(config.storesUrl, filters, request.signal).then(function (data) {
+            if (storesRequest !== request) return;
+            setStoreOptions(data.stores, storeSelect.value);
+            storesStatus.hidden = true;
+        }).catch(function () {
+            if (storesRequest !== request) return;
+            storesMessage.textContent = t('storesLoadFailed');
+            storesLoading.hidden = true;
+            storesRetry.hidden = false;
+        });
+    }
+
+    function storeFilters(params) {
+        var filters = queryFilters(params);
+        filters.delete('store');
+        return filters;
+    }
+
+    function loadReasonReport() {
+        if (refundReasonReport || reportRequest) {
+            renderReasonReport();
+            return;
+        }
+        reportFailed = false;
+        var request = new AbortController();
+        reportRequest = request;
+        renderReasonReport();
+        fetchJson(config.refundReasonsUrl, queryFilters(appliedParams), request.signal).then(function (data) {
+            if (reportRequest !== request) return;
+            refundReasonReport = data;
+            reportRequest = null;
+            renderReasonReport();
+        }).catch(function () {
+            if (reportRequest !== request) return;
+            reportRequest = null;
+            reportFailed = true;
+            renderReasonReport();
+        });
+    }
+
+    function syncFilters(params) {
+        filterFields.forEach(function (field) {
+            var value = params.get(field.name) || (field.name === 'per_page' ? '10' : '');
+            if (field === storeSelect && !Array.from(field.options).some(function (option) { return option.value === value; })) {
+                field.add(new Option(value, value));
+            }
+            field.value = value;
+            if (field.tagName === 'SELECT') field.dispatchEvent(new Event('change'));
+        });
+        pageSizeInput.value = filterForm.elements.per_page.value;
+        state.sort = params.get('sort') || '';
+        state.direction = params.get('direction') || '';
+    }
+
+    function loadList(params) {
+        appliedParams = new URLSearchParams(params);
+        if (storesKey !== storeFilters(appliedParams).toString()) {
+            if (storesRequest) storesRequest.abort();
+            storesRequest = null;
+            storesKey = null;
+            showStoresLoading();
+        }
+        var newReportKey = queryFilters(appliedParams).toString();
+        if (reportKey !== newReportKey) {
+            if (reportRequest) reportRequest.abort();
+            reportRequest = null;
+            reportKey = newReportKey;
+            refundReasonReport = null;
+            reportFailed = false;
+            state.reasonReportExpanded = false;
+            renderReasonReport();
+        }
+
+        if (listRequest) listRequest.abort();
+        var request = new AbortController();
+        listRequest = request;
+        listReady = false;
+        state.selected = {};
+        products = [];
+        body.replaceChildren();
+        empty.hidden = true;
+        listError.hidden = true;
+        exportButton.disabled = true;
+        ['products', 'sales', 'revenue', 'refunds'].forEach(function (metric) {
+            document.getElementById('product-statistics-summary-' + metric).textContent = blank();
+        });
+        pagination = {};
+        overallSummary = {};
+        state.page = 1;
+        renderPagination();
+        refreshSelection();
+        renderSortIndicators();
+        setListLoading(true);
+        fetchJson(config.listUrl, appliedParams, request.signal).then(function (data) {
+            if (listRequest !== request) return;
+            products = data.products;
+            overallSummary = data.summary;
+            pagination = data.pagination;
+            state.page = Number(pagination.current_page) || 1;
+            listReady = true;
+            exportButton.disabled = false;
+            renderTable();
+            if (tableScroll) tableScroll.scrollTop = 0;
+            if (config.exportValidationError && $) {
+                config.exportValidationError = '';
+                $('#product-statistics-export-modal').modal('show');
+            }
+        }).catch(function () {
+            if (listRequest !== request) return;
+            listError.hidden = false;
+            document.getElementById('product-statistics-list-error-message').textContent = t('listLoadFailed');
+        }).finally(function () {
+            if (listRequest !== request) return;
+            setListLoading(false);
+            loadStores(appliedParams, false);
+        });
+    }
+
+    function navigate(params, mode) {
+        var url = new URL(filterForm.action);
+        url.search = params.toString();
+        var search = new URLSearchParams(url.search);
+        if (mode === 'push' && url.href !== window.location.href) window.history.pushState(null, '', url);
+        syncFilters(search);
+        loadList(search);
+    }
+
+    function changePage(params) {
+        var next = new URLSearchParams(appliedParams);
+        Object.keys(params).forEach(function (key) {
+            if (params[key] === '') next.delete(key);
+            else next.set(key, params[key]);
+        });
+        navigate(next, 'push');
+    }
+
+    function populateBusinessPayload(container) {
+        if (!container) return;
+        container.replaceChildren();
+        queryFilters(appliedParams).forEach(function (value, name) {
+            appendHiddenInput(container, name, value);
+        });
+        appendHiddenInput(container, 'sort', state.sort);
+        appendHiddenInput(container, 'direction', state.direction);
+        selectedProductIds().forEach(function (id) { appendHiddenInput(container, 'selected_ids[]', id); });
+    }
+
+    filterForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var params = new URLSearchParams();
+        new FormData(filterForm).forEach(function (value, key) {
+            if (value.trim() !== '') params.set(key, value.trim());
+        });
+        navigate(params, 'push');
+    });
+    document.getElementById('product-statistics-reset').addEventListener('click', function (event) {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(new URLSearchParams(), 'push');
+    });
+    document.getElementById('product-statistics-list-retry').addEventListener('click', function () { loadList(appliedParams); });
+    storesRetry.addEventListener('click', function () { loadStores(appliedParams, true); });
+    window.addEventListener('popstate', function () { navigate(new URLSearchParams(window.location.search)); });
+    clearSelection.addEventListener('click', function () {
+        state.selected = {};
+        refreshSelection();
+    });
+    document.getElementById('product-statistics-page-jump').addEventListener('submit', function (event) {
+        event.preventDefault();
+        changePage({ page: document.getElementById('product-statistics-page-input').valueAsNumber });
+    });
+    pageSizeInput.addEventListener('change', function () { changePage({ per_page: pageSizeInput.value, page: 1 }); });
+    document.getElementById('product-statistics-prev-page').addEventListener('click', function () { if (state.page > 1) changePage({ page: state.page - 1 }); });
+    document.getElementById('product-statistics-next-page').addEventListener('click', function () { if (state.page < Number(pagination.last_page || 1)) changePage({ page: state.page + 1 }); });
     if (checkAll) checkAll.addEventListener('change', function () { products.forEach(function (product) { state.selected[product.id] = checkAll.checked; }); refreshSelection(); });
     document.addEventListener('change', function (event) { if (event.target.classList.contains('product-statistics-check')) { state.selected[event.target.value] = event.target.checked; refreshSelection(); } });
     if (exportForm) {
         exportForm.addEventListener('submit', function (event) {
+            if (!listReady) { event.preventDefault(); return; }
             var scope = exportForm.querySelector('input[name="scope"]:checked').value;
             if (scope === 'selected' && !selectedProductIds().length) { event.preventDefault(); window.alert(t('selectExportWarning')); return; }
-            populateExportPayload();
+            populateBusinessPayload(exportPayload);
         });
-        if ($) $('#product-statistics-export-modal').on('show.bs.modal', function () { refreshSelection(); populateExportPayload(); });
+        if ($) $('#product-statistics-export-modal').on('show.bs.modal', function () { refreshSelection(); populateBusinessPayload(exportPayload); });
     }
     if (retryTongtuButton && retryTongtuForm) {
         retryTongtuButton.addEventListener('click', function () {
             if (!selectedProductIds().length) return;
             if (!window.confirm(t('retryTongtuSkusConfirm'))) return;
-            populateRetryTongtuPayload();
+            populateBusinessPayload(retryTongtuPayload);
             retryTongtuForm.submit();
         });
     }
     document.addEventListener('submit', function (event) {
+        var jump = event.target.closest('.product-statistics-detail-jump');
+        if (jump) {
+            event.preventDefault();
+            detailState.pages[jump.dataset.detailTable] = jump.elements.page.valueAsNumber;
+            ensureDetailLoaded(true);
+            return;
+        }
         var form = event.target.closest('.product-statistics-detail-filter-form');
         if (!form) return;
         event.preventDefault();
@@ -679,6 +985,7 @@
         ensureDetailLoaded(true);
     });
     if ($) {
+        $('#product-statistics-detail-modal').on('hidden.bs.modal', function () { detailState = {}; });
         $('#product-statistics-detail-modal').on('shown.bs.tab', 'a[data-product-detail-tab]', function (event) {
             detailState.activeTab = event.target.dataset.productDetailTab || 'overview';
             ensureDetailLoaded(false);
@@ -688,7 +995,12 @@
         var reasonReportToggle = event.target.closest('.product-statistics-reason-toggle');
         if (reasonReportToggle) {
             state.reasonReportExpanded = !state.reasonReportExpanded;
-            renderReasonReport();
+            if (state.reasonReportExpanded) loadReasonReport();
+            else renderReasonReport();
+            return;
+        }
+        if (event.target.closest('.product-statistics-reason-retry')) {
+            loadReasonReport();
             return;
         }
         var imagePreview = event.target.closest('.product-statistics-thumb.is-previewable');
@@ -720,16 +1032,15 @@
             ensureDetailLoaded(true);
             return;
         }
-        var target = event.target.closest('.product-statistics-view, .product-statistics-page-button, .product-statistics-sort');
+        var target = event.target.closest('.product-statistics-view, .product-statistics-sort');
         if (!target) return;
         if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) openProductDetail(product); return; }
-        if (target.classList.contains('product-statistics-page-button')) { navigate({ page: number(target.dataset.page) || 1 }); return; }
         if (target.classList.contains('product-statistics-sort')) {
             var sort = target.dataset.sort;
             var direction = 'desc';
             if (state.sort === sort && state.direction === 'desc') direction = 'asc';
             else if (state.sort === sort && state.direction === 'asc') { sort = ''; direction = ''; }
-            navigate({ sort: sort, direction: direction, page: 1 });
+            changePage({ sort: sort, direction: direction, page: 1 });
         }
     });
     document.addEventListener('change', function (event) {
@@ -746,7 +1057,6 @@
             openImagePreview(event.target);
         }
     });
-    renderTable();
     bindTableBoundaryScroll();
-    if (config.exportValidationError && $) $('#product-statistics-export-modal').modal('show');
+    navigate(new URLSearchParams(window.location.search));
 }(window, document, window.jQuery));

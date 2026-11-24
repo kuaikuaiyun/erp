@@ -8,6 +8,7 @@
     var error = modal.querySelector('[data-order-detail-error]');
     var content = modal.querySelector('[data-order-detail-content]');
     var edit = modal.querySelector('[data-order-detail-edit]');
+    var minimumLoadingMs = Number(modal.dataset.minimumLoadingMs) || 0;
     var requestSequence = 0;
 
     function setState(state, message) {
@@ -25,6 +26,16 @@
         edit.href = '#';
         setState('loading');
         if (window.jQuery) window.jQuery(modal).modal('show');
+        var loadingStartedAt = performance.now();
+
+        function finish(callback) {
+            var remaining = minimumLoadingMs - (performance.now() - loadingStartedAt);
+            function applyResult() {
+                if (sequence === requestSequence) callback();
+            }
+            if (remaining > 0) window.setTimeout(applyResult, remaining);
+            else applyResult();
+        }
 
         fetch(url, {
             credentials: 'same-origin',
@@ -33,17 +44,19 @@
             if (!response.ok) throw new Error('订单详情请求失败（HTTP ' + response.status + '）。');
             return response.text();
         }).then(function (html) {
-            if (sequence !== requestSequence) return;
-            content.innerHTML = html;
-            var root = content.querySelector('.logistics-order-detail');
-            if (root && root.dataset.editUrl) {
-                edit.href = root.dataset.editUrl;
-                edit.hidden = false;
-            }
-            setState('content');
+            finish(function () {
+                content.innerHTML = html;
+                var root = content.querySelector('.logistics-order-detail');
+                if (root && root.dataset.editUrl) {
+                    edit.href = root.dataset.editUrl;
+                    edit.hidden = false;
+                }
+                setState('content');
+            });
         }).catch(function (failure) {
-            if (sequence !== requestSequence) return;
-            setState('error', failure.message || '订单详情加载失败。');
+            finish(function () {
+                setState('error', modal.dataset.orderDetailFailure || failure.message);
+            });
         });
     }
 

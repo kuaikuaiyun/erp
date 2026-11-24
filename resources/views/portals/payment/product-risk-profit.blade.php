@@ -9,13 +9,29 @@
     $money = static fn ($value) => '$'.number_format((float) $value, 2);
     $number = static fn ($value) => number_format((float) $value, ((float) $value == (int) $value) ? 0 : 2);
     $rate = static fn ($value) => number_format((float) $value, 2).'%';
-    $sortableHeaders = ['product'=>'name','product_code'=>'product_code','stores'=>'shop_count','sales'=>'sales','revenue'=>'revenue','paypal_refund'=>'paypal_refund_amount','paypal_dispute'=>'paypal_dispute_count','card_refund'=>'credit_card_refund_amount','combined_refund'=>'combined_refund_rate'];
+    $metricFilterText = $translationPrefix.'.metric_filters';
+    $rateFilterOrder = [
+        'paypal_refund_rate', 'credit_card_refund_rate', 'combined_refund_rate',
+        'paypal_dispute_rate', 'credit_card_dispute_rate',
+        'paypal_delivered_dispute_rate', 'credit_card_delivered_dispute_rate',
+    ];
+    $metricValue = static function (string $metric, string $bound) use ($filters): string {
+        $value = old($metric.'_'.$bound, $filters['metric_ranges'][$metric][$bound] ?? '');
+
+        return is_scalar($value) ? (string) $value : '';
+    };
+    $metricFields = ['order_count_min'];
+    foreach ($rateFilterOrder as $metric) {
+        $metricFields[] = $metric.'_min';
+        $metricFields[] = $metric.'_max';
+    }
+    $metricErrors = collect($metricFields)->flatMap(fn ($field) => $errors->get($field));
 @endphp
 
 @section('page_title', __($translationPrefix.'.page_title'))
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-metrics2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush
@@ -34,6 +50,46 @@
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>@endforeach</select></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.only_abnormal') }}</span><select class="form-control" name="only_abnormal"><option value="">{{ __($translationPrefix.'.filters.all_products') }}</option><option value="1" @selected($filters['only_abnormal'] === '1')>{{ __($translationPrefix.'.filters.abnormal') }}</option></select></label>
+            <details class="payment-product-metric-filters" @if(!empty($filters['metric_ranges']) || $metricErrors->isNotEmpty()) open @endif>
+                <summary>{{ __($metricFilterText.'.title') }}</summary>
+                <div class="payment-product-metric-filter-content">
+                    <p>{{ __($metricFilterText.'.hint') }}</p>
+                    @if($metricErrors->isNotEmpty())
+                        <ul class="text-danger" role="alert">
+                            @foreach($metricErrors as $message)
+                                <li>{{ $message }}</li>
+                            @endforeach
+                        </ul>
+                    @endif
+                    <div class="payment-product-metric-filter-grid">
+                        <fieldset>
+                            <legend>{{ __($metricFilterText.'.metrics.order_count') }}</legend>
+                            <div class="payment-product-metric-bounds payment-product-metric-bounds-single">
+                                <label>
+                                    <span>{{ __($metricFilterText.'.order_count_min') }}</span>
+                                    <input class="form-control" type="number" name="order_count_min" min="0" max="2147483647" step="1" value="{{ $metricValue('order_count', 'min') }}" @if($errors->has('order_count_min')) aria-invalid="true" @endif>
+                                </label>
+                            </div>
+                        </fieldset>
+                        @foreach($rateFilterOrder as $metric)
+                            @php($metricLabel = __($metricFilterText.'.metrics.'.$metric))
+                            <fieldset>
+                                <legend>{{ $metricLabel }}</legend>
+                                <div class="payment-product-metric-bounds">
+                                    @foreach(['min', 'max'] as $bound)
+                                        @php($field = $metric.'_'.$bound)
+                                        <label>
+                                            <span aria-hidden="true">{{ __($metricFilterText.'.bound_'.$bound) }}</span>
+                                            <span class="sr-only">{{ __($metricFilterText.'.'.$bound, ['metric' => $metricLabel]) }}</span>
+                                            <input class="form-control" type="number" name="{{ $field }}" min="0" max="99999999" step="0.01" value="{{ $metricValue($metric, $bound) }}" @if($errors->has($field)) aria-invalid="true" @endif>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            </fieldset>
+                        @endforeach
+                    </div>
+                </div>
+            </details>
             <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" data-payment-product-export data-export-url="{{ route('payment.product-risk-profit.export') }}"><i class="fa fa-file-excel-o"></i> {{ __($translationPrefix.'.export.button') }}</button></div>
         </form>
     </div></div>

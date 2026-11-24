@@ -72,7 +72,15 @@ class FashionOrderController extends Controller
         $storeKeyword = trim((string) ($validated['store_keyword'] ?? ''));
         $selectedStatus = (string) ($validated['status'] ?? '');
         $query = FashionLogisticsOrder::query()
-            ->with(['items', 'store'])
+            ->select([
+                'id', 'assistant_domain_store_id', 'store_name', 'source_domain', 'order_number', 'external_order_id',
+                'status', 'customer_name', 'customer_email', 'customer_phone', 'payment_method', 'payment_method_title',
+                'currency', 'total_amount', 'discount_amount', 'source_order_created_at', 'source_order_timezone', 'order_created_at',
+            ])
+            ->with(['items' => static fn ($items) => $items
+                ->select(['id', 'fashion_logistics_order_id', 'product_name', 'sku', 'quantity'])
+                ->orderBy('id')->limit(2)])
+            ->withCount('items')
             ->where('source_platform', 'xshoppy')
             ->whereHas('store', function (Builder $stores) use ($user): void {
                 $this->applyStoreVisibility($stores, $user);
@@ -149,6 +157,39 @@ class FashionOrderController extends Controller
             'operators' => $operators,
             'syncStates' => $syncStates,
             'filters' => [...$validated, 'status' => $selectedStatus],
+        ]);
+    }
+
+    public function show(Request $request, FashionLogisticsOrder $order): Response|JsonResponse
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $this->portalService->assertPortal($context['portal']);
+        $user = $context['user'];
+        abort_unless($user->can('portal.fuzhuangwuliu.orders'), 403);
+        abort_unless($order->source_platform === 'xshoppy', 404);
+        abort_unless($this->applyStoreVisibility($order->store()->getQuery(), $user)->exists(), 403);
+
+        $detail = $order->only([
+            'store_name', 'source_domain', 'currency', 'status', 'payment_method_title', 'payment_method',
+            'transaction_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_address',
+        ]);
+        $detail['order_number'] = $order->order_number ?: $order->external_order_id;
+        $detail['source_order_created_at'] = ($order->source_order_created_at?->format('Y-m-d H:i:s') ?: '—')
+            .($order->source_order_timezone ? ' · '.$order->source_order_timezone : '');
+        foreach (['order_created_at', 'order_modified_at', 'paid_at', 'completed_at', 'source_synced_at'] as $field) {
+            $detail[$field] = $order->{$field}?->format('Y-m-d H:i:s');
+        }
+        foreach (['total_amount', 'shipping_amount', 'discount_amount', 'tax_amount'] as $field) {
+            $detail[$field] = number_format((float) $order->{$field}, 4);
+        }
+        $detail['source_payload'] = $order->source_payload ?? [];
+
+        return response()->json([
+            'order' => $detail,
+            'items' => $order->items()->orderBy('id')->get(['product_name', 'sku', 'image_url', 'quantity', 'subtotal', 'total']),
         ]);
     }
 

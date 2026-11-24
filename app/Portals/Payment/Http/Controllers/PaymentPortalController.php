@@ -24,6 +24,7 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class PaymentPortalController extends Controller
@@ -729,7 +730,7 @@ class PaymentPortalController extends Controller
     /** @return array<string,mixed> */
     private function productRiskFilters(Request $request): array
     {
-        $validated = $request->validate([
+        $rules = [
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
@@ -737,13 +738,49 @@ class PaymentPortalController extends Controller
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
             'only_abnormal' => ['nullable', Rule::in(['', '1'])],
-            'sort' => ['nullable', Rule::in(['', 'name', 'product_code', 'shop_count', 'sales', 'revenue', 'paypal_refund_amount', 'paypal_refund_rate', 'paypal_dispute_count', 'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate'])],
+            'sort' => ['nullable', Rule::in([
+                '', 'name', 'product_code', 'shop_count', 'sales', 'revenue', 'paypal_refund_amount',
+                'paypal_dispute_count', 'credit_card_refund_amount', ...PaymentProductRiskService::LIST_METRICS,
+            ])],
             'direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
-        ]);
+        ];
+        $rules['order_count_min'] = ['nullable', 'integer', 'min:0', 'max:2147483647'];
+        $labels = ['order_count_min' => __('payment.product_risk_profit.metric_filters.order_count_min')];
+        foreach (PaymentProductRiskService::RATE_METRICS as $metric) {
+            foreach (['min', 'max'] as $bound) {
+                $field = $metric.'_'.$bound;
+                $rules[$field] = ['nullable', 'numeric', 'min:0', 'max:99999999', 'decimal:0,2'];
+                $labels[$field] = __('payment.product_risk_profit.metric_filters.'.$bound, [
+                    'metric' => __('payment.product_risk_profit.metric_filters.metrics.'.$metric),
+                ]);
+            }
+        }
 
-        return $this->normaliseProductRiskFilters($validated);
+        $validated = $request->validate($rules, [], $labels);
+        $ranges = [];
+        foreach (PaymentProductRiskService::LIST_METRICS as $metric) {
+            $min = $validated[$metric.'_min'] ?? null;
+            $max = $validated[$metric.'_max'] ?? null;
+            $min = $min === '' ? null : $min;
+            $max = $max === '' ? null : $max;
+            if ($min !== null && $max !== null && (float) $min >= (float) $max) {
+                throw ValidationException::withMessages([
+                    $metric.'_max' => __('payment.product_risk_profit.metric_filters.invalid_range', [
+                        'metric' => __('payment.product_risk_profit.metric_filters.metrics.'.$metric),
+                    ]),
+                ]);
+            }
+            if ($min !== null) {
+                $ranges[$metric]['min'] = (float) $min;
+            }
+            if ($max !== null) {
+                $ranges[$metric]['max'] = (float) $max;
+            }
+        }
+
+        return [...$this->normaliseProductRiskFilters($validated), 'metric_ranges' => $ranges];
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */

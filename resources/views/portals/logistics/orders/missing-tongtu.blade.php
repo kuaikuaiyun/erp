@@ -1,107 +1,76 @@
 @extends('portal.layout')
 
-@section('page_title', '缺失通途订单核对')
+@section('page_title', __('logistics.missing_tongtu_page.title'))
+
+@push('styles')
+    <link rel="stylesheet" href="{{ asset('assets/erp/logistics.css') }}?v=20261104-1">
+    <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261123-19">
+    <link rel="stylesheet" href="{{ asset('assets/erp/missing-tongtu-orders.css') }}?v=2">
+@endpush
 
 @section('content')
-    <link rel="stylesheet" href="{{ asset('assets/erp/logistics.css') }}?v=20261104-1">
-    <style>
-        .tongtu-check .box { border: 1px solid #dce5ec; border-radius: 8px; }
-        .tongtu-check .box-header, .tongtu-check .box-body, .tongtu-check .box-footer { padding: 14px 18px; }
-        .tongtu-check .box-title { font-size: 15px; font-weight: 600; }
-        .tongtu-check .box-title .fa { color: #367fa9; margin-right: 6px; }
-        .tongtu-check .filters, .tongtu-check .result-footer { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
-        .tongtu-check .date-field { flex: 0 1 180px; min-width: 145px; }
-        .tongtu-check .date-field label { display: block; color: #465b6d; }
-        .tongtu-check .date-field input { border-radius: 4px; border-color: #c8d6e1; }
-        .tongtu-check .domain-field { flex-basis: 240px; }
-        .tongtu-check .actions { display: flex; gap: 8px; }
-        .tongtu-check .results-table { margin-bottom: 0; }
-        .tongtu-check .results-table th { background: #edf3f7; color: #344e63; }
-        .tongtu-check .results-table th, .tongtu-check .results-table td { padding: 12px 18px; overflow-wrap: anywhere; }
-        .tongtu-check .results-table th:first-child { width: 22%; min-width: 145px; }
-        .tongtu-check .store-domain { color: #344e63; font-weight: 600; }
-        .tongtu-check .order-numbers { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
-        .tongtu-check .order-numbers li { padding: 2px 8px; border: 1px solid #d4e0ea; border-radius: 4px; background: #edf3f7; color: #344e63; font-variant-numeric: tabular-nums; }
-        .tongtu-check .more-orders { margin-top: 8px; }
-        .tongtu-check .more-orders summary { display: list-item; width: fit-content; cursor: pointer; color: #367fa9; }
-        .tongtu-check .more-orders[open] summary { margin-bottom: 8px; }
-        .tongtu-check .more-orders[open] .expand-orders,
-        .tongtu-check .more-orders:not([open]) .collapse-orders { display: none; }
-        .tongtu-check .result-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-        .tongtu-check .result-footer .logistics-pagination-control { flex-wrap: wrap; }
-        .tongtu-check .empty { text-align: center; color: #526a7b; padding: 28px 18px; }
-        .tongtu-check .store-sync-cell { min-width: 160px; width: 180px; }
-        .tongtu-check .store-sync-cell form { margin: 0; }
-        .tongtu-check .store-sync-cell small { display: block; max-width: 240px; margin-top: 5px; font-weight: normal; }
-    </style>
     <section class="content-header">
-        <h1>缺失通途订单核对</h1>
+        <h1>{{ __('logistics.missing_tongtu_page.title') }}</h1>
     </section>
-    <section class="content tongtu-check">
-        <div class="box">
-            <div class="box-header with-border">
-                <h2 class="box-title"><i class="fa fa-filter" aria-hidden="true"></i> 筛选条件</h2>
+    <section class="content flt tongtu-check">
+        <form method="get" action="{{ $checkUrl }}" class="flt-card flt-filters" data-loading="region" data-loading-target=".tongtu-result-box">
+            <input type="hidden" name="per_page" value="{{ $orders->perPage() }}">
+            <h3 class="tongtu-filter-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __('logistics.missing_tongtu_page.filters') }}</h3>
+            <div class="flt-filter-grid">
+                <label>{{ __('logistics.missing_tongtu_page.domain') }}
+                    <input id="tongtu-store-domain" type="search" name="store_domain" value="{{ $storeDomain }}"
+                        placeholder="{{ __('logistics.missing_tongtu_page.domain_placeholder') }}" maxlength="255" autocomplete="off">
+                </label>
+                <label>{{ __('logistics.missing_tongtu_page.order_number') }}
+                    <input id="tongtu-order-number" type="search" name="tongtu_order_number" value="{{ $tongtuOrderNumber }}"
+                        placeholder="{{ __('logistics.missing_tongtu_page.number_placeholder') }}" maxlength="191" autocomplete="off">
+                </label>
+                <div class="flt-time-range" role="group" aria-label="{{ __('logistics.missing_tongtu_page.payment_dates') }}">
+                    <label>{{ __('logistics.missing_tongtu_page.paid_from') }}<input id="paid-from" type="date" name="paid_from" value="{{ $paidFrom }}"></label>
+                    <label>{{ __('logistics.missing_tongtu_page.paid_to') }}<input id="paid-to" type="date" name="paid_to" value="{{ $paidTo }}"></label>
+                </div>
             </div>
-            <div class="box-body">
-                <form method="GET" action="{{ $checkUrl }}" class="filters">
-                    <input type="hidden" name="per_page" value="{{ $orders->perPage() }}">
-                    <div class="date-field">
-                        <label for="paid-from">付款开始日期</label>
-                        <input id="paid-from" class="form-control" type="date" name="paid_from" value="{{ $paidFrom }}">
-                    </div>
-                    <div class="date-field">
-                        <label for="paid-to">付款结束日期</label>
-                        <input id="paid-to" class="form-control" type="date" name="paid_to" value="{{ $paidTo }}">
-                    </div>
-                    <div class="date-field domain-field">
-                        <label for="tongtu-store-domain">店铺域名</label>
-                        <input id="tongtu-store-domain" class="form-control" type="search" name="store_domain"
-                               value="{{ $storeDomain }}" placeholder="输入完整或部分域名" maxlength="255" autocomplete="off">
-                    </div>
-                    <div class="date-field domain-field">
-                        <label for="tongtu-order-number">通途订单号</label>
-                        <input id="tongtu-order-number" class="form-control" type="search" name="tongtu_order_number"
-                               value="{{ $tongtuOrderNumber }}" placeholder="输入完整或部分单号" maxlength="191" autocomplete="off">
-                    </div>
-                    <div class="actions">
-                        <button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> 查询</button>
-                        <a class="btn btn-default" href="{{ $checkUrl }}">重置</a>
-                    </div>
-                </form>
+            <div class="flt-filter-actions">
+                <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __('logistics.common.search') }}</button>
+                <a class="flt-btn" href="{{ $checkUrl }}" data-loading="region" data-loading-target=".tongtu-result-box">{{ __('logistics.common.reset') }}</a>
             </div>
-        </div>
+        </form>
 
         @if ($errors->any())
             <div class="alert alert-danger" role="alert">{{ $errors->first() }}</div>
         @endif
         <div id="tongtu-sync-progress" class="alert alert-info" role="status"
              data-url="{{ request()->fullUrlWithQuery(['progress' => 1]) }}"
+             data-active-template="{{ __('logistics.missing_tongtu_page.active', ['date' => '__date__', 'orders' => '__orders__']) }}"
+             data-last-sync-template="{{ __('logistics.missing_tongtu_page.last_sync', ['time' => '__time__']) }}"
              data-synced-days="{{ $syncedDays }}" @if ($syncedDays >= $totalDays) hidden @endif>
-            {{ $coverageFrom }} 至 {{ $coverageTo }} 已同步
-            <span data-coverage>{{ $syncedDays }} / {{ $totalDays }}</span> 天。
+            {{ __('logistics.missing_tongtu_page.coverage', ['from' => $coverageFrom, 'to' => $coverageTo]) }}
+            <span data-coverage>{{ $syncedDays }} / {{ $totalDays }}</span> {{ __('logistics.missing_tongtu_page.days') }}
             <span data-active></span>
-            <a href="{{ request()->fullUrl() }}" data-refresh hidden>刷新核对结果</a>
+            <a href="{{ request()->fullUrl() }}" data-refresh hidden>{{ __('logistics.missing_tongtu_page.refresh') }}</a>
         </div>
-        <div class="box tongtu-result-box">
-            <div class="box-header with-border">
-                <h2 class="box-title">核对结果</h2>
-                <div class="result-actions pull-right">
-                    <span id="tongtu-last-sync" class="text-muted" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
-                    <a href="{{ $exportUrl }}" class="btn btn-default btn-sm" data-pjax="false" download>
-                        <i class="fa fa-download" aria-hidden="true"></i> 导出 Excel
+        <div class="flt-card flt-records tongtu-result-box">
+            <div class="flt-toolbar">
+                <div class="flt-selection">{{ __('logistics.missing_tongtu_page.group_count', ['count' => $orders->total()]) }}</div>
+                <div class="flt-toolbar-actions">
+                    <span id="tongtu-last-sync" class="text-muted" @if (!$lastSync) hidden @endif>{{ __('logistics.missing_tongtu_page.last_sync', ['time' => $lastSync ?? '']) }}</span>
+                    <a href="{{ $exportUrl }}" class="flt-btn" data-pjax="false" download>
+                        <i class="fa fa-download" aria-hidden="true"></i> {{ __('logistics.missing_tongtu_page.export') }}
                     </a>
                 </div>
             </div>
-            <div class="table-responsive">
-                <table class="table table-striped table-hover results-table">
+            <div class="flt-table-scroll tongtu-table-scroll {{ $orders->isEmpty() ? 'is-empty' : '' }}" tabindex="0" aria-label="{{ __('logistics.missing_tongtu_page.results') }}">
+                <table class="results-table">
                     <thead>
-                        <tr><th scope="col">店铺域名</th><th scope="col">通途订单号</th>@if($canSyncMissingTongtuStores)<th scope="col" class="store-sync-cell">{{ __('logistics.missing_tongtu_sync.actions') }}</th>@endif</tr>
+                        <tr><th scope="col">{{ __('logistics.missing_tongtu_page.domain') }}</th><th scope="col">{{ __('logistics.missing_tongtu_page.order_number') }}</th>@if($canSyncMissingTongtuStores)<th scope="col" class="store-sync-cell">{{ __('logistics.missing_tongtu_sync.actions') }}</th>@endif</tr>
                     </thead>
                     <tbody>
                         @forelse ($orders as $group)
-                            @php($previewSize = 8)
+                            @php
+                                $previewSize = 8;
+                            @endphp
                             <tr>
-                                <td class="{{ $group['domain'] ? 'store-domain' : 'text-muted' }}">{{ $group['domain'] ?? '未匹配域名' }}</td>
+                                <td class="{{ $group['domain'] ? 'store-domain' : 'text-muted' }}">{{ $group['domain'] ?? __('logistics.missing_tongtu_page.unmatched_domain') }}</td>
                                 <td>
                                     <ul class="order-numbers">
                                         @foreach (array_slice($group['numbers'], 0, $previewSize) as $number)
@@ -111,8 +80,8 @@
                                     @if (count($group['numbers']) > $previewSize)
                                         <details class="more-orders">
                                             <summary>
-                                                <span class="expand-orders">展开剩余 {{ count($group['numbers']) - $previewSize }} 个单号</span>
-                                                <span class="collapse-orders">收起单号</span>
+                                                <span class="expand-orders">{{ __('logistics.missing_tongtu_page.expand_orders', ['count' => count($group['numbers']) - $previewSize]) }}</span>
+                                                <span class="collapse-orders">{{ __('logistics.missing_tongtu_page.collapse_orders') }}</span>
                                             </summary>
                                             <ul class="order-numbers">
                                                 @foreach (array_slice($group['numbers'], $previewSize) as $number)
@@ -123,35 +92,67 @@
                                     @endif
                                 </td>
                                 @if($canSyncMissingTongtuStores)
-                                @php($syncStore = $missingTongtuSyncStores[$group['domain'] ?? ''] ?? ['store'=>null,'reason'=>'unmatched','busy'=>false])
+                                @php
+                                    $syncStore = $missingTongtuSyncStores[$group['domain'] ?? ''] ?? ['store' => null, 'reason' => 'unmatched', 'busy' => false];
+                                @endphp
                                 <td class="store-sync-cell">
                                     @if($syncStore['store'] && !$syncStore['busy'])
                                     <form method="post" action="{{ route('logistics.shopify-stores.sync', $syncStore['store']) }}" data-loading="page">
                                         @csrf
-                                        <button type="submit" class="btn btn-primary btn-sm" title="{{ __('logistics.missing_tongtu_sync.hint') }}"><i class="fa fa-refresh" aria-hidden="true"></i> {{ __('logistics.missing_tongtu_sync.sync') }}</button>
+                                        <button type="submit" class="flt-btn" title="{{ __('logistics.missing_tongtu_sync.hint') }}"><i class="fa fa-refresh" aria-hidden="true"></i> {{ __('logistics.missing_tongtu_sync.sync') }}</button>
                                     </form>
                                     @else
-                                    <button type="button" class="btn btn-default btn-sm" disabled>{{ __('logistics.missing_tongtu_sync.unavailable') }}</button>
+                                    <button type="button" class="flt-btn" disabled>{{ __('logistics.missing_tongtu_sync.unavailable') }}</button>
                                     <small class="text-muted">{{ __('logistics.missing_tongtu_sync.'.($syncStore['busy'] ? 'busy' : $syncStore['reason'])) }}</small>
                                     @endif
                                 </td>
                                 @endif
                             </tr>
                         @empty
-                            <tr><td colspan="{{ $canSyncMissingTongtuStores ? 3 : 2 }}" class="empty">{{ $lastSync ? '已同步的数据中没有符合筛选条件的缺失订单。' : '所选日期暂无已同步数据。' }}</td></tr>
+                            <tr><td colspan="{{ $canSyncMissingTongtuStores ? 3 : 2 }}"><div class="flt-empty"><i class="fa fa-search" aria-hidden="true"></i><p>{{ __('logistics.missing_tongtu_page.'.($lastSync ? 'empty_results' : 'empty_unsynced')) }}</p></div></td></tr>
                         @endforelse
                     </tbody>
                 </table>
             </div>
-            <div class="box-footer result-footer">
-                @include('portals.logistics.partials.pagination', [
-                    'paginator' => $orders,
-                    'filters' => $paginationFilters,
-                    'routeName' => 'logistics.orders.missing-tongtu',
-                    'loadingTarget' => '.tongtu-result-box',
-                ])
+            <div class="flt-pagination tongtu-pagination">
+                <span>{{ __('logistics.missing_tongtu_page.page_summary', ['first' => $orders->firstItem() ?? 0, 'last' => $orders->lastItem() ?? 0, 'total' => $orders->total()]) }}</span>
+                <form method="get" action="{{ $checkUrl }}" data-loading="region" data-loading-target=".tongtu-result-box">
+                    @foreach ($paginationFilters as $key => $value)
+                        @if ($key !== 'per_page')<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endif
+                    @endforeach
+                    <label>{{ __('logistics.orders.list.per_page') }}
+                        <select name="per_page" onchange="this.form.requestSubmit()">
+                            @foreach ([20, 50, 100] as $size)
+                                <option value="{{ $size }}" @selected($orders->perPage() === $size)>{{ $size }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                </form>
+                <nav class="tongtu-page-links" aria-label="{{ __('logistics.orders.list.pagination') }}">
+                    @if ($orders->previousPageUrl())
+                        <a class="flt-btn" href="{{ $orders->previousPageUrl() }}" data-loading="region" data-loading-target=".tongtu-result-box">{{ __('logistics.orders.list.previous') }}</a>
+                    @else
+                        <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.previous') }}</button>
+                    @endif
+                    <span>{{ $orders->currentPage() }} / {{ $orders->lastPage() }}</span>
+                    @if ($orders->nextPageUrl())
+                        <a class="flt-btn" href="{{ $orders->nextPageUrl() }}" data-loading="region" data-loading-target=".tongtu-result-box">{{ __('logistics.orders.list.next') }}</a>
+                    @else
+                        <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.next') }}</button>
+                    @endif
+                </nav>
+                <form method="get" action="{{ $checkUrl }}" data-loading="region" data-loading-target=".tongtu-result-box">
+                    @foreach ($paginationFilters as $key => $value)
+                        <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                    @endforeach
+                    <label><span class="flt-sr-only">{{ __('logistics.orders.list.page') }}</span><input type="number" name="page" min="1" max="{{ $orders->lastPage() }}" required placeholder="{{ __('logistics.orders.list.page') }}"></label>
+                    <button class="flt-btn flt-primary" type="submit">{{ __('logistics.orders.list.jump') }}</button>
+                </form>
             </div>
         </div>
     </section>
-    <script src="{{ asset('assets/erp/tongtu-sync-progress.js') }}"></script>
 @endsection
+
+@push('scripts')
+    <script src="{{ asset('assets/erp/tongtu-sync-progress.js') }}?v=2" defer></script>
+@endpush

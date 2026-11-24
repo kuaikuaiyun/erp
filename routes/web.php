@@ -80,6 +80,7 @@ Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('f
 Route::patch('/fashion/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->whereNumber('store')->name('fashion.stores.credentials.update');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
 Route::get('/fashion-logistics/orders/test-api/{store}', [FashionOrderController::class, 'testApi'])->whereNumber('store')->name('fashion-logistics.orders.test-api');
+Route::get('/fashion-logistics/orders/{order}', [FashionOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.orders.show');
 Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
 Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
 Route::get('/fashion-logistics/shopline-orders/{order}', [ShoplineOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.shopline-orders.show');
@@ -507,6 +508,9 @@ Route::put('/orders/{order}', [LogisticsOrderController::class, 'update'])->name
 Route::put('/orders/{order}/refunds/{refund}', [LogisticsOrderController::class, 'updateRefund'])->name('logistics.orders.refunds.update');
 Route::delete('/orders/{order}/refunds/{refund}', [LogisticsOrderController::class, 'voidRefund'])->name('logistics.orders.refunds.void');
 Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])->name('logistics.product-statistics.index');
+Route::get('/product-statistics/list', [ProductStatisticsController::class, 'listData'])->name('logistics.product-statistics.list');
+Route::get('/product-statistics/stores', [ProductStatisticsController::class, 'storeOptions'])->name('logistics.product-statistics.stores');
+Route::get('/product-statistics/refund-reasons', [ProductStatisticsController::class, 'refundReasons'])->name('logistics.product-statistics.refund-reasons');
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::post('/product-statistics/tongtu-skus/retry', [ProductStatisticsController::class, 'retryTongtuSkus'])->name('logistics.product-statistics.tongtu-skus.retry');

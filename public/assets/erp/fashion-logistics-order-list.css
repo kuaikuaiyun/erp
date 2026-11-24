@@ -1,0 +1,740 @@
+.fashion-order-list {
+    min-width: 0;
+}
+
+.fashion-order-heading {
+    margin: 0 0 16px;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.fashion-order-filter .form-group {
+    min-width: 0;
+    margin: 0;
+}
+
+.fashion-order-filter .form-group > label {
+    margin-bottom: 8px;
+}
+
+.fashion-order-filter .form-control {
+    height: 36px;
+    box-shadow: none;
+}
+
+.fashion-order-filter .flt-time-range {
+    grid-column: span 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fashion-order-filter .flt-picker-options input[type="radio"] {
+    flex: none;
+}
+
+.fashion-order-filter .flt-picker-options span {
+    overflow-wrap: anywhere;
+}
+
+.fashion-order-list .fashion-order-scroll {
+    overscroll-behavior: auto;
+}
+
+.fashion-order-list .fashion-order-table {
+    min-width: 1120px;
+    margin: 0;
+}
+
+.fashion-order-list--sl .fashion-order-table,
+.fashion-order-list--nbc .fashion-order-table {
+    min-width: 1240px;
+}
+
+.fashion-order-list .fashion-order-table th.flt-check { width: 44px; }
+.fashion-order-list .fashion-order-table th:nth-child(2) { width: 23%; }
+.fashion-order-list .fashion-order-table th:nth-child(3) { width: 13%; }
+.fashion-order-list .fashion-order-table th:nth-child(4) { width: 13%; }
+.fashion-order-list .fashion-order-table th:nth-child(5) { width: 10%; }
+.fashion-order-list .fashion-order-table th:nth-child(6) { width: 21%; }
+.fashion-order-list .fashion-order-table th:nth-child(7) { width: 9%; }
+.fashion-order-list .fashion-order-table th:last-child { width: 6%; }
+
+.fashion-order-list .fashion-order-table td {
+    padding: 13px 11px;
+    text-align: left;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+
+.fashion-order-list .fashion-order-table td.flt-check,
+.fashion-order-list .fashion-order-table td:last-child {
+    text-align: center;
+}
+
+.fashion-order-table :is(.xsl-field-line, .sl-field-line, .sl-status-line, .nbc-field) {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    line-height: 1.6;
+    white-space: normal;
+}
+
+.fashion-order-table :is(.xsl-field-label, .sl-field-label, .nbc-field > small) {
+    flex: none;
+    color: #627e92;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.fashion-order-table :is(.xsl-field-value, .sl-field-value, .nbc-field-value, .sl-status-value) {
+    min-width: 0;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.fashion-order-table .fashion-order-emphasis,
+.fashion-order-table :is(.xsl-order-no, .xsl-store, .sl-order-no, .nbc-money strong) {
+    color: #175a83;
+    font-weight: 600;
+}
+
+.fashion-order-table :is(.xsl-product, .sl-product, .nbc-product) > div {
+    min-width: 0;
+}
+
+.fashion-order-table :is(.xsl-product-name, .sl-product-name, .nbc-product-title) {
+    max-width: none;
+    max-height: none;
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.fashion-order-table .nbc-product-sku {
+    overflow: visible;
+    white-space: normal;
+}
+
+.fashion-order-table .flt-row-action {
+    white-space: nowrap;
+}
+
+.fashion-order-list .is-empty .fashion-order-table {
+    min-width: 0;
+}
+
+.fashion-order-list .is-empty .fashion-order-table th {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fashion-order-list .fashion-order-pagination {
+    border-top: 1px solid var(--flt-line);
+}
+
+.fashion-order-modal.modal .modal-content {
+    border: 1px solid #dce8f0;
+    border-radius: 9px;
+}
+
+.fashion-order-modal.modal .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e1eaf1;
+    background: #fff;
+    color: #24455b;
+}
+
+.fashion-order-modal.modal .modal-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.fashion-order-modal.modal .modal-header .close {
+    color: #486b80;
+    opacity: .85;
+}
+
+.fashion-order-detail-modal .modal-dialog {
+    width: calc(100% - 32px);
+    max-width: 1400px;
+    margin: 12px auto;
+}
+
+.fashion-order-detail-modal .modal-content {
+    overflow: hidden;
+}
+
+.fashion-order-detail-modal.modal .modal-header {
+    background: #f4f9fd;
+}
+
+.fashion-order-detail-modal .modal-title .fa,
+.fashion-detail-card-heading .fa {
+    margin-right: 5px;
+    color: #258bbc;
+}
+
+.fashion-order-detail-modal .modal-body {
+    min-height: min(300px, 45vh);
+    max-height: calc(100vh - 135px);
+    max-height: calc(100dvh - 135px);
+    padding: 0;
+    overflow: auto;
+    background: #edf3f8;
+}
+
+.fashion-order-detail-modal .modal-footer {
+    padding: 10px 20px;
+    border-top-color: #dce8f2;
+}
+
+.fashion-order-detail-modal [hidden] {
+    display: none !important;
+}
+
+.fashion-detail-loading,
+.fashion-detail-error {
+    display: flex;
+    min-height: min(300px, 45vh);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    color: #52738c;
+}
+
+.fashion-detail-loading .flt-spinner {
+    width: 30px;
+    height: 30px;
+    color: #2188be;
+}
+
+.fashion-detail-error {
+    color: #a94442;
+}
+
+.fashion-detail-content {
+    padding: 18px;
+    color: #1d4667;
+    overflow-wrap: anywhere;
+}
+
+.fashion-detail-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    border: 1px solid #d6e6ef;
+    border-left: 4px solid #2188be;
+    border-radius: 8px;
+    background: linear-gradient(110deg, #fff, #eff8fc);
+}
+
+.fashion-detail-hero h3 {
+    margin: 3px 0 7px;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.fashion-detail-hero p {
+    margin: 0;
+    color: #647f96;
+    font-size: 12px;
+}
+
+.fashion-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.fashion-detail-tag {
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #e4f1fa;
+    color: #205e83;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.fashion-detail-tag.is-paid {
+    background: #e0f3eb;
+    color: #19664c;
+}
+
+.fashion-detail-tag.is-neutral {
+    background: #e8eef3;
+    color: #49667d;
+}
+
+.fashion-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    gap: 16px;
+}
+
+.fashion-detail-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.fashion-detail-card {
+    padding: 14px 16px;
+    border: 1px solid #d8e6f0;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.fashion-detail-card-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid #e2ecf3;
+}
+
+.fashion-detail-card-heading h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.fashion-detail-card-heading span,
+.fashion-detail-item-copy p,
+.fashion-detail-fields dt {
+    color: #627f96;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.fashion-detail-items {
+    display: grid;
+    gap: 10px;
+}
+
+.fashion-detail-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
+    align-items: center;
+    gap: 12px;
+    padding: 11px;
+    border: 1px solid #dce9f2;
+    border-radius: 6px;
+    background: #f8fbfd;
+}
+
+.fashion-detail-item-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.fashion-detail-item-info img {
+    width: 54px;
+    height: 54px;
+    flex: none;
+    border: 1px solid #dce9f2;
+    border-radius: 5px;
+    object-fit: cover;
+}
+
+.fashion-detail-item-copy {
+    min-width: 0;
+}
+
+.fashion-detail-item-copy p {
+    margin: 4px 0 0;
+}
+
+.fashion-detail-fields {
+    margin: 0;
+}
+
+.fashion-detail-fields dd {
+    margin: 2px 0 0;
+    font-weight: 600;
+}
+
+.fashion-detail-fields.is-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.fashion-detail-fields.is-grid > div {
+    padding: 7px 9px;
+    border-radius: 5px;
+    background: #f0f6fa;
+}
+
+.fashion-detail-fields.is-stacked > div {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 0;
+}
+
+.fashion-detail-fields.is-stacked > div + div {
+    border-top: 1px dashed #dce8f1;
+}
+
+.fashion-detail-fields.is-stacked dd {
+    text-align: right;
+}
+
+.fashion-detail-amount {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 5px 8px;
+    margin: 0 0 5px;
+    padding: 9px 10px;
+    border-radius: 5px;
+    background: #e9f5fd;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.fashion-detail-amount span {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.fashion-detail-raw {
+    overflow: hidden;
+    border: 1px solid #dce7ef;
+    border-radius: 6px;
+    background: #f7fafc;
+}
+
+.fashion-detail-raw summary {
+    padding: 10px 12px;
+    color: #315e7d;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fashion-detail-raw pre {
+    max-height: 330px;
+    margin: 0;
+    padding: 12px;
+    overflow: auto;
+    border: 0;
+    border-top: 1px solid #dce7ef;
+    border-radius: 0;
+    background: #eef4f8;
+    color: #32536c;
+    font-size: 11px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.fashion-sync-modal .modal-dialog {
+    width: calc(100% - 32px);
+    max-width: 1360px;
+    margin: 12px auto;
+}
+
+.fashion-sync-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    overflow: hidden;
+}
+
+.fashion-sync-modal.modal .modal-header {
+    flex: none;
+    background: #f4f9fd;
+}
+
+.fashion-sync-modal .modal-title .fa {
+    color: #258bbc;
+    margin-right: 5px;
+}
+
+.fashion-sync-modal .modal-header p {
+    margin: 5px 0 0;
+    color: #627f96;
+    font-size: 12px;
+}
+
+.fashion-sync-modal .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    padding: 14px 18px;
+    overflow: auto;
+    background: #f1f6fa;
+    color: #315671;
+}
+
+.fashion-sync-modal .modal-footer {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 9px 18px;
+    border-top-color: #dce8f2;
+}
+
+.fashion-sync-filter {
+    display: grid;
+    flex: none;
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) minmax(78px, .55fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid #dce7ef;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.fashion-sync-filter .form-group {
+    min-width: 0;
+    margin: 0;
+}
+
+.fashion-sync-filter label {
+    color: #526f84;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.fashion-sync-filter .form-control {
+    height: 36px;
+    border-color: #ccdae6;
+    border-radius: 5px;
+    box-shadow: none;
+}
+
+.fashion-sync-summary {
+    display: grid;
+    flex: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+}
+
+.fashion-sync-summary[hidden] {
+    display: none;
+}
+
+.fashion-sync-summary > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid #dce7ef;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.fashion-sync-summary dt {
+    color: #647d91;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.fashion-sync-summary dd {
+    margin: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.fashion-sync-table-scroll {
+    min-height: min(145px, 26vh);
+    overflow: auto;
+    border: 1px solid #dce7ef;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.fashion-sync-table {
+    width: 100%;
+    min-width: 720px;
+    table-layout: fixed;
+    border-spacing: 0;
+    border-collapse: separate;
+    font-size: 12px;
+}
+
+#shopline-sync-modal .fashion-sync-table { min-width: 880px; }
+#nbc-sync-modal .fashion-sync-table { min-width: 1120px; }
+
+.fashion-sync-table th,
+.fashion-sync-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #e3edf4;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.fashion-sync-table th {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    background: #eff6fb;
+    color: #41647c;
+    font-weight: 600;
+}
+
+.fashion-sync-table th:last-child {
+    width: 25%;
+}
+
+.fashion-sync-table tbody tr:nth-child(even) td {
+    background: #f8fbfd;
+}
+
+.fashion-sync-subtitle {
+    display: block;
+    margin-top: 3px;
+    color: #678397;
+}
+
+.fashion-sync-number {
+    font-variant-numeric: tabular-nums;
+}
+
+.fashion-sync-badge {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 9px;
+    background: #edf2f6;
+    color: #536d81;
+    line-height: 1.35;
+}
+
+.fashion-sync-badge[data-state="success"] { background: #e1f3eb; }
+.fashion-sync-badge[data-state="syncing"] { background: #e5f3fc; color: #176689; }
+.fashion-sync-badge[data-state="failed"] { background: #fff0ef; }
+.fashion-sync-badge[data-state="missing"] { background: #fff4e2; }
+.fashion-sync-badge[data-state="success"], .fashion-sync-summary [data-state="success"] dd { color: #1a6c52; }
+.fashion-sync-badge[data-state="failed"], .fashion-sync-summary [data-state="failed"] dd { color: #a03439; }
+.fashion-sync-badge[data-state="missing"], .fashion-sync-summary [data-state="missing"] dd { color: #895c1b; }
+
+.fashion-sync-error summary {
+    cursor: pointer;
+    color: #956447;
+    white-space: nowrap;
+}
+
+.fashion-sync-error summary span {
+    display: inline-block;
+    max-width: calc(100% - 18px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.fashion-sync-error > div {
+    margin-top: 5px;
+    color: #315671;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.fashion-sync-table .fashion-sync-message {
+    height: 95px;
+    text-align: center;
+    vertical-align: middle;
+    color: #627f96;
+}
+
+.fashion-sync-feedback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.fashion-sync-feedback[data-state="error"] {
+    color: #a03439;
+}
+
+.fashion-sync-navigation,
+.fashion-sync-navigation nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 9px;
+}
+
+.fashion-sync-navigation {
+    flex: 1;
+    justify-content: space-between;
+    min-width: 0;
+    color: #526f84;
+    font-size: 12px;
+}
+
+.fashion-sync-navigation .flt-btn {
+    min-height: 28px;
+    padding: 3px 8px;
+}
+
+@media (max-width: 900px) {
+    .fashion-detail-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .fashion-order-filter .flt-time-range {
+        grid-column: 1 / -1;
+    }
+
+    .fashion-order-detail-modal .modal-dialog {
+        width: calc(100% - 16px);
+        margin: 8px auto;
+    }
+
+    .fashion-detail-content {
+        padding: 10px;
+    }
+
+    .fashion-detail-hero,
+    .fashion-detail-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fashion-sync-modal .modal-dialog {
+        width: calc(100% - 16px);
+        margin: 8px auto;
+    }
+
+    .fashion-sync-modal .modal-body {
+        padding: 10px;
+    }
+
+    .fashion-sync-filter,
+    .fashion-sync-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .fashion-sync-filter > :first-child {
+        grid-column: 1 / -1;
+    }
+
+    .fashion-sync-navigation {
+        flex-basis: 100%;
+    }
+}

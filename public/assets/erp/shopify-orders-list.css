@@ -1,0 +1,159 @@
+.shopify-orders-list .orders-filter-title {
+    margin-bottom: 16px;
+}
+
+.shopify-orders-list .orders-field-label {
+    margin-bottom: 8px;
+}
+
+.shopify-orders-list .flt-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopify-orders-list .orders-advanced-filters {
+    margin-top: 16px;
+}
+
+.shopify-orders-list .orders-advanced-toggle {
+    background: #f6faff;
+    color: #295e7d;
+}
+
+.shopify-orders-list .orders-advanced-toggle:hover,
+.shopify-orders-list .orders-advanced-toggle[aria-expanded="true"] {
+    background: #e9f4fc;
+}
+
+.shopify-orders-list .orders-advanced-toggle[aria-expanded="false"] .orders-collapse-label,
+.shopify-orders-list .orders-advanced-toggle[aria-expanded="true"] .orders-expand-label,
+.shopify-orders-list .orders-advanced-toggle[aria-expanded="true"] .orders-advanced-count {
+    display: none;
+}
+
+.shopify-orders-list .orders-advanced-toggle[aria-expanded="true"] i {
+    transform: rotate(180deg);
+}
+
+.shopify-orders-list .orders-filter-dates {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px 24px;
+    margin-top: 18px;
+}
+
+.shopify-orders-list .flt-picker-options label {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+    .shopify-orders-list .flt-filter-grid,
+    .shopify-orders-list .orders-filter-dates {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .shopify-orders-list .flt-filter-grid,
+    .shopify-orders-list .orders-filter-dates {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.shopify-orders-list .logistics-batch-form {
+    flex: 1 1 200px;
+    margin: 0;
+}
+
+.shopify-orders-list .logistics-batch-form select {
+    min-width: 0;
+}
+
+.shopify-orders-list .logistics-orders-scroll {
+    min-height: 0;
+    max-height: clamp(260px, 75vh, 900px);
+}
+
+.shopify-orders-list .logistics-orders-scroll.is-empty {
+    overflow: hidden !important;
+}
+
+.shopify-orders-list .is-empty .logistics-orders-table {
+    min-width: 0;
+}
+
+.shopify-orders-list .is-empty thead {
+    display: none;
+}
+
+.shopify-orders-list .logistics-orders-table {
+    width: 100%;
+    min-width: 3546px;
+}
+
+.shopify-orders-list .logistics-orders-table th:nth-child(1) { width: 46px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(2) { width: 75px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(3) { width: 185px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(4) { width: 285px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(5) { width: 190px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(6) { width: 170px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(7) { width: 420px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(8) { width: 295px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(9) { width: 180px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(10) { width: 230px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(11) { width: 175px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(12) { width: 175px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(13) { width: 160px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(14) { width: 170px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(15) { width: 245px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(16) { width: 260px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(17) { width: 130px; }
+.shopify-orders-list .logistics-orders-table th:nth-child(18) { width: 155px; }
+
+.shopify-orders-list .logistics-orders-table td.orders-row-actions {
+    padding: 8px 6px !important;
+}
+
+.shopify-orders-list .orders-row-actions {
+    white-space: nowrap;
+}
+
+.shopify-orders-list .orders-row-actions .flt-btn {
+    display: inline-flex;
+    min-height: 28px;
+    padding: 4px 8px;
+}
+
+.shopify-orders-list .orders-row-actions .flt-btn + .flt-btn {
+    margin-left: 6px;
+}
+
+.shopify-orders-list .logistics-store-information-value,
+.shopify-orders-list .logistics-payment-information-value,
+.shopify-orders-list .logistics-sale-product-detail-sku > span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.shopify-orders-list .logistics-orders-table tr[data-selected="1"]:not(.has-non-runnable-product) > td {
+    background: #edf7fe !important;
+}
+
+.shopify-orders-list .orders-pagination-actions,
+.shopify-orders-list .orders-page-links {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.shopify-orders-list .orders-pagination-actions label {
+    white-space: nowrap;
+}
+
+.shopify-orders-list .orders-pagination-actions input[type="number"] {
+    width: 76px;
+}
+
+.shopify-orders-list .orders-pagination-actions select {
+    width: auto;
+}

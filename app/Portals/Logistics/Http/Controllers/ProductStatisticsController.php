@@ -32,20 +32,51 @@ class ProductStatisticsController extends Controller
             return $context;
         }
 
-        $filters = $this->filters($request);
-        $data = $this->statistics->page($filters);
-
         return view('portals.logistics.product-statistics.index', [
             ...$this->viewContext($context),
-            'products' => $data['products'],
-            'productSummary' => $data['summary'],
-            'refundReasonReport' => $data['refund_reason_report'],
-            'productPagination' => $data['pagination'],
-            'stores' => $this->statistics->storeOptions($filters),
-            'filters' => $filters,
+            'filters' => $this->filters($request),
             'matchStatusOptions' => $this->matchStatusOptions(),
             'labels' => $this->labels(),
         ]);
+    }
+
+    public function listData(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $data = $this->statistics->page($this->filters($request) + ['skip_refund_report' => true]);
+        unset($data['refund_reason_report']);
+
+        return response()->json($data)->header('Cache-Control', 'private, no-store');
+    }
+
+    public function storeOptions(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $filters = $this->normaliseFilters($request->validate($this->filterRules(false)));
+
+        return response()->json(['stores' => $this->statistics->storeOptions($filters)])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function refundReasons(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $filters = $this->normaliseFilters($request->validate($this->filterRules(false)));
+
+        return response()->json($this->statistics->refundReasonReportForFilters($filters))
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function detail(Request $request): Response
@@ -270,6 +301,11 @@ class ProductStatisticsController extends Controller
     private function labels(): array
     {
         return [
+            'listLoadFailed' => __('logistics.product_statistics.ui.list_load_failed'),
+            'storesLoadFailed' => __('logistics.product_statistics.ui.stores_load_failed'),
+            'reasonLoading' => __('logistics.product_statistics.ui.reason_loading'),
+            'reasonLoadFailed' => __('logistics.product_statistics.ui.reason_load_failed'),
+            'retryLoad' => __('logistics.product_statistics.ui.retry_load'),
             'notAvailable' => __('logistics.common.not_available'),
             'view' => __('logistics.product_statistics.ui.view'),
             'detail' => __('logistics.product_statistics.ui.detail'),
@@ -419,6 +455,16 @@ class ProductStatisticsController extends Controller
             'viewOrder' => __('logistics.product_statistics.ui.view_order'),
             'salesChange' => __('logistics.product_statistics.ui.sales_change'),
             'matchStatus' => __('logistics.product_statistics.headers.match_status'),
+            'pclBasic' => __('logistics.product_statistics.mapping.pcl_basic'),
+            'pclCosts' => __('logistics.product_statistics.mapping.pcl_costs'),
+            'pclShipping' => __('logistics.product_statistics.mapping.pcl_shipping'),
+            'pclTimes' => __('logistics.product_statistics.mapping.pcl_times'),
+            'filterSearchOptions' => __('frontend_list_template.search_options'),
+            'filterNoOptions' => __('frontend_list_template.no_options'),
+            'filterClearChoice' => __('frontend_list_template.clear_choice'),
+            'detailPageInput' => __('logistics.orders.list.page'),
+            'detailPageJump' => __('logistics.orders.list.jump'),
+            'detailPaginationLabel' => __('logistics.orders.list.pagination'),
             'currentPclProductData' => __('logistics.product_statistics.mapping.current_pcl_product_data'),
             'currentPclProductDataEmpty' => __('logistics.product_statistics.mapping.current_pcl_product_data_empty'),
             'currentSkuData' => __('logistics.product_statistics.mapping.current_sku_data'),

@@ -53,13 +53,25 @@ class ShoplineOrderController extends Controller
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE), $user)
             ->orderBy('shop_name')
-            ->get(['id', 'shop_name', 'shopline_app_token', 'owner_user_id', 'user_name']);
+            ->get(['id', 'shop_name', 'owner_user_id', 'user_name']);
         $storeHandles = $stores
             ->filter(fn (AssistantDomainStore $store): bool => filled($store->shop_name))
             ->unique(fn (AssistantDomainStore $store): string => strtolower(trim((string) $store->shop_name)))
             ->values();
         $query = FashionLogisticsOrder::query()
-            ->with(['items', 'store.ownerUser:id,name,username'])
+            ->select([
+                'id', 'assistant_domain_store_id', 'order_number', 'external_order_id', 'order_created_at',
+                'store_name', 'source_domain', 'status', 'payment_status', 'fulfillment_status', 'marketing_source',
+                'customer_name', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'discount_amount',
+            ])
+            ->with([
+                'items' => static fn ($items) => $items
+                    ->select(['id', 'fashion_logistics_order_id', 'product_name', 'sku', 'quantity'])
+                    ->orderBy('id')->limit(2),
+                'store:id,owner_user_id,user_name,team',
+                'store.ownerUser:id,name,username',
+            ])
+            ->withCount('items')
             ->where('source_platform', self::PLATFORM)
             ->whereHas('store', function (Builder $stores) use ($user): void {
                 $this->applyStoreVisibility($stores, $user)

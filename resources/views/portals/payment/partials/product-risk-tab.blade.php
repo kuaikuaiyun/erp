@@ -7,6 +7,15 @@
     $rate = static fn ($value) => number_format((float) $value, 2).'%';
     $activeSort = (string) ($filters['sort'] ?? '');
     $activeDirection = (string) ($filters['direction'] ?? 'desc');
+    $metricLabels = __($translationPrefix.'.metric_filters.metrics');
+    $sortColumns = [
+        'product_info' => ['name' => 'sort.product_name', 'product_code' => 'compact.pcl'],
+        'basic_info' => ['order_count' => 'compact.order_count', 'revenue' => 'compact.sales_amount'],
+        'paypal_fee_info' => ['paypal_dispute_rate' => 'compact.dispute_rate', 'paypal_refund_rate' => 'compact.refund_rate', 'paypal_delivered_dispute_rate' => 'compact.delivered_dispute_rate'],
+        'card_fee_info' => ['credit_card_dispute_rate' => 'compact.dispute_rate', 'credit_card_refund_rate' => 'compact.refund_rate', 'credit_card_delivered_dispute_rate' => 'compact.delivered_dispute_rate'],
+        'latest_paid_at' => [],
+        'combined_refund' => ['combined_refund_rate' => 'table.combined_refund'],
+    ];
 @endphp
 
 @if(($tab ?? 'risk_metrics') === 'refund_reason')
@@ -14,12 +23,31 @@
 @else
 
 <div class="payment-real-product-table-wrap payment-product-scroll-table"><table class="table payment-real-product-table payment-product-compact-table"><thead><tr>
-        <th><span>{{ __($translationPrefix.'.table.product_info') }}</span><span class="payment-product-sort-group"><button type="button" class="payment-product-metric-sort @if($activeSort === 'name') active @endif" data-payment-product-sort="name">{{ __($translationPrefix.'.sort.product_name') }} <i class="fa {{ $activeSort === 'name' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button><button type="button" class="payment-product-metric-sort @if($activeSort === 'product_code') active @endif" data-payment-product-sort="product_code">{{ __($translationPrefix.'.compact.pcl') }} <i class="fa {{ $activeSort === 'product_code' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></span></th>
-        <th><span>{{ __($translationPrefix.'.table.basic_info') }}</span><span class="payment-product-sort-group"><span>{{ __($translationPrefix.'.compact.order_count') }}</span><button type="button" class="payment-product-metric-sort @if($activeSort === 'revenue') active @endif" data-payment-product-sort="revenue">{{ __($translationPrefix.'.compact.sales_amount') }} <i class="fa {{ $activeSort === 'revenue' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></span></th>
-        <th>{{ __($translationPrefix.'.table.paypal_fee_info') }}</th>
-        <th>{{ __($translationPrefix.'.table.card_fee_info') }}</th>
-        <th>{{ __($translationPrefix.'.table.latest_paid_at') }}</th>
-        <th><button type="button" class="payment-product-metric-sort payment-product-header-sort @if($activeSort === 'combined_refund_rate') active @endif" data-payment-product-sort="combined_refund_rate">{{ __($translationPrefix.'.table.combined_refund') }} <i class="fa {{ $activeSort === 'combined_refund_rate' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></th>
+        @foreach($sortColumns as $column => $metrics)
+            <th scope="col" @if($column === 'combined_refund' && $activeSort === 'combined_refund_rate') aria-sort="{{ $activeDirection === 'asc' ? 'ascending' : 'descending' }}" @endif>
+                @if($column !== 'combined_refund')
+                    <span>{{ __($translationPrefix.'.table.'.$column) }}</span>
+                @endif
+                @if($metrics !== [])
+                    <span class="{{ $column === 'combined_refund' ? 'payment-product-single-sort' : 'payment-product-sort-group' }}">
+                        @foreach($metrics as $metric => $labelKey)
+                            @php
+                                $isActive = $activeSort === $metric;
+                                $nextDirection = $isActive && $activeDirection === 'desc' ? 'asc' : 'desc';
+                                $label = __($translationPrefix.'.'.$labelKey);
+                                $sortLabel = __($translationPrefix.'.metric_filters.sort_'.$nextDirection, [
+                                    'metric' => $metricLabels[$metric] ?? $label,
+                                ]);
+                            @endphp
+                            <button type="button" @class(['payment-product-metric-sort', 'payment-product-header-sort' => $column === 'combined_refund', 'active' => $isActive])
+                                data-payment-product-sort="{{ $metric }}" aria-pressed="{{ $isActive ? 'true' : 'false' }}" aria-label="{{ $sortLabel }}" title="{{ $sortLabel }}">
+                                {{ $label }} <i class="fa {{ $isActive ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}" aria-hidden="true"></i>
+                            </button>
+                        @endforeach
+                    </span>
+                @endif
+            </th>
+        @endforeach
     </tr></thead><tbody>
         @forelse($dashboard['products'] as $product)
             @php($abnormal = (float)$product['combined_refund_rate'] > 0 || (int)$product['paypal_dispute_count'] > 0)
@@ -37,15 +65,15 @@
                 <td class="payment-product-info-cell"><div class="payment-real-product-identity">@if($product['image_url'])<button type="button" class="payment-product-image-button" data-payment-product-image data-image-url="{{ $product['image_url'] }}" data-image-name="{{ $displayName }}"><img src="{{ $product['image_url'] }}" alt="{{ $displayName }}" loading="lazy"></button>@else<span><i class="fa fa-cube"></i></span>@endif<div><strong title="{{ $displayName }}">{{ $displayName }}</strong><small><b>{{ __($translationPrefix.'.compact.pcl') }}：</b>{{ $product['product_code'] ?: $product['sku'] }}</small><small><b>{{ __($translationPrefix.'.compact.match_status') }}：</b>{{ $product['match_status_label'] }}</small></div></div></td>
                 <td class="payment-product-basic-cell"><dl class="payment-product-compact-metrics"><div><dt>{{ __($translationPrefix.'.compact.order_count') }}</dt><dd>{{ $number($product['order_count'] ?? 0) }}{{ __($translationPrefix.'.compact.order_unit') }}</dd></div><div><dt>{{ __($translationPrefix.'.compact.sales_amount') }}</dt><dd>{{ $money($product['revenue']) }}</dd></div></dl></td>
                 <td class="payment-product-fee-cell"><dl class="payment-product-compact-metrics">
-                    <div><dt><button type="button" class="payment-product-metric-sort @if($activeSort === 'paypal_refund_rate') active @endif" data-payment-product-sort="paypal_refund_rate">{{ __($translationPrefix.'.compact.refund_rate') }} <i class="fa {{ $activeSort === 'paypal_refund_rate' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></dt><dd>{{ $rate($product['paypal_refund_rate']) }} <small>{{ $number($paypalRefundOrderCount) }}笔 ÷ {{ $number($paypalOrderCount) }}笔 × 100%</small></dd></div>
-                    <div><dt><button type="button" class="payment-product-metric-sort @if($activeSort === 'paypal_dispute_rate') active @endif" data-payment-product-sort="paypal_dispute_rate">{{ __($translationPrefix.'.compact.dispute_rate') }} <i class="fa {{ $activeSort === 'paypal_dispute_rate' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></dt><dd>{{ $rate($product['paypal_dispute_rate']) }} <small>{{ $number($paypalDisputeOrderCount) }}笔 ÷ {{ $number($paypalOrderCount) }}笔 × 100%</small></dd></div>
+                    <div><dt>{{ __($translationPrefix.'.compact.refund_rate') }}</dt><dd>{{ $rate($product['paypal_refund_rate']) }} <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($paypalRefundOrderCount), 'denominator' => $number($paypalOrderCount)]) }}</small></dd></div>
+                    <div><dt>{{ __($translationPrefix.'.compact.dispute_rate') }}</dt><dd>{{ $rate($product['paypal_dispute_rate']) }} <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($paypalDisputeOrderCount), 'denominator' => $number($paypalOrderCount)]) }}</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.description_mismatch_rate') }}</dt><dd>{{ $rate($product['paypal_description_mismatch_rate']) }} <small>物品与描述不符争议金额 ÷ PayPal 总争议金额 × 100%</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.initial_dispute_rate') }}</dt><dd>{{ $rate($product['paypal_initial_dispute_rate']) }} <small>{{ $number($product['paypal_initial_dispute_count']) }}笔 ÷ {{ $number($product['paypal_initial_order_count']) }}笔 × 100%</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.delivered_dispute_rate') }}</dt><dd>{{ $rate($product['paypal_delivered_dispute_rate']) }} <small>{{ $number($product['paypal_delivered_dispute_count']) }}笔 ÷ {{ $number($product['paypal_delivered_order_count']) }}笔 × 100%</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.initial_refund_amount_rate') }}</dt><dd>{{ $rate($product['paypal_initial_refund_amount_rate']) }} <small>{{ $money($product['paypal_initial_refund_amount']) }} ÷ {{ $money($product['paypal_initial_received_amount']) }} × 100%</small></dd></div>
                 </dl></td>
                 <td class="payment-product-fee-cell"><dl class="payment-product-compact-metrics">
-                    <div><dt><button type="button" class="payment-product-metric-sort @if($activeSort === 'credit_card_refund_rate') active @endif" data-payment-product-sort="credit_card_refund_rate">{{ __($translationPrefix.'.compact.refund_rate') }} <i class="fa {{ $activeSort === 'credit_card_refund_rate' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></dt><dd>{{ $rate($product['credit_card_refund_rate']) }} <small>{{ $number($creditCardRefundOrderCount) }}笔 ÷ {{ $number($creditCardOrderCount) }}笔 × 100%</small></dd></div>
+                    <div><dt>{{ __($translationPrefix.'.compact.refund_rate') }}</dt><dd>{{ $rate($product['credit_card_refund_rate']) }} <small>{{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($creditCardRefundOrderCount), 'denominator' => $number($creditCardOrderCount)]) }}</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.dispute_rate') }}</dt><dd>{{ $rate($product['credit_card_dispute_rate']) }} <small>{{ $number($product['credit_card_dispute_count']) }}笔 ÷ {{ $number($creditCardOrderCount) }}笔 × 100%</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.delivered_dispute_rate') }}</dt><dd>{{ $rate($product['credit_card_delivered_dispute_rate']) }} <small>{{ $number($product['credit_card_delivered_dispute_count']) }}笔 ÷ {{ $number($product['credit_card_delivered_order_count']) }}笔 × 100%</small></dd></div>
                     <div><dt>{{ __($translationPrefix.'.compact.initial_refund_amount_rate') }}</dt><dd>{{ $rate($product['credit_card_initial_refund_amount_rate']) }} <small>{{ $money($product['credit_card_initial_refund_amount']) }} ÷ {{ $money($product['credit_card_initial_received_amount']) }} × 100%</small></dd></div>

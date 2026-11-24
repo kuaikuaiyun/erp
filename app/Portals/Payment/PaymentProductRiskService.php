@@ -6,12 +6,31 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsTongtuSkuMapping;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentProductRiskService
 {
+    public const RATE_METRICS = [
+        'paypal_dispute_rate',
+        'credit_card_dispute_rate',
+        'paypal_refund_rate',
+        'credit_card_refund_rate',
+        'combined_refund_rate',
+        'paypal_delivered_dispute_rate',
+        'credit_card_delivered_dispute_rate',
+    ];
+
+    public const LIST_METRICS = ['order_count', ...self::RATE_METRICS];
+
+    private const SUPPLEMENTARY_DISPUTE_RATES = [
+        'credit_card_dispute_rate',
+        'paypal_delivered_dispute_rate',
+        'credit_card_delivered_dispute_rate',
+    ];
+
     public function __construct(
         private readonly LogisticsProductStatisticsService $statistics,
         private readonly PaymentProductAlertService $alerts,
@@ -37,7 +56,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     private function buildDashboard(array $filters): array
     {
-        $data = $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]));
+        $data = $this->productList($filters);
         $summary = $data['summary'];
         $revenue = (float) ($summary['revenue'] ?? 0);
         $refunds = (float) ($summary['actual_refunds'] ?? 0);
@@ -70,12 +89,12 @@ class PaymentProductRiskService
     {
         if ($tab !== 'refund_reason') {
             return [
-                ...$this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true])),
+                ...$this->productList($filters),
                 'filters' => $filters,
             ];
         }
 
-        $report = $this->statistics->refundReasonReportForFilters($filters);
+        $report = $this->statistics->refundReasonReportForFilters(array_diff_key($filters, ['metric_ranges' => true]));
         $rows = [];
         foreach (['source_reason', 'manual_reason'] as $type) {
             foreach (($report[$type] ?? []) as $row) {
@@ -99,6 +118,58 @@ class PaymentProductRiskService
         ];
     }
 
+    private function productList(array $filters): array
+    {
+        $ranges = (array) ($filters['metric_ranges'] ?? []);
+        $sort = (string) ($filters['sort'] ?? '');
+        $extraMetrics = array_values(array_intersect(
+            ['order_count', ...self::SUPPLEMENTARY_DISPUTE_RATES],
+            [...array_keys($ranges), $sort],
+        ));
+        if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
+            return $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]));
+        }
+
+        $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics): void {
+            // The supplementary values currently displayed use product history.
+            // Only the candidate product set uses the list's date/store filters.
+            if (in_array('order_count', $extraMetrics, true)) {
+                $query->leftJoinSub($this->paidOrderFactsQuery(clone $candidateKeys), 'payment_order_facts', 'payment_order_facts.product_key', '=', 'base.product_key')
+                    ->selectRaw('COALESCE(payment_order_facts.order_count, 0) as order_count');
+            }
+            $rates = array_values(array_intersect(self::SUPPLEMENTARY_DISPUTE_RATES, $extraMetrics));
+            if ($rates !== []) {
+                $query->leftJoinSub($this->alerts->listDisputeRatesQuery($rates, $candidateKeys), 'payment_dispute_rates', 'payment_dispute_rates.product_key', '=', 'base.product_key');
+                foreach ($rates as $rate) {
+                    $query->selectRaw("COALESCE(payment_dispute_rates.{$rate}, 0) as {$rate}");
+                }
+            }
+        });
+
+        return $this->withPaymentProductNames($data);
+    }
+
+    /** @param list<string>|Builder $keys */
+    private function paidOrderFactsQuery(array|Builder $keys, array $filters = []): Builder
+    {
+        $key = $this->productKeyExpression('items');
+        $query = DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->whereIn(DB::raw($key), $keys)
+            ->whereNotNull('orders.paid_at');
+        $this->applyPaidAtRange($query, $filters);
+        if (($filters['store'] ?? '') !== '') {
+            $query->where('orders.store_name', $filters['store']);
+        }
+
+        return $query->selectRaw("{$key} as product_key")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->selectRaw('MIN(orders.paid_at) as first_paid_at')
+            ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
+            ->groupByRaw($key);
+    }
+
     /** @param array<string,mixed> $data @return array<string,mixed> */
     private function withPaymentProductNames(array $data): array
     {
@@ -113,13 +184,7 @@ class PaymentProductRiskService
             return $data;
         }
 
-        $keyExpression = "CASE "
-            ."WHEN NULLIF(TRIM(items.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM(items.tongtu_product_code))) "
-            ."WHEN NULLIF(TRIM(items.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM(items.shopify_sku))) "
-            ."WHEN NULLIF(TRIM(items.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM(items.tongtu_sku))) "
-            ."WHEN NULLIF(TRIM(items.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM(items.shopify_product_id))) "
-            ."WHEN NULLIF(TRIM(COALESCE(items.tongtu_product_name, items.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE(items.tongtu_product_name, items.product_title)))) "
-            ."ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM(items.tongtu_product_code)), ''), NULLIF(LOWER(TRIM(items.tongtu_sku)), ''), NULLIF(LOWER(TRIM(items.shopify_sku)), ''), '__missing__')) END";
+        $keyExpression = $this->productKeyExpression('items');
         $firstItems = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('logistics_order_items as items')
             ->whereIn(DB::raw($keyExpression), array_values($keys))
@@ -132,20 +197,8 @@ class PaymentProductRiskService
             ->get(['payment_product_names.product_key', 'source_item.product_title', 'source_item.tongtu_product_name'])
             ->keyBy('product_key');
 
-        $latestPaidQuery = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->table('logistics_order_items as items')
-            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
-            ->whereIn(DB::raw($keyExpression), array_values($keys))
-            ->whereNotNull('orders.paid_at');
         $activeFilters = (array) ($data['filters'] ?? []);
-        $this->applyPaidAtRange($latestPaidQuery, $activeFilters);
-        if (($activeFilters['store'] ?? '') !== '') $latestPaidQuery->where('orders.store_name', $activeFilters['store']);
-        $orderFacts = $latestPaidQuery
-            ->selectRaw("{$keyExpression} as product_key")
-            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
-            ->selectRaw('MIN(orders.paid_at) as first_paid_at')
-            ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
-            ->groupByRaw($keyExpression)->get()->keyBy('product_key');
+        $orderFacts = $this->paidOrderFactsQuery(array_values($keys), $activeFilters)->get()->keyBy('product_key');
 
         $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), $activeFilters);
         $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $orderFacts): array {

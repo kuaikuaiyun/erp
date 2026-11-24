@@ -1,0 +1,137 @@
+.tongtu-check .tongtu-filter-title {
+    margin-bottom: 16px;
+}
+
+.tongtu-check .flt-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tongtu-check .flt-time-range {
+    grid-column: span 2;
+}
+
+.tongtu-check .tongtu-table-scroll .results-table {
+    min-width: 620px;
+}
+
+.tongtu-check .tongtu-table-scroll thead th {
+    position: sticky;
+    top: 0;
+    left: auto;
+    right: auto;
+    z-index: 4;
+    text-align: left;
+}
+
+.tongtu-check .results-table th:first-child {
+    width: 24%;
+}
+
+.tongtu-check .results-table th:last-child:not(.store-sync-cell) {
+    width: auto;
+}
+
+.tongtu-check .tongtu-table-scroll td:first-child,
+.tongtu-check .tongtu-table-scroll td:last-child {
+    position: static;
+    box-shadow: none;
+    white-space: normal;
+}
+
+.tongtu-check .results-table td {
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.tongtu-check .results-table .store-domain {
+    font-weight: 600;
+}
+
+.tongtu-check .results-table .store-sync-cell {
+    width: 180px;
+}
+
+.tongtu-check .store-sync-cell small {
+    display: block;
+    margin-top: 5px;
+}
+
+.tongtu-check .store-sync-cell .flt-btn {
+    min-height: 28px;
+    padding: 4px 8px;
+}
+
+.tongtu-check .order-numbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.tongtu-check .order-numbers li {
+    padding: 2px 8px;
+    border: 1px solid #d4e0ea;
+    border-radius: 4px;
+    background: #edf3f7;
+    font-variant-numeric: tabular-nums;
+}
+
+.tongtu-check .more-orders {
+    margin-top: 8px;
+}
+
+.tongtu-check .more-orders summary {
+    width: fit-content;
+    color: var(--flt-blue);
+    cursor: pointer;
+}
+
+.tongtu-check .more-orders[open] summary {
+    margin-bottom: 8px;
+}
+
+.tongtu-check .more-orders[open] .expand-orders,
+.tongtu-check .more-orders:not([open]) .collapse-orders,
+.tongtu-check .tongtu-table-scroll.is-empty thead {
+    display: none;
+}
+
+.tongtu-check .tongtu-table-scroll.is-empty .results-table {
+    min-width: 0;
+}
+
+.tongtu-check .tongtu-table-scroll.is-empty td {
+    text-align: center;
+}
+
+.tongtu-check .tongtu-page-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tongtu-check .tongtu-pagination input[type="number"] {
+    width: 76px;
+}
+
+.tongtu-check .tongtu-pagination select {
+    width: auto;
+}
+
+@media (max-width: 1100px) {
+    .tongtu-check .flt-filter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .tongtu-check .flt-filter-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tongtu-check .flt-time-range {
+        grid-column: auto;
+    }
+}

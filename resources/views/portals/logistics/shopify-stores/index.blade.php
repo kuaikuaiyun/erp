@@ -1,6 +1,6 @@
 @extends('portal.layout')
 
-@section('page_title', 'Shopify 店铺同步')
+@section('page_title', __('logistics.shopify_stores.title'))
 
 @php
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
@@ -8,29 +8,33 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261014-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261123-19">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/shopify-stores-list.css?v=6">
 @endpush
 
 @section('content')
     <section class="content-header">
-        <h1>Shopify 店铺同步 <small>保存店铺资料时自动登记 Webhook；订单同步按需人工执行</small></h1>
+        <h1>{{ __('logistics.shopify_stores.title') }} <small>{{ __('logistics.shopify_stores.subtitle') }}</small></h1>
     </section>
 
-    <section class="content logistics-page">
+    <section class="content logistics-page flt shopify-stores-list">
         @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
         @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
 
-        <form method="get" action="{{ route('logistics.shopify-stores.index') }}" class="box box-solid logistics-filter-box">
+        <form method="get" action="{{ route('logistics.shopify-stores.index') }}" class="flt-card flt-filters" data-loading="region" data-loading-target=".shopify-stores-list"
+            data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
+            data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}">
             <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
-            <div class="box-body">
-                <div class="logistics-filter-grid">
-                    @foreach(['shop_name', 'store_prefix'] as $field)
-                        <div class="logistics-filter-field">
+            <div class="shopify-filter-body">
+                <div class="flt-filter-grid">
+                    @foreach(['shop_name', 'shop_login_url', 'store_prefix', 'tongtu_prefix', 'user_name', 'team'] as $field)
+                        <div class="shopify-filter-field">
                             <label for="shopify-{{ $field }}">{{ __('logistics.shopify_stores.'.$field) }}</label>
                             <input id="shopify-{{ $field }}" name="{{ $field }}" class="form-control" value="{{ $filters[$field] }}" maxlength="2000" placeholder="{{ __('logistics.shopify_stores.search_placeholder') }}">
                             @error($field)<span class="text-danger">{{ $message }}</span>@enderror
                         </div>
                     @endforeach
-                    <div class="logistics-filter-field">
+                    <div class="shopify-filter-field">
                         <label for="shopify-webhook-status">{{ __('logistics.shopify_stores.webhook_status') }}</label>
                         <select id="shopify-webhook-status" name="webhook_status" class="form-control">
                             <option value="">{{ __('logistics.common.all') }}</option>
@@ -39,7 +43,7 @@
                             @endforeach
                         </select>
                     </div>
-                    <div class="logistics-filter-field">
+                    <div class="shopify-filter-field">
                         <label for="shopify-sync-status">{{ __('logistics.shopify_stores.sync_status') }}</label>
                         <select id="shopify-sync-status" name="sync_status" class="form-control">
                             <option value="">{{ __('logistics.common.all') }}</option>
@@ -48,11 +52,37 @@
                             @endforeach
                         </select>
                     </div>
+                    <div class="shopify-filter-field">
+                        <label for="shopify-token-status">{{ __('logistics.shopify_stores.token_status') }}</label>
+                        <select id="shopify-token-status" name="token_status" class="form-control">
+                            <option value="">{{ __('logistics.common.all') }}</option>
+                            @foreach(__('logistics.shopify_stores.token_options') as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['token_status'] === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                        @error('token_status')<span class="text-danger">{{ $message }}</span>@enderror
+                    </div>
                 </div>
-                <p class="help-block">{{ __('logistics.shopify_stores.filter_hint') }}</p>
-                <p class="help-block">{{ __('logistics.shopify_stores.search_hint') }}</p>
-                <button type="submit" class="btn btn-primary btn-sm"><i class="fa fa-search"></i> {{ __('logistics.common.search') }}</button>
-                <a href="{{ route('logistics.shopify-stores.index') }}" class="btn btn-default btn-sm">{{ __('logistics.common.reset') }}</a>
+                <div class="shopify-filter-dates">
+                    @foreach(['sync', 'webhook'] as $prefix)
+                        <div class="flt-time-range shopify-date-range">
+                            @foreach(['from', 'to'] as $bound)
+                                @php
+                                    $field = $prefix.'_'.$bound;
+                                @endphp
+                                <div class="shopify-filter-field">
+                                    <label for="shopify-{{ $field }}">{{ __('logistics.shopify_stores.'.$field) }}</label>
+                                    <input id="shopify-{{ $field }}" name="{{ $field }}" type="date" class="form-control" value="{{ $filters[$field] }}">
+                                    @error($field)<span class="text-danger">{{ $message }}</span>@enderror
+                                </div>
+                            @endforeach
+                        </div>
+                    @endforeach
+                </div>
+                <div class="flt-filter-actions">
+                <button type="submit" class="flt-btn flt-primary"><i class="fa fa-search"></i> {{ __('logistics.common.search') }}</button>
+                <a href="{{ route('logistics.shopify-stores.index') }}" class="flt-btn">{{ __('logistics.common.reset') }}</a>
+                </div>
             </div>
         </form>
 
@@ -60,13 +90,8 @@
             @php
                 $syncProgress = $activeSyncBatch->progressPayload();
                 $syncRunning = !$syncProgress['completed'];
-                $syncTitle = match ($syncProgress['status']) {
-                    'queued' => 'Shopify 同步任务排队中',
-                    'processing' => 'Shopify 店铺后台同步中',
-                    'cancelling' => '正在停止 Shopify 同步任务',
-                    'cancelled' => 'Shopify 同步已停止',
-                    default => 'Shopify 同步完成',
-                };
+                $syncTitles = __('logistics.shopify_stores.progress_status');
+                $syncTitle = $syncTitles[$syncProgress['status']] ?? $syncTitles['completed'];
             @endphp
             <div id="shopify-sync-progress"
                  class="logistics-match-progress logistics-shopify-sync-progress"
@@ -83,26 +108,26 @@
                     <div class="progress-bar" data-shopify-sync-bar role="progressbar" style="width: {{ $syncProgress['percent'] }}%"></div>
                 </div>
                 <div class="logistics-match-progress-summary" data-shopify-sync-summary>
-                    已处理 {{ $syncProgress['processed'] }} / {{ $syncProgress['total'] }} 家；成功 {{ $syncProgress['success'] }} 家，失败 {{ $syncProgress['failed'] }} 家，已停止 {{ $syncProgress['cancelled'] }} 家；新增订单 {{ $syncProgress['created_orders'] }} 条，更新订单 {{ $syncProgress['updated_orders'] }} 条，Shopify SKU 缺失 {{ $syncProgress['sku_exceptions'] }} 单（{{ $syncProgress['sku_missing_items'] }} / {{ $syncProgress['sku_items'] }} 个商品明细），未付款跳过 {{ $syncProgress['skipped_unpaid'] }} 条，Webhook 警告 {{ $syncProgress['webhook_warnings'] }} 家。
+                    {{ __('logistics.shopify_stores.progress_summary', $syncProgress) }}
                 </div>
                 <div class="logistics-shopify-sync-current {{ $syncProgress['current_store'] ? '' : 'hide' }}" data-shopify-sync-current>
-                    <i class="fa fa-building-o"></i> 当前店铺：<strong>{{ $syncProgress['current_store'] }}</strong>
+                    <i class="fa fa-building-o"></i> {{ __('logistics.shopify_stores.current_store') }}：<strong>{{ $syncProgress['current_store'] }}</strong>
                 </div>
                 <div class="logistics-match-progress-note">
-                    <i class="fa fa-clock-o"></i> 每家店铺固定同步近 {{ $syncProgress['sync_days'] }} 天；可关闭本页，后台任务不会中断，返回后仍会显示进度。
+                    <i class="fa fa-clock-o"></i> {{ __('logistics.shopify_stores.progress_note', $syncProgress) }}
                 </div>
                 <div class="logistics-shopify-sync-actions">
                     <form method="post" action="{{ route('logistics.shopify-stores.sync-cancel', $activeSyncBatch) }}" data-shopify-sync-cancel-form class="{{ $syncProgress['can_cancel'] ? '' : 'hide' }}">
                         @csrf
                         <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                        <button type="submit" class="btn btn-warning btn-xs" onclick="return confirm('确认停止尚未开始的店铺吗？当前正在同步的店铺会正常完成。');">
-                            <i class="fa fa-stop-circle"></i> 停止剩余任务
+                        <button type="submit" class="btn btn-warning btn-xs" data-confirm="{{ __('logistics.shopify_stores.cancel_confirm') }}" onclick="return confirm(this.dataset.confirm);">
+                            <i class="fa fa-stop-circle"></i> {{ __('logistics.shopify_stores.cancel_sync') }}
                         </button>
                     </form>
                 </div>
                 <div class="logistics-shopify-sync-issues {{ $syncIssueDetails === [] ? 'hide' : '' }}" data-shopify-sync-issues>
                     <details {{ $syncProgress['completed'] && $syncIssueDetails !== [] ? 'open' : '' }}>
-                        <summary>查看异常与警告（<span data-shopify-sync-issue-count>{{ count($syncIssueDetails) }}</span>）</summary>
+                        <summary>{{ __('logistics.shopify_stores.issues') }}（<span data-shopify-sync-issue-count>{{ count($syncIssueDetails) }}</span>）</summary>
                         <div data-shopify-sync-issue-list>
                             @foreach($syncIssueDetails as $issue)
                                 <div><strong>{{ $issue['store_name'] }}</strong>：{{ $issue['reason'] }}</div>
@@ -113,12 +138,15 @@
             </div>
         @endif
 
-        <div class="box box-solid logistics-tip-box">
-            <div class="box-body">
-                <i class="fa fa-info-circle text-aqua"></i>
-                仅显示助理系统中“建站系统为 Shopify 且店铺状态为在用”的店铺。保存满足条件的店铺会自动登记订单创建、订单更新、退款创建三类 Webhook；下方“登记 Webhook”不会同步历史订单。
-            </div>
-        </div>
+        <details class="flt-guidance">
+            <summary><i class="fa fa-info-circle" aria-hidden="true"></i><strong>{{ __('logistics.shopify_stores.guidance') }}</strong></summary>
+            <ul class="flt-guidance-items">
+                <li>{{ __('logistics.shopify_stores.scope_hint') }}</li>
+                <li>{{ __('logistics.shopify_stores.search_hint') }}</li>
+                <li>{{ __('logistics.shopify_stores.filter_hint') }}</li>
+                <li>{{ __('logistics.shopify_stores.date_hint') }}</li>
+            </ul>
+        </details>
 
         <form id="shopify-batch-sync-form" method="post" action="{{ route('logistics.shopify-stores.batch-sync') }}">
             @csrf
@@ -128,88 +156,119 @@
             @csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
         </form>
-        <div class="box box-solid logistics-table-box">
-            <div class="box-header with-border logistics-list-toolbar">
-                <h3 class="box-title">Shopify 店铺列表</h3>
-                <button class="btn btn-primary btn-sm" type="submit" form="shopify-batch-webhook-form" id="batch-webhook-button" disabled>
-                    <i class="fa fa-rss"></i> 批量登记 Webhook
+        <div class="flt-card flt-records">
+            <div class="flt-toolbar">
+                <div class="flt-selection" aria-live="polite">
+                    <span>{{ __('frontend_list_template.records', ['count' => $stores->total()]) }}</span>
+                    <span class="flt-toolbar-divider" aria-hidden="true"></span>
+                    <span data-shopify-selected-count data-template="{{ __('frontend_list_template.selected_records', ['count' => '__count__']) }}">{{ __('frontend_list_template.selected_records', ['count' => 0]) }}</span>
+                    <button type="button" id="shopify-clear-selection" disabled>{{ __('logistics.shopify_stores.clear_selection') }}</button>
+                </div>
+                <div class="flt-toolbar-actions">
+                <button class="flt-btn" type="submit" form="shopify-batch-webhook-form" id="batch-webhook-button" disabled>
+                    <i class="fa fa-rss"></i> {{ __('logistics.shopify_stores.batch_webhook') }}
                 </button>
-                <button class="btn btn-success btn-sm" type="submit" form="shopify-batch-sync-form" id="batch-sync-button" disabled>
-                    <i class="fa fa-refresh"></i> 批量同步近{{ $manualSyncDays }}天
+                <button class="flt-btn flt-primary" type="submit" form="shopify-batch-sync-form" id="batch-sync-button" disabled>
+                    <i class="fa fa-refresh"></i> {{ __('logistics.shopify_stores.batch_sync', ['days' => $manualSyncDays]) }}
                 </button>
-                @include('portals.logistics.partials.pagination', ['paginator' => $stores, 'filters' => $filters, 'routeName' => 'logistics.shopify-stores.index'])
+                </div>
             </div>
-            <div class="box-body table-responsive no-padding logistics-shopify-stores-scroll">
-                <table class="table table-hover logistics-table logistics-shopify-stores-table">
+            <div class="flt-table-scroll shopify-store-table-scroll {{ $stores->isEmpty() ? 'is-empty' : '' }}" tabindex="0" aria-label="{{ __('logistics.shopify_stores.menu') }}">
+                <table class="shopify-store-table">
                     <thead>
                         <tr>
-                            <th class="logistics-sticky-left"><input id="shopify-store-check-all" type="checkbox" aria-label="全选店铺"></th>
-                            <th>店铺名称</th>
-                            <th>店铺登入网址</th>
-                            <th>店铺前缀</th>
-                            <th>通途前缀</th>
-                            <th>运营人员</th>
-                            <th>所属组</th>
-                            <th>Token 更新时间</th>
-                            <th>最近同步时间</th>
-                            <th>最近同步结果/失败原因</th>
-                            <th>Webhook 状态</th>
-                            <th>Webhook 更新时间</th>
-                            <th>Webhook 失败原因</th>
-                            <th class="logistics-action-column">操作</th>
+                            <th class="flt-check"><input id="shopify-store-check-all" type="checkbox" aria-label="{{ __('logistics.shopify_stores.check_all') }}"></th>
+                            <th scope="col">{{ __('logistics.shopify_stores.shop_name') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.login_url') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.store_prefix') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.tongtu_prefix') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.operator') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.team') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.token_time') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.last_sync') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.sync_message') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.webhook_status') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.webhook_time') }}</th>
+                            <th scope="col">{{ __('logistics.shopify_stores.webhook_error') }}</th>
+                            <th class="logistics-action-column" scope="col">{{ __('logistics.shopify_stores.actions') }}</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($stores as $store)
+                        @foreach($stores as $store)
                             @php
                                 $connection = $store->shopifyConnection;
-                                $tokenExpired = $connection?->token_obtained_at && (!$connection->token_expires_at || !$connection->token_expires_at->isFuture());
-                                $tokenClass = !$connection?->token_obtained_at ? 'label-default' : ($tokenExpired ? 'label-danger' : 'label-success');
-                                $tokenLabel = $connection?->token_obtained_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: '未获取';
-                                $tokenTitle = $connection?->token_expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ? '有效至 '.$connection->token_expires_at->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '';
-                                $hasConnectionFailure = $connection && ($connection->last_sync_status === 'failed' || $connection->webhook_status === 'failed');
+                                $teamLabel = \App\Models\AssistantDomainStore::displayMultiValue($store->team);
+                                $tokenLabel = $connection?->token_obtained_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: __('logistics.shopify_stores.token_missing');
+                                $tokenTitle = $connection?->token_expires_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ? __('logistics.shopify_stores.token_until', ['time' => $connection->token_expires_at->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')]) : '';
+                                $tokenIsAbnormal = !$connection?->token_obtained_at || !$connection?->token_expires_at?->isFuture();
+                                $hasConnectionFailure = $tokenIsAbnormal
+                                    || $connection?->webhook_status !== 'active'
+                                    || $connection?->last_sync_status === 'failed';
                             @endphp
                             <tr class="{{ $hasConnectionFailure ? 'logistics-row-failed' : '' }}">
-                                <td class="logistics-sticky-left"><input class="shopify-store-check" type="checkbox" value="{{ $store->id }}" aria-label="选择 {{ $store->shop_name }}"></td>
-                                <td>{{ $store->shop_name }}</td>
-                                <td class="logistics-url-cell">{{ $store->shop_login_url ?: '—' }}</td>
-                                <td>{{ $store->store_prefix ?: '—' }}</td>
-                                <td>{{ $store->tongtu_prefix ?: '—' }}</td>
-                                <td>{{ $store->user_name ?: '—' }}</td>
-                                <td>{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: '—' }}</td>
-                                <td><span class="label {{ $tokenClass }} logistics-tag" title="{{ $tokenTitle }}">{{ $tokenLabel }}</span></td>
+                                <td class="logistics-sticky-left"><input class="shopify-store-check" type="checkbox" value="{{ $store->id }}" aria-label="{{ __('logistics.shopify_stores.check_store', ['store' => $store->shop_name]) }}"></td>
+                                <td title="{{ $store->shop_name }}">{{ $store->shop_name }}</td>
+                                <td class="logistics-url-cell" title="{{ $store->shop_login_url }}">{{ $store->shop_login_url ?: '—' }}</td>
+                                <td title="{{ $store->store_prefix }}">{{ $store->store_prefix ?: '—' }}</td>
+                                <td title="{{ $store->tongtu_prefix }}">{{ $store->tongtu_prefix ?: '—' }}</td>
+                                <td title="{{ $store->user_name }}">{{ $store->user_name ?: '—' }}</td>
+                                <td title="{{ $teamLabel }}">{{ $teamLabel ?: '—' }}</td>
+                                <td><span title="{{ $tokenTitle }}">{{ $tokenLabel }}</span></td>
                                 <td>{{ $connection?->last_synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: '—' }}</td>
                                 <td class="logistics-message-cell">{{ $connection?->last_sync_message ?: '—' }}</td>
-                                <td><span class="label {{ $connection?->webhookStatusClass() ?: 'label-default' }} logistics-tag">{{ $connection?->webhook_status === 'active' ? '已登记' : ($connection?->webhook_status === 'failed' ? '登记失败' : '未登记') }}</span></td>
+                                <td>{{ __('logistics.shopify_stores.webhook_'.match($connection?->webhook_status) { 'active' => 'active', 'failed' => 'failed', default => 'missing' }) }}</td>
                                 <td>{{ $connection?->webhook_registered_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: '—' }}</td>
                                 <td class="logistics-message-cell">{{ $connection?->webhook_last_error ?: '—' }}</td>
                                 <td class="logistics-actions">
-                                    <form method="post" action="{{ route('logistics.shopify-stores.register-webhooks', $store) }}" class="logistics-inline-form">
-                                        @csrf
-                                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                                        <button class="btn btn-primary btn-xs" type="submit"><i class="fa fa-rss"></i> 登记 Webhook</button>
-                                    </form>
-                                    <form method="post" action="{{ route('logistics.shopify-stores.sync', $store) }}" class="logistics-inline-form">
-                                        @csrf
-                                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                                        <button class="btn btn-success btn-xs" type="submit" {{ isset($syncRunning) && $syncRunning ? 'disabled' : '' }}><i class="fa fa-refresh"></i> 同步近{{ $manualSyncDays }}天</button>
-                                    </form>
+                                    <div class="shopify-store-actions">
+                                        <form method="post" action="{{ route('logistics.shopify-stores.register-webhooks', $store) }}" class="logistics-inline-form">
+                                            @csrf
+                                            <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                                            <button class="flt-btn" type="submit">{{ __('logistics.shopify_stores.webhook_register') }}</button>
+                                        </form>
+                                        <form method="post" action="{{ route('logistics.shopify-stores.sync', $store) }}" class="logistics-inline-form">
+                                            @csrf
+                                            <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                                            <button class="flt-btn" type="submit" {{ isset($syncRunning) && $syncRunning ? 'disabled' : '' }}>{{ __('logistics.shopify_stores.sync_days', ['days' => $manualSyncDays]) }}</button>
+                                        </form>
+                                    </div>
                                 </td>
                             </tr>
-                        @empty
-                            <tr><td colspan="15" class="text-center text-muted">暂无符合条件的 Shopify 店铺。</td></tr>
-                        @endforelse
+                        @endforeach
                     </tbody>
                 </table>
             </div>
-            <div class="box-footer clearfix">
-                @include('portals.logistics.partials.pagination', ['paginator' => $stores, 'filters' => $filters, 'routeName' => 'logistics.shopify-stores.index'])
-            </div>
+            @if($stores->isEmpty())
+                <div class="flt-empty shopify-store-empty"><i class="fa fa-search" aria-hidden="true"></i><h4>{{ __('logistics.shopify_stores.empty') }}</h4><p>{{ __('logistics.shopify_stores.empty_hint') }}</p></div>
+            @endif
+            <nav class="flt-pagination" aria-label="{{ __('logistics.shopify_stores.pagination') }}" data-loading="region" data-loading-target=".flt-records">
+                <form method="get" action="{{ route('logistics.shopify-stores.index') }}">
+                    @foreach($filters as $field => $value)
+                        @if($field !== 'per_page')<input type="hidden" name="{{ $field }}" value="{{ $value }}">@endif
+                    @endforeach
+                    <label>{{ __('logistics.shopify_stores.per_page') }}
+                        <select name="per_page" onchange="this.form.requestSubmit()">
+                            @foreach([20, 50, 100] as $size)<option value="{{ $size }}" @selected($filters['per_page'] === $size)>{{ $size }}</option>@endforeach
+                        </select>
+                    </label>
+                </form>
+                @if($stores->previousPageUrl())<a class="flt-btn" href="{{ $stores->previousPageUrl() }}">{{ __('logistics.shopify_stores.previous') }}</a>
+                @else<button class="flt-btn" type="button" disabled>{{ __('logistics.shopify_stores.previous') }}</button>@endif
+                <strong>{{ __('logistics.shopify_stores.page_label', ['page' => $stores->currentPage(), 'pages' => $stores->lastPage()]) }}</strong>
+                @if($stores->nextPageUrl())<a class="flt-btn" href="{{ $stores->nextPageUrl() }}">{{ __('logistics.shopify_stores.next') }}</a>
+                @else<button class="flt-btn" type="button" disabled>{{ __('logistics.shopify_stores.next') }}</button>@endif
+                <form method="get" action="{{ route('logistics.shopify-stores.index') }}">
+                    @foreach($filters as $field => $value)<input type="hidden" name="{{ $field }}" value="{{ $value }}">@endforeach
+                    <label><span class="flt-sr-only">{{ __('logistics.shopify_stores.page') }}</span><input name="page" type="number" required min="1" max="{{ $stores->lastPage() }}" step="1" placeholder="{{ __('logistics.shopify_stores.page') }}"></label>
+                    <button class="flt-btn flt-primary" type="submit">{{ __('logistics.shopify_stores.jump') }}</button>
+                </form>
+            </nav>
         </div>
     </section>
 @endsection
 
 @push('scripts')
+    <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=3" defer></script>
     <script>
         (function () {
             var all = document.getElementById('shopify-store-check-all');
@@ -217,6 +276,8 @@
             var webhookButton = document.getElementById('batch-webhook-button');
             var syncForm = document.getElementById('shopify-batch-sync-form');
             var webhookForm = document.getElementById('shopify-batch-webhook-form');
+            var clearSelection = document.getElementById('shopify-clear-selection');
+            var counts = document.querySelectorAll('[data-shopify-selected-count]');
             var syncLocked = {{ isset($syncRunning) && $syncRunning ? 'true' : 'false' }};
             var items = function () { return Array.prototype.slice.call(document.querySelectorAll('.shopify-store-check')); };
             var selected = function () { return items().filter(function (item) { return item.checked; }); };
@@ -231,11 +292,16 @@
             };
             var refresh = function () {
                 var selectedItems = selected();
+                counts.forEach(function (count) { count.textContent = count.dataset.template.replace('__count__', selectedItems.length); });
+                clearSelection.disabled = selectedItems.length === 0;
+                all.disabled = items().length === 0;
+                items().forEach(function (item) { item.closest('tr').dataset.selected = item.checked ? '1' : '0'; });
                 syncButton.disabled = syncLocked || selectedItems.length === 0;
                 webhookButton.disabled = selectedItems.length === 0;
                 all.checked = items().length > 0 && selectedItems.length === items().length;
                 all.indeterminate = selectedItems.length > 0 && !all.checked;
             };
+            clearSelection.addEventListener('click', function () { items().forEach(function (item) { item.checked = false; }); refresh(); });
             all.addEventListener('change', function () { items().forEach(function (item) { item.checked = all.checked; }); refresh(); });
             items().forEach(function (item) { item.addEventListener('change', refresh); });
             syncForm.addEventListener('submit', function () { populate(syncForm); });
@@ -260,13 +326,9 @@
             var issueCount = panel.querySelector('[data-shopify-sync-issue-count]');
             var issueList = panel.querySelector('[data-shopify-sync-issue-list]');
             var reloading = false;
-            var labels = {
-                queued: 'Shopify 同步任务排队中',
-                processing: 'Shopify 店铺后台同步中',
-                cancelling: '正在停止 Shopify 同步任务',
-                cancelled: 'Shopify 同步已停止',
-                completed: 'Shopify 同步完成'
-            };
+            var labels = @json(__('logistics.shopify_stores.progress_status'));
+            var summaryText = @json(__('logistics.shopify_stores.progress_summary'));
+            var currentText = @json(__('logistics.shopify_stores.current_store'));
             var escapeHtml = function (value) {
                 var node = document.createElement('div');
                 node.textContent = value == null ? '' : String(value);
@@ -281,12 +343,12 @@
                 issues.classList.toggle('hide', rows.length === 0);
             };
             var render = function (data) {
-                title.textContent = labels[data.status] || 'Shopify 店铺后台同步中';
+                title.textContent = labels[data.status] || labels.processing;
                 percent.textContent = data.percent + '%';
                 bar.style.width = data.percent + '%';
-                summary.textContent = '已处理 ' + data.processed + ' / ' + data.total + ' 家；成功 ' + data.success + ' 家，失败 ' + data.failed + ' 家，已停止 ' + data.cancelled + ' 家；新增订单 ' + data.created_orders + ' 条，更新订单 ' + data.updated_orders + ' 条，Shopify SKU 缺失 ' + data.sku_exceptions + ' 单（' + data.sku_missing_items + ' / ' + data.sku_items + ' 个商品明细），未付款跳过 ' + data.skipped_unpaid + ' 条，Webhook 警告 ' + data.webhook_warnings + ' 家。';
+                summary.textContent = summaryText.replace(/:([a-z_]+)/g, function (key, name) { return data[name] ?? key; });
                 if (data.current_store) {
-                    current.innerHTML = '<i class="fa fa-building-o"></i> 当前店铺：<strong>' + escapeHtml(data.current_store) + '</strong>';
+                    current.innerHTML = '<i class="fa fa-building-o"></i> ' + escapeHtml(currentText) + '：<strong>' + escapeHtml(data.current_store) + '</strong>';
                     current.classList.remove('hide');
                 } else {
                     current.classList.add('hide');
@@ -311,7 +373,7 @@
                     if (!response.ok) { throw new Error('HTTP ' + response.status); }
                     return response.json();
                 }).then(render).catch(function () {
-                    title.textContent = '进度读取暂时失败，系统仍在后台同步';
+                    title.textContent = @json(__('logistics.shopify_stores.poll_failed'));
                 });
             };
 
