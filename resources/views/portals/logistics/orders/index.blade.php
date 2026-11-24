@@ -7,7 +7,7 @@
     $advancedFilterCount = collect($filters)->except([
         'per_page', 'id', 'shopify_order_number', 'tongtu_order_number', 'shopify_order_id', 'shopify_sku',
         'product_name', 'store_domain', 'shopify_sku_status', 'product_runnable_status', 'store_name', 'owner_assignment', 'group_names',
-    ])->filter(fn ($value) => $value !== '')->count();
+    ])->filter(fn ($value) => $value !== '' && $value !== [])->count();
     $display = static function ($value): string {
         if ($value === null || $value === '') return '—';
         if (is_string($value) && preg_match('/^-?\d+\.\d{1,4}$/', $value)) return rtrim(rtrim($value, '0'), '.');
@@ -72,7 +72,8 @@
             <h3 class="orders-filter-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __('logistics.orders.list.filters') }}</h3>
             <form method="get" action="{{ route('logistics.orders.index') }}" class="logistics-filter-form" data-loading="region" data-loading-target=".logistics-orders-scroll"
                 data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
-                data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}">
+                data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}"
+                data-selected-options="{{ __('frontend_list_template.selected_options', ['names' => '__names__', 'count' => '__count__']) }}">
                 <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                 <div class="flt-filter-grid">
                     <div><label class="orders-field-label" for="orders-filter-id">{{ __('logistics.orders.list.field_id') }}</label><input class="form-control" name="id" id="orders-filter-id" value="{{ $filters['id'] }}" placeholder="{{ __('logistics.orders.list.placeholder_id') }}"></div>
@@ -97,7 +98,7 @@
                         <div><label class="orders-field-label" for="orders-filter-source_shop_domain">{{ __('logistics.orders.list.field_source_shop_domain') }}</label><select class="form-control" name="source_shop_domain" id="orders-filter-source_shop_domain"><option value="">{{ __('logistics.orders.list.choose_source') }}</option>@foreach($filterOptions['sourceDomains'] as $value)<option value="{{ $value }}" @selected($filters['source_shop_domain'] === $value)>{{ $value }}</option>@endforeach</select></div>
                         <div><label class="orders-field-label" for="orders-filter-store_assignment_status">{{ __('logistics.orders.list.field_store_assignment_status') }}</label><select class="form-control" name="store_assignment_status" id="orders-filter-store_assignment_status"><option value="">{{ __('logistics.common.all') }}</option><option value="assigned" @selected($filters['store_assignment_status'] === 'assigned')>{{ __('logistics.orders.list.assigned') }}</option><option value="unmatched" @selected($filters['store_assignment_status'] === 'unmatched')>{{ __('logistics.orders.list.unmatched') }}</option></select></div>
                         <div><label class="orders-field-label" for="orders-filter-is_add_on">{{ __('logistics.orders.list.field_is_add_on') }}</label><select class="form-control" name="is_add_on" id="orders-filter-is_add_on"><option value="">{{ __('logistics.orders.list.choose_add_on') }}</option><option value="已加购" @selected($filters['is_add_on'] === '已加购')>{{ __('logistics.orders.list.added') }}</option><option value="未加购" @selected($filters['is_add_on'] === '未加购')>{{ __('logistics.orders.list.not_added') }}</option></select></div>
-                        <div><label class="orders-field-label" for="orders-filter-subscription_type">{{ __('logistics.orders.list.field_subscription_type') }}</label><select class="form-control" name="subscription_type" id="orders-filter-subscription_type"><option value="">{{ __('logistics.orders.list.choose_subscription') }}</option>@foreach($filterOptions['subscriptionTypes'] as $value)<option value="{{ $value }}" @selected($filters['subscription_type'] === $value)>{{ $value }}</option>@endforeach</select></div>
+                        <div><label class="orders-field-label" for="orders-filter-subscription_type">{{ __('logistics.orders.list.field_subscription_type') }}</label><select class="form-control" name="subscription_type[]" id="orders-filter-subscription_type" multiple data-filter-searchable><option value="" disabled>{{ __('logistics.orders.list.choose_subscription') }}</option>@foreach($filterOptions['subscriptionTypes'] as $value)<option value="{{ $value }}" @selected(in_array($value, $filters['subscription_type'], true))>{{ $value }}</option>@endforeach</select></div>
                         <div><label class="orders-field-label" for="orders-filter-payment_method">{{ __('logistics.orders.list.field_payment_method') }}</label><select class="form-control" name="payment_method" id="orders-filter-payment_method"><option value="">{{ __('logistics.orders.list.choose_payment_method') }}</option>@foreach($filterOptions['paymentMethods'] as $value)<option value="{{ $value }}" @selected($filters['payment_method'] === $value)>{{ $value }}</option>@endforeach</select></div>
                         <div><label class="orders-field-label" for="orders-filter-payment_gateway">{{ __('logistics.orders.list.field_payment_gateway') }}</label><select class="form-control" name="payment_gateway" id="orders-filter-payment_gateway"><option value="">{{ __('logistics.orders.list.choose_payment_gateway') }}</option>@foreach($filterOptions['paymentGateways'] as $value)<option value="{{ $value }}" @selected($filters['payment_gateway'] === $value)>{{ $value }}</option>@endforeach</select></div>
                         <div><label class="orders-field-label" for="orders-filter-collection_account">{{ __('logistics.orders.list.field_collection_account') }}</label><select class="form-control" name="collection_account" id="orders-filter-collection_account"><option value="">{{ __('logistics.orders.list.all_collection_accounts') }}</option>@foreach($filterOptions['collectionAccounts'] as $value)<option value="{{ $value }}" @selected($filters['collection_account'] === $value)>{{ $value }}</option>@endforeach</select></div>
@@ -319,7 +320,9 @@
                     <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target=".logistics-orders-scroll">
                         @foreach ($filters as $filterName => $filterValue)
                             @if ($filterName !== 'per_page')
-                                <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                                @foreach ((array) $filterValue as $value)
+                                    <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                                @endforeach
                             @endif
                         @endforeach
                         <label>{{ __('logistics.orders.list.per_page') }}
@@ -345,7 +348,9 @@
                     </nav>
                     <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target=".logistics-orders-scroll">
                         @foreach ($filters as $filterName => $filterValue)
-                            <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                            @foreach ((array) $filterValue as $value)
+                                <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                            @endforeach
                         @endforeach
                         <label><span class="flt-sr-only">{{ __('logistics.orders.list.page') }}</span><input type="number" name="page" min="1" max="{{ $orders->lastPage() }}" required placeholder="{{ __('logistics.orders.list.page') }}"></label>
                         <button type="submit" class="flt-btn flt-primary">{{ __('logistics.orders.list.jump') }}</button>
@@ -361,7 +366,9 @@
                 <form method="post" action="{{ route('logistics.orders.export') }}" class="modal-content" id="logistics-order-export-form" data-loading="download" data-selection-required="{{ __('logistics.orders.list.export_selection_required') }}">
                     @csrf
                     @foreach ($filters as $filterName => $filterValue)
-                        <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                        @foreach ((array) $filterValue as $value)
+                            <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                        @endforeach
                     @endforeach
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal" aria-label="{{ __('logistics.common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -592,5 +599,5 @@
         }());
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-2"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=6" defer></script>
+    <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=7" defer></script>
 @endpush

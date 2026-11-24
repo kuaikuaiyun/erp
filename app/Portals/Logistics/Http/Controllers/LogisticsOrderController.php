@@ -959,7 +959,7 @@ class LogisticsOrderController extends Controller
         return $context;
     }
 
-    /** @return array<string, string|int> */
+    /** @return array<string, string|int|list<string>> */
     private function filters(Request $request): array
     {
         $perPage = (int) $request->input('per_page', 20);
@@ -970,7 +970,7 @@ class LogisticsOrderController extends Controller
         $fields = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'owner_assignment', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
-            'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
+            'buyer_phone', 'is_add_on', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account', 'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
             'source_shop_domain', 'store_domain', 'product_name', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
@@ -981,6 +981,12 @@ class LogisticsOrderController extends Controller
             $value = $request->input($field, '');
             $filters[$field] = is_scalar($value) ? trim((string) $value) : '';
         }
+
+        $subscriptionTypes = $request->input('subscription_type', []);
+        $filters['subscription_type'] = array_values(array_unique(array_filter(
+            array_map(static fn ($value): string => is_scalar($value) ? trim((string) $value) : '', (array) $subscriptionTypes),
+            static fn (string $value): bool => $value !== '',
+        )));
 
         foreach (['refunded', 'ordered', 'paid'] as $prefix) {
             foreach (['from', 'to'] as $suffix) {
@@ -1004,14 +1010,14 @@ class LogisticsOrderController extends Controller
             });
     }
 
-    /** @param array<string, string|int> $filters */
+    /** @param array<string, string|int|list<string>> $filters */
     private function orderQuery(array $filters): Builder
     {
         $query = $this->listedOrders();
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'group_names', 'staff_status', 'buyer_name', 'buyer_email',
-            'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
+            'buyer_phone', 'is_add_on', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'logistics_status', 'data_status',
             'time_zone', 'source_shop_domain',
         ];
@@ -1019,6 +1025,14 @@ class LogisticsOrderController extends Controller
             if ($filters[$column] !== '') {
                 $query->where($column, 'like', $this->contains((string) $filters[$column]));
             }
+        }
+
+        if ($filters['subscription_type'] !== []) {
+            $query->where(function (Builder $types) use ($filters): void {
+                foreach ($filters['subscription_type'] as $type) {
+                    $types->orWhere('subscription_type', 'like', $this->contains($type));
+                }
+            });
         }
 
         if ($filters['collection_account'] !== '') {

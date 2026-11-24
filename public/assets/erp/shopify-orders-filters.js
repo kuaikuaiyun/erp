@@ -68,20 +68,26 @@
             clear.type = 'button';
             clear.className = 'flt-picker-clear';
             clear.textContent = form.dataset.clearChoice;
-            clear.addEventListener('click', () => choose(''));
+            clear.addEventListener('click', function () {
+                select.selectedIndex = -1;
+                if (!select.multiple) select.value = '';
+                updateSelection();
+                picker.open = false;
+                summary.focus();
+            });
             panel.append(options, clear);
 
             function updateSummary() {
-                const selected = select.selectedOptions[0] || emptyOption;
-                summary.textContent = selected.label;
-                summary.title = selected.label;
+                const names = Array.from(select.selectedOptions, option => option.label);
+                const caption = select.multiple && names.length > 1
+                    ? form.dataset.selectedOptions.replace('__count__', names.length).replace('__names__', names.join('、'))
+                    : (names[0] || emptyOption.label);
+                summary.textContent = caption;
+                summary.title = caption;
             }
 
-            function choose(value) {
-                select.value = value;
+            function updateSelection() {
                 select.dispatchEvent(new Event('change', { bubbles: true }));
-                picker.open = false;
-                summary.focus();
             }
 
             function drawOptions() {
@@ -99,14 +105,22 @@
 
                 visible.forEach(function (option) {
                     const label = document.createElement('label');
-                    const radio = document.createElement('input');
+                    const input = document.createElement('input');
                     const text = document.createElement('span');
-                    radio.type = 'radio';
-                    radio.checked = option.selected;
-                    radio.disabled = option.disabled;
-                    radio.addEventListener('click', () => choose(option.value));
+                    input.type = select.multiple ? 'checkbox' : 'radio';
+                    input.checked = option.selected;
+                    input.disabled = option.disabled;
+                    input.addEventListener('click', function () {
+                        if (select.multiple) option.selected = input.checked;
+                        else select.value = option.value;
+                        updateSelection();
+                        if (!select.multiple) {
+                            picker.open = false;
+                            summary.focus();
+                        }
+                    });
                     text.textContent = option.label;
-                    label.append(radio, text);
+                    label.append(input, text);
                     options.append(label);
                 });
             }
