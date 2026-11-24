@@ -84,43 +84,65 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261117-1">
+    @if(($portal->code ?? '') === 'yunying')
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-20">
+    <style>
+    .operation-placement-template.flt{padding:15px}.operation-placement-template .operation-placement-filters{margin-bottom:15px;padding:18px 20px 15px}.operation-placement-filter-grid{display:grid;grid-template-columns:minmax(260px,1.6fr) repeat(4,minmax(150px,1fr));align-items:start;gap:14px 18px}.operation-placement-filter-grid>label>input{margin-top:8px}.operation-placement-filter-grid .operation-ai-template-picker-field{min-width:0}.operation-placement-filter-grid .flt-field-label{margin-bottom:8px}.operation-placement-filter-grid .flt-picker-panel{z-index:108}.operation-placement-filter-grid .operation-ai-template-picker-search{min-height:34px!important;margin-bottom:5px;padding:7px 10px!important}.operation-placement-filter-grid .flt-picker-options{margin-top:0}.operation-placement-filter-grid .flt-picker-options label{font-weight:400}.operation-placement-filter-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:13px}.operation-placement-records{overflow:hidden}.operation-placement-records .flt-toolbar{padding:12px 18px}.operation-placement-table-scroll{max-height:calc(100vh - 300px);overflow:auto}.operation-placement-table{min-width:1320px!important;margin:0!important;border-collapse:separate!important;border-spacing:0!important;table-layout:fixed}.operation-placement-table thead th{position:sticky;top:0;z-index:4;padding:11px 10px!important;background:#eaf4fa!important;color:#345c75!important;border-right:1px solid #dce8ef!important}.operation-placement-table tbody td{padding:11px 10px!important;border-right:1px solid #e7eef3!important;border-bottom:1px solid #e7eef3!important}.operation-placement-table tbody tr:nth-child(odd)>td{background:#fff}.operation-placement-table tbody tr:nth-child(even)>td{background:#f3f9fd}.operation-placement-table tbody tr:hover>td{background:#eaf5fb!important}.operation-ai-template-pagination{border-top:1px solid #e3edf4}.operation-ai-template-pagination .operation-ai-pagination-total{margin-right:auto}.operation-ai-template-pagination .operation-ai-page-size{margin-right:auto}.operation-ai-template-pagination .is-disabled{pointer-events:none;opacity:.45}.operation-ai-template-pagination form{display:flex;align-items:center;gap:8px;margin:0}.operation-ai-template-pagination input[type=hidden]{display:none}.operation-ai-template-pagination .operation-ai-page-jump input{width:64px!important}@media(max-width:1400px){.operation-placement-filter-grid{grid-template-columns:repeat(3,minmax(180px,1fr))}}@media(max-width:900px){.operation-placement-filter-grid{grid-template-columns:repeat(2,minmax(180px,1fr))}}@media(max-width:650px){.operation-placement-template.flt{padding:10px}.operation-placement-filter-grid{grid-template-columns:1fr}.operation-ai-template-pagination{justify-content:center}.operation-ai-template-pagination .operation-ai-pagination-total,.operation-ai-template-pagination .operation-ai-page-size{width:100%;margin:0;justify-content:center}}
+    </style>
+    @endif
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
     <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261118-1"></script>
+    @if(($portal->code ?? '') === 'yunying')
+    <script>
+    document.addEventListener('DOMContentLoaded',function(){
+        var pickers=Array.prototype.slice.call(document.querySelectorAll('[data-operation-ai-template-picker]'));
+        pickers.forEach(function(picker){
+            var summary=picker.querySelector('[data-picker-summary]'),search=picker.querySelector('[data-picker-search]'),options=picker.querySelectorAll('[data-picker-option]'),empty=picker.querySelector('[data-picker-empty]');
+            picker.querySelectorAll('input[type="radio"]').forEach(function(input){input.addEventListener('change',function(){summary.textContent=input.closest('label').querySelector('span').textContent;picker.removeAttribute('open');});});
+            if(search)search.addEventListener('input',function(){var keyword=search.value.trim().toLowerCase(),visible=0;options.forEach(function(option){var show=!keyword||option.textContent.toLowerCase().indexOf(keyword)!==-1;option.hidden=!show;if(show)visible++;});empty.hidden=visible!==0;});
+            picker.addEventListener('toggle',function(){if(picker.open&&search){search.value='';options.forEach(function(option){option.hidden=false;});empty.hidden=true;setTimeout(function(){search.focus();},0);}});
+        });
+        document.addEventListener('click',function(event){pickers.forEach(function(picker){if(!picker.contains(event.target))picker.removeAttribute('open');});});
+    });
+    </script>
+    @endif
 @endpush
 
 @section('content')
-<section class="content aikaipin-submission-page" data-aikaipin-submission-page="placement-evaluation">
-    <div class="box box-solid aikaipin-submission-filter-box">
-        <div class="box-body">
-            <form class="aikaipin-submission-filter-form" method="get" action="{{ route($placementRouteNames['index']) }}" data-aikaipin-list-filter-form>
-                <div class="aikaipin-submission-filter-grid">
-                    <div class="aikaipin-submission-filter-field">
-                        <label for="aikaipin-placement-evaluation-keyword">{{ $t('placement_evaluation.filters.keyword') }}</label>
-                        <input id="aikaipin-placement-evaluation-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off"
-                            placeholder="{{ $t('placement_evaluation.filters.keyword_placeholder') }}" data-aikaipin-list-filter>
-                    </div>
-                    <div class="aikaipin-submission-filter-actions">
-                        <button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ $t('placement_evaluation.filters.search') }}</button>
-                        <a class="btn btn-default" href="{{ route($placementRouteNames['index']) }}"><i class="fa fa-undo" aria-hidden="true"></i> {{ $t('placement_evaluation.filters.reset') }}</a>
-                    </div>
-                </div>
-            </form>
+<section class="content aikaipin-submission-page {{ ($portal->code ?? '') === 'yunying' ? 'flt operation-placement-template' : '' }}" data-aikaipin-submission-page="placement-evaluation">
+    @if(($portal->code ?? '') === 'yunying')
+    <form class="flt-card flt-filters operation-placement-filters" method="get" action="{{ route($placementRouteNames['index']) }}" data-aikaipin-list-filter-form>
+        <div class="operation-placement-filter-grid">
+            <label>{{ $t('placement_evaluation.filters.keyword') }}<input type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off" placeholder="{{ $t('placement_evaluation.filters.keyword_placeholder') }}" data-aikaipin-list-filter></label>
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.category'),'name'=>'category','selected'=>$filters['category'],'options'=>[''=>__('aikaipin.filters.all')] + collect($categories)->mapWithKeys(fn($category)=>[$category=>$category])->all(),'searchable'=>true])
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.source'),'name'=>'source','selected'=>$filters['source'],'options'=>[''=>__('aikaipin.filters.all')] + trans('aikaipin.upload.source_options')])
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.type'),'name'=>'type','selected'=>$filters['type'],'options'=>[''=>__('aikaipin.filters.all')] + trans('aikaipin.upload.type_options')])
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>'测评状态','name'=>'evaluation_status','selected'=>$filters['evaluation_status'],'options'=>[''=>'全部状态','evaluated'=>'已测评','unevaluated'=>'未测评']])
+            <input type="hidden" name="per_page" value="{{ $filters['per_page'] ?? 15 }}">
         </div>
-    </div>
+        <div class="operation-placement-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ $t('placement_evaluation.filters.search') }}</button><a class="flt-btn" href="{{ route($placementRouteNames['index']) }}"><i class="fa fa-refresh"></i> {{ $t('placement_evaluation.filters.reset') }}</a></div>
+    </form>
+    @else
+    <div class="box box-solid aikaipin-submission-filter-box"><div class="box-body"><form class="aikaipin-submission-filter-form" method="get" action="{{ route($placementRouteNames['index']) }}" data-aikaipin-list-filter-form><div class="aikaipin-submission-filter-grid"><div class="aikaipin-submission-filter-field"><label for="aikaipin-placement-evaluation-keyword">{{ $t('placement_evaluation.filters.keyword') }}</label><input id="aikaipin-placement-evaluation-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off" placeholder="{{ $t('placement_evaluation.filters.keyword_placeholder') }}" data-aikaipin-list-filter></div><div class="aikaipin-submission-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('placement_evaluation.filters.search') }}</button><a class="btn btn-default" href="{{ route($placementRouteNames['index']) }}"><i class="fa fa-undo"></i> {{ $t('placement_evaluation.filters.reset') }}</a></div></div></form></div></div>
+    @endif
 
-    <div class="box box-solid aikaipin-submission-list-box">
+    <div class="{{ ($portal->code ?? '') === 'yunying' ? 'flt-card flt-records operation-placement-records' : 'box box-solid aikaipin-submission-list-box' }}">
+        @if(($portal->code ?? '') === 'yunying')
+        <div class="flt-toolbar"><div class="flt-selection"><i class="fa fa-line-chart"></i><span>共 {{ $products->total() }} 个产品</span></div></div>
+        @else
         <div class="box-header with-border aikaipin-submission-list-toolbar">
             <div class="aikaipin-submission-list-toolbar-summary">
                 <i class="fa fa-line-chart" aria-hidden="true"></i>
                 <span>共 {{ $products->total() }} 个产品</span>
             </div>
         </div>
-        <div class="box-body no-padding">
-            <div class="table-responsive">
-                <table class="table table-hover aikaipin-submission-table aikaipin-placement-evaluation-table">
+        @endif
+        <div class="{{ ($portal->code ?? '') === 'yunying' ? 'flt-table-scroll operation-placement-table-scroll' : 'box-body no-padding' }}">
+            <div class="{{ ($portal->code ?? '') === 'yunying' ? '' : 'table-responsive' }}">
+                <table class="{{ ($portal->code ?? '') === 'yunying' ? 'operation-placement-table' : 'table table-hover' }} aikaipin-submission-table aikaipin-placement-evaluation-table">
                     <thead>
                     <tr>
                         <th class="aikaipin-placement-product-image-column">产品图片</th><th class="aikaipin-placement-product-code-column">产品编号</th><th class="aikaipin-placement-product-name-column">产品名称</th><th class="aikaipin-placement-product-category-column">产品分类</th>
@@ -172,7 +194,7 @@
                             <td class="aikaipin-placement-product-count-cell"><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
                             <td class="aikaipin-placement-product-updated-cell">{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
                             <td class="aikaipin-placement-product-status-cell">@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>
-                            <td class="aikaipin-placement-product-action-cell"><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route($placementRouteNames['product_show'], $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
+                            <td class="aikaipin-placement-product-action-cell"><button class="{{ ($portal->code ?? '') === 'yunying' ? 'flt-row-action' : 'btn btn-default btn-sm' }}" type="button" data-aikaipin-product-placement-view data-url="{{ route($placementRouteNames['product_show'], $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
                         </tr>
                     @endforeach
                     <tr data-aikaipin-list-empty-row @if ($products->isNotEmpty()) hidden @endif>
@@ -188,9 +210,11 @@
             </div>
         </div>
         @if ($products->isNotEmpty())
-            <div class="box-footer aikaipin-submission-pagination">
-                @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])
-            </div>
+            @if(($portal->code ?? '') === 'yunying')
+                @include('portals.operation.ai-product-library.partials.pagination', ['paginator' => $products])
+            @else
+                <div class="box-footer aikaipin-submission-pagination">@include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])</div>
+            @endif
         @endif
     </div>
 </section>
