@@ -1,6 +1,20 @@
 <?php
 
 return [
+    'shopify_store_alerts' => [
+        'not_registered' => '未登记 :count',
+        'abnormal' => '异常 :count',
+        'hint' => '仅统计在用Shopify店铺。未登记指Webhook未登记；异常包含连接、Webhook登记或最近订单同步失败，异常按店铺去重。两类可重叠。',
+    ],
+    'missing_tongtu_sync' => [
+        'actions' => '操作',
+        'sync' => '同步该店铺',
+        'hint' => '复用现有Shopify后台队列同步该店铺近180天订单，提交后进入店铺页查看进度。',
+        'unmatched' => '未唯一匹配到在用Shopify店铺，请先核对店铺域名。',
+        'ambiguous' => '该域名对应多个在用Shopify店铺，请到店铺列表确认后同步。',
+        'busy' => '该店铺已有同步任务，请等待当前任务完成。',
+        'unavailable' => '暂不可同步',
+    ],
     'common' => [
         'historical_domain_unknown' => '历史域名未确定',
         'store_domain' => '店铺域名',

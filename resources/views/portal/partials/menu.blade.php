@@ -77,6 +77,12 @@
         <a href="{{ $href }}">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($portal->code === 'wuliu' && $menu->code === 'logistics_shopify_stores' && (($shopifyStoreAlertCounts['not_registered'] ?? 0) > 0 || ($shopifyStoreAlertCounts['abnormal'] ?? 0) > 0))
+            <span class="shopify-store-menu-alerts" title="{{ __('logistics.shopify_store_alerts.hint') }}">
+                @if(($shopifyStoreAlertCounts['not_registered'] ?? 0) > 0)<span class="shopify-store-menu-alert shopify-store-menu-alert-warning">{{ __('logistics.shopify_store_alerts.not_registered', ['count'=>$shopifyStoreAlertCounts['not_registered']]) }}</span>@endif
+                @if(($shopifyStoreAlertCounts['abnormal'] ?? 0) > 0)<span class="shopify-store-menu-alert shopify-store-menu-alert-danger">{{ __('logistics.shopify_store_alerts.abnormal', ['count'=>$shopifyStoreAlertCounts['abnormal']]) }}</span>@endif
+            </span>
+            @endif
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
             <span class="operation-rejected-count" title="复盘被驳回待修改">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
             @endif

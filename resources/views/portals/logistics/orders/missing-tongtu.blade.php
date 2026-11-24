@@ -30,6 +30,9 @@
         .tongtu-check .result-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
         .tongtu-check .result-footer .logistics-pagination-control { flex-wrap: wrap; }
         .tongtu-check .empty { text-align: center; color: #526a7b; padding: 28px 18px; }
+        .tongtu-check .store-sync-cell { min-width: 160px; width: 180px; }
+        .tongtu-check .store-sync-cell form { margin: 0; }
+        .tongtu-check .store-sync-cell small { display: block; max-width: 240px; margin-top: 5px; font-weight: normal; }
     </style>
     <section class="content-header">
         <h1>缺失通途订单核对</h1>
@@ -92,7 +95,7 @@
             <div class="table-responsive">
                 <table class="table table-striped table-hover results-table">
                     <thead>
-                        <tr><th scope="col">店铺域名</th><th scope="col">通途订单号</th></tr>
+                        <tr><th scope="col">店铺域名</th><th scope="col">通途订单号</th>@if($canSyncMissingTongtuStores)<th scope="col" class="store-sync-cell">{{ __('logistics.missing_tongtu_sync.actions') }}</th>@endif</tr>
                     </thead>
                     <tbody>
                         @forelse ($orders as $group)
@@ -119,9 +122,23 @@
                                         </details>
                                     @endif
                                 </td>
+                                @if($canSyncMissingTongtuStores)
+                                @php($syncStore = $missingTongtuSyncStores[$group['domain'] ?? ''] ?? ['store'=>null,'reason'=>'unmatched','busy'=>false])
+                                <td class="store-sync-cell">
+                                    @if($syncStore['store'] && !$syncStore['busy'])
+                                    <form method="post" action="{{ route('logistics.shopify-stores.sync', $syncStore['store']) }}" data-loading="page">
+                                        @csrf
+                                        <button type="submit" class="btn btn-primary btn-sm" title="{{ __('logistics.missing_tongtu_sync.hint') }}"><i class="fa fa-refresh" aria-hidden="true"></i> {{ __('logistics.missing_tongtu_sync.sync') }}</button>
+                                    </form>
+                                    @else
+                                    <button type="button" class="btn btn-default btn-sm" disabled>{{ __('logistics.missing_tongtu_sync.unavailable') }}</button>
+                                    <small class="text-muted">{{ __('logistics.missing_tongtu_sync.'.($syncStore['busy'] ? 'busy' : $syncStore['reason'])) }}</small>
+                                    @endif
+                                </td>
+                                @endif
                             </tr>
                         @empty
-                            <tr><td colspan="2" class="empty">{{ $lastSync ? '已同步的数据中没有符合筛选条件的缺失订单。' : '所选日期暂无已同步数据。' }}</td></tr>
+                            <tr><td colspan="{{ $canSyncMissingTongtuStores ? 3 : 2 }}" class="empty">{{ $lastSync ? '已同步的数据中没有符合筛选条件的缺失订单。' : '所选日期暂无已同步数据。' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>

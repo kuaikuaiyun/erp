@@ -1,0 +1,7 @@
+.portal-admin-shell .sidebar-menu .shopify-store-menu-alerts { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 5px 0 0 24px; padding: 0; white-space: normal; }
+.portal-admin-shell .sidebar-menu .shopify-store-menu-alert { display: inline-block; padding: 2px 5px; border-radius: 3px; font-size: 11px; font-weight: 600; line-height: 15px; white-space: nowrap; }
+.portal-admin-shell .sidebar-menu .shopify-store-menu-alert-warning { background: #f9d58a; color: #61420e; }
+.portal-admin-shell .sidebar-menu .shopify-store-menu-alert-danger { background: #e77a7a; color: #fff; }
+@media (min-width: 768px) {
+    .portal-admin-shell.sidebar-collapse .sidebar-menu > li:not(:hover) > a .shopify-store-menu-alerts { display: none; }
+}

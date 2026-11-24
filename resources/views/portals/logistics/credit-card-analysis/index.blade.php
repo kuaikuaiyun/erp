@@ -27,7 +27,7 @@
 
 @push('styles')
 <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-<link rel="stylesheet" href="{{ $origin }}/assets/erp/credit-card-analysis.css?v=20261123-1">
+<link rel="stylesheet" href="{{ $origin }}/assets/erp/credit-card-analysis.css?v=20261124-1">
 @endpush
 
 @section('content')

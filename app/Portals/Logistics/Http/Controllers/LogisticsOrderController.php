@@ -342,6 +342,7 @@ class LogisticsOrderController extends Controller
 
         $orders = $this->paginateMissingTongtuOrders($groups, $perPage)->appends($paginationFilters);
         $checkUrl = $domains->portalPath($context['portal'], $menu->path);
+        $canSyncStores = $context['portal']->menus->contains(fn ($item) => $item->code === 'logistics_shopify_stores' && $item->is_enabled);
 
         return view('portals.logistics.orders.missing-tongtu', [
             ...$this->viewContext($context),
@@ -358,7 +359,38 @@ class LogisticsOrderController extends Controller
             'coverageFrom' => $coverageFrom,
             'coverageTo' => $coverageTo,
             'lastSync' => $lastSync,
+            'canSyncMissingTongtuStores' => $canSyncStores,
+            'missingTongtuSyncStores' => $canSyncStores ? $this->missingTongtuSyncStores($orders->getCollection()) : [],
         ]);
+    }
+
+    /** Match each displayed domain once; ambiguous domains must never choose a store implicitly. */
+    private function missingTongtuSyncStores(Collection $groups): array
+    {
+        if ($groups->isEmpty()) return [];
+        $stores = AssistantDomainStore::query()->where('site_builder', 'shopify')
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
+            ->get(['id', 'domain', 'shop_name'])
+            ->groupBy(fn ($store) => TongtuOrderSnapshotService::domain($store->domain) ?? '');
+        $candidates = [];
+        foreach ($groups as $group) {
+            $domain = TongtuOrderSnapshotService::domain($group['domain'] ?? null) ?? '';
+            $matches = $domain === '' ? collect() : $stores->get($domain, collect());
+            $candidates[$group['domain'] ?? ''] = [
+                'store' => $matches->count() === 1 ? $matches->first() : null,
+                'reason' => $matches->count() > 1 ? 'ambiguous' : 'unmatched',
+                'busy' => false,
+            ];
+        }
+        $ids = collect($candidates)->pluck('store')->filter()->map(fn ($store) => $store->getKey());
+        $busy = $ids->isEmpty() ? [] : \App\Models\LogisticsShopifySyncTask::query()
+            ->whereIn('assistant_domain_store_id', $ids)->whereIn('status', \App\Models\LogisticsShopifySyncTask::activeStatuses())
+            ->distinct()->pluck('assistant_domain_store_id')->all();
+        foreach ($candidates as &$candidate) {
+            $candidate['busy'] = $candidate['store'] !== null && in_array($candidate['store']->getKey(), $busy);
+        }
+        unset($candidate);
+        return $candidates;
     }
 
     private function matchingMissingTongtuOrders(QueryBuilder $query, string $storeDomain): iterable

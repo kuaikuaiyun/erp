@@ -6,6 +6,8 @@
 .credit-card-analysis-table .ca-dispute-select-cell { min-width: 46px; width: 46px; padding: 10px 6px !important; text-align: center; }
 .credit-card-analysis-table td:last-child, .credit-card-analysis-table th:last-child { position: sticky; right: 0; min-width: 145px; width: 145px; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
 .credit-card-analysis-table td:last-child { z-index: 2; background: #fff; }
+.credit-card-analysis-table thead th { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 #bdcad7, 0 3px 7px rgba(42, 67, 94, .09); }
+.credit-card-analysis-table thead th:last-child { z-index: 6; }
 .credit-card-analysis-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }
 .credit-card-analysis-table.table-hover tbody tr:hover > td:last-child { background: #edf5fb !important; }
 .credit-card-analysis-table tbody tr.ca-record-handled > td { background: #a7e9bb !important; border-color: #8edca6 !important; }

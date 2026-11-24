@@ -20,6 +20,9 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/sidebar-layout.css?v=20261111-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/admin-notifications.css?v=20260929-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/portal-shell.css?v=20261006-2">
+    @if(($portal->code ?? null) === 'wuliu')
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/shopify-store-alerts.css?v=20261124-1">
+    @endif
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.css?v=20261011-3">
 @if (($portal->code ?? null) === 'fuzhuang' || request()->routeIs('operation-tasks.*'))
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/operation-tasks.css?v=20261111-14">
@@ -36,6 +39,10 @@
         : ($greetingHour < 18 ? 'admin.greeting.afternoon' : 'admin.greeting.evening');
     $greeting = trans($greetingKey, ['name' => $user->name]);
     $footer = app(\App\Services\SystemSettingService::class)->footer();
+    $shopifyStoreAlertCounts = $portal->code === 'wuliu'
+        && $portal->menus->contains(fn ($menu) => $menu->code === 'logistics_shopify_stores' && $menu->is_enabled)
+        ? app(\App\Portals\Logistics\ShopifyStoreAlertService::class)->counts()
+        : [];
     $assistantDailyPendingCounts = $portal->code === 'zhuli'
         ? app(\App\Portals\Assistant\AssistantDailySubmissionPendingCountService::class)->forUser($user)
         : [];
