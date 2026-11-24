@@ -5,95 +5,102 @@
 @php
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
     $t = static fn (string $key, array $replace = []): string => __('ai_products.'.$key, $replace);
+    $query = request()->query();
+    $currentPage = $submissions->currentPage();
+    $lastPage = max(1, $submissions->lastPage());
+    $selectedStatus = (string) ($filters['review_status'] ?? '');
+    $selectedStatusLabel = $selectedStatus === '' ? $t('common.all') : ($statusLabels[$selectedStatus] ?? $t('common.all'));
 @endphp
+
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261022-01">
+<link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-22">
 <style>
-.ai-status-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;line-height:16px;white-space:nowrap}
-.ai-status-pending{background:#fcf8e3;color:#8a6d3b;border:1px solid #faebcc}
-.ai-status-approved{background:#dff0d8;color:#3c763d;border:1px solid #d6e9c6}
-.ai-status-rejected{background:#fdeaea;color:#a94442;border:1px solid #f2cfcf}
-.ai-product-option-category{color:#8a8a8a;font-size:12px;margin-left:6px}
-.ai-product-modal-hint{display:block;margin-top:6px;color:#999;font-size:12px}
-.ai-product-actions{white-space:nowrap}
-.ai-product-delete-form{display:inline}
+.ai-product-operation-page{padding:15px}.ai-product-operation-page>.content-header{padding:0 0 15px}.ai-product-operation-page>.content-header h1{margin:0}.ai-product-operation-page>.content-header p{margin:6px 0 0;color:#718697}.ai-product-operation-filters{margin-bottom:15px;padding:18px 20px 15px}.ai-product-operation-filter-grid{display:grid;grid-template-columns:minmax(300px,2fr) minmax(220px,1fr);gap:14px 18px;align-items:start}.ai-product-operation-filter-grid>label>input{margin-top:8px}.ai-product-status-field{min-width:0}.ai-product-status-picker[open] summary:after{transform:translateY(-20%) rotate(225deg)}.ai-product-status-picker .flt-picker-panel{z-index:108}.ai-product-status-search{min-height:34px!important;margin-bottom:5px;padding:7px 10px!important}.ai-product-status-picker .flt-picker-options{margin-top:0}.ai-product-operation-filter-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:13px}.ai-product-operation-records{overflow:hidden}.ai-product-operation-records .flt-toolbar{padding:12px 18px}.ai-product-operation-table-scroll{max-height:calc(100vh - 300px);overflow:auto}.ai-product-operation-table{width:100%!important;min-width:1100px!important;margin:0!important;border-collapse:separate!important;border-spacing:0!important;table-layout:fixed!important}.ai-product-operation-table th:nth-child(1){width:145px}.ai-product-operation-table th:nth-child(2){width:285px}.ai-product-operation-table th:nth-child(3){width:150px}.ai-product-operation-table th:nth-child(4){width:190px}.ai-product-operation-table th:nth-child(5){width:120px}.ai-product-operation-table th:nth-child(6),.ai-product-operation-table th:nth-child(7){width:145px}.ai-product-operation-table th:nth-child(8){width:145px}.ai-product-operation-table thead th{position:sticky;top:0;z-index:4;padding:11px 10px!important;background:#eaf4fa!important;color:#345c75!important;border-right:1px solid #dce8ef!important;white-space:nowrap}.ai-product-operation-table tbody td{padding:11px 10px!important;border-right:1px solid #e7eef3!important;border-bottom:1px solid #e7eef3!important;vertical-align:middle!important}.ai-product-operation-table tbody tr:nth-child(odd)>td{background:#fff}.ai-product-operation-table tbody tr:nth-child(even)>td{background:#f3f9fd}.ai-product-operation-table tbody tr:hover>td{background:#eaf5fb!important}.ai-product-operation-table .ai-product-report-no{color:#285b7e;font-weight:700}.ai-product-operation-table .ai-product-link{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-product-operation-table .ai-product-remark{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#607789}.ai-product-operation-table .ai-product-time{color:#667f91;font-variant-numeric:tabular-nums;white-space:nowrap}.ai-product-operation-table .flt-status[data-status=rejected]{border-color:#f0c9c4;background:#fff0ee;color:#bd5c4d}.ai-product-operation-actions{display:flex;align-items:center;justify-content:center;gap:2px;white-space:nowrap}.ai-product-operation-actions form{display:inline-flex;margin:0}.ai-product-operation-actions .flt-row-action{display:inline-flex;align-items:center;gap:4px}.ai-product-operation-pagination{border-top:1px solid #e3edf4}.ai-product-operation-pagination .ai-product-pagination-total{margin-right:auto}.ai-product-operation-pagination form{display:flex;align-items:center;gap:8px;margin:0}.ai-product-operation-pagination form input[type=hidden]{display:none}.ai-product-operation-pagination .is-disabled{pointer-events:none;opacity:.45}.ai-product-operation-pagination .ai-product-page-jump input{width:64px!important}.ai-product-operation-notices{position:fixed;top:64px;right:24px;z-index:1200;display:grid;width:min(420px,calc(100vw - 32px));gap:10px;pointer-events:none}.ai-product-operation-notice{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;border:1px solid #cfe1ec;border-left:4px solid #318fbe;border-radius:8px;background:#fff;color:#385a70;box-shadow:0 8px 28px rgba(31,67,91,.16);pointer-events:auto}.ai-product-operation-notice>i{margin-top:2px;color:#318fbe;font-size:17px}.ai-product-operation-notice.is-success{border-left-color:#36a477}.ai-product-operation-notice.is-success>i{color:#36a477}.ai-product-operation-notice.is-error{border-left-color:#d36b57}.ai-product-operation-notice.is-error>i{color:#d36b57}.ai-product-operation-notice-copy{flex:1;min-width:0;line-height:1.65}.ai-product-operation-notice-copy strong{display:block;margin-bottom:2px;color:#294b61}.ai-product-operation-notice-close{border:0;background:none;color:#91a2ae;font-size:19px;line-height:1;cursor:pointer}.ai-product-operation-flash{position:relative;margin-bottom:15px;box-shadow:none}.ai-product-entry-modal .modal-content{overflow:hidden;border:1px solid #d4e3ef;border-radius:12px;box-shadow:0 22px 90px rgba(23,54,76,.25)}.ai-product-entry-modal .modal-header{padding:18px 22px;background:#f6faff;border-bottom:1px solid #e5edf5}.ai-product-entry-modal .modal-title{color:#294b61;font-size:19px;font-weight:600}.ai-product-entry-modal .modal-body{padding:22px}.ai-product-entry-modal .modal-footer{display:flex;justify-content:flex-end;gap:9px;padding:15px 22px;background:#fbfdff;border-top:1px solid #e8eff5}.ai-product-entry-modal .modal-footer .flt-btn{min-height:36px}.ai-product-entry-guidance{display:flex;align-items:flex-start;gap:10px;margin-bottom:18px;padding:12px 14px;border:1px solid #cfe4f1;border-left:4px solid #318fbe;border-radius:7px;background:#f2f9fd;color:#527084;line-height:1.7}.ai-product-entry-guidance i{margin-top:3px;color:#318fbe;font-size:16px}.ai-product-entry-guidance strong{color:#2a5874}.ai-product-entry-modal .form-control{height:38px;border:1px solid #cfdeea;border-radius:5px;box-shadow:none}.ai-product-entry-modal .form-control:focus{border-color:#339dd3;box-shadow:0 0 0 3px rgba(36,153,209,.1)}.ai-product-entry-modal .has-error .form-control{border-color:#ce695a}.ai-product-entry-modal .help-block{padding:6px 8px;border-radius:4px;background:#fff4f1;color:#bf5546}.ai-product-field-tip{display:block;margin-top:7px;color:#7d91a1;font-size:12px}.ai-product-delete-dialog{margin:auto}.ai-product-delete-dialog .flt-dialog-content{display:flex;align-items:flex-start;gap:14px}.ai-product-delete-icon{display:inline-flex;flex:0 0 38px;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:#fff1ed;color:#c85e4c;font-size:18px}.ai-product-delete-copy strong{display:block;margin-bottom:7px;color:#38566a}.ai-product-delete-copy p{margin:0;color:#7c674f;line-height:1.8}@media(max-width:800px){.ai-product-operation-filter-grid{grid-template-columns:1fr}.ai-product-operation-page{padding:10px}.ai-product-operation-pagination{justify-content:center}.ai-product-operation-pagination .ai-product-pagination-total{width:100%;margin:0;text-align:center}.ai-product-status-picker .flt-picker-panel{position:relative;top:5px}.ai-product-operation-notices{top:55px;right:16px}}
 </style>
 @endpush
 
 @section('content')
-<section class="content product-request-page">
-    <header class="content-header"><h1>{{ $t('operation.title') }}</h1></header>
-    @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
-    @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
-    @if(isset($errors) && $errors->any())<div class="alert alert-danger"><ul class="list-unstyled" style="margin:0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
+<section class="content ai-product-operation-page flt">
+    <header class="content-header"><h1>{{ $t('operation.title') }}</h1><p>查看、筛选并维护已提交的产品投放链接</p></header>
 
-    <div class="box box-solid product-request-filter-box"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters.keyword') }}</h3></div><div class="box-body"><form class="product-request-filter-form" method="get" action="{{ route('ai-products.operation.index') }}"><div class="product-request-filter-grid"><div class="product-request-filter-field"><label>{{ $t('filters.keyword') }}</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ $t('filters.keyword_placeholder') }}"></div><div class="product-request-filter-field"><label>{{ $t('fields.review_status') }}</label><select class="form-control" name="review_status"><option value="">{{ $t('common.all') }}</option>@foreach($statusLabels as $value => $label)<option value="{{ $value }}" @selected($filters['review_status'] === $value)>{{ $label }}</option>@endforeach</select></div><div class="product-request-filter-field"><label>{{ $t('filters.per_page') }}</label><select class="form-control" name="per_page">@foreach([20, 50, 100] as $perPage)<option value="{{ $perPage }}" @selected($filters['per_page'] === $perPage)>{{ $perPage }}</option>@endforeach</select></div></div><div class="product-request-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="btn btn-default" href="{{ route('ai-products.operation.index') }}">{{ $t('common.reset') }}</a></div></form></div></div>
-
-    <div class="box box-solid product-request-table-box"><div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('operation.list_title') }}</h3><span class="product-request-toolbar-spacer"></span><button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#ai-product-create-modal"><i class="fa fa-plus"></i> {{ $t('operation.create_button') }}</button></div><div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table"><thead><tr><th class="product-request-sticky-left">{{ $t('fields.report_no') }}</th><th>{{ $t('fields.placement_link') }}</th><th>{{ $t('fields.reporter') }}</th><th>{{ $t('fields.remark') }}</th><th>{{ $t('fields.review_status') }}</th><th>{{ $t('fields.submitted_at') }}</th><th>{{ $t('fields.reviewed_at') }}</th><th>{{ $t('fields.operation') }}</th></tr></thead><tbody>
-        @forelse($submissions as $submission)
-            <tr><td class="product-request-sticky-left"><strong>{{ $submission->report_no }}</strong></td><td class="product-request-link-wrap"><a href="{{ $submission->placement_link }}" target="_blank" rel="noopener" title="{{ $submission->placement_link }}">{{ $submission->placement_link }}</a></td><td>{{ $submission->operation_display_name }}</td><td class="product-request-name-cell" title="{{ $submission->review_remark }}">{{ $submission->review_remark ?: '—' }}</td><td><span class="ai-status-badge ai-status-{{ $submission->review_status }}">{{ $statusLabels[$submission->review_status] ?? $submission->review_status }}</span></td><td>{{ optional($submission->created_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td><td>{{ $submission->reviewed_at ? $submission->reviewed_at->timezone('Asia/Shanghai')->format('Y-m-d H:i') : '—' }}</td><td class="ai-product-actions">@if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_REJECTED)<button type="button" class="btn btn-primary btn-xs" data-ai-edit-toggle data-edit-action="{{ route('ai-products.operation.update', $submission) }}" data-edit-link="{{ $submission->placement_link }}" data-edit-report-no="{{ $submission->report_no }}"><i class="fa fa-pencil"></i> {{ $t('operation.edit_button') }}</button>@endif @if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_PENDING)<form method="post" action="{{ route('ai-products.operation.destroy', $submission) }}" class="ai-product-delete-form" onsubmit='return confirm(@json($t('operation.delete_confirm')));'>@csrf @method('DELETE')<button type="submit" class="btn btn-danger btn-xs"><i class="fa fa-trash-o"></i> {{ $t('common.delete') }}</button></form>@endif @if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_APPROVED)<span class="text-muted">—</span>@endif</td></tr>
-        @empty
-            <tr><td colspan="8" class="product-request-empty">{{ $t('common.no_records') }}</td></tr>
-        @endforelse
-    </tbody></table></div>{{ $submissions->links('portals.product-requests.partials.pagination') }}</div>
-
-    <div class="modal fade" id="ai-product-create-modal" tabindex="-1" role="dialog" aria-labelledby="ai-product-create-title">
-        <div class="modal-dialog" role="document">
-            <form method="post" action="{{ route('ai-products.operation.store') }}" class="modal-content">
-                @csrf
-                <input type="hidden" name="_form" value="create">
-                <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ai-product-create-title"><i class="fa fa-rocket"></i> {{ $t('operation.create_title') }}</h4></div>
-                <div class="modal-body">
-                    <div class="form-group{{ $errors->has('placement_link') ? ' has-error' : '' }}">
-                        <label for="ai-product-placement-link">{{ $t('fields.placement_link') }} <span class="text-danger">*</span></label>
-                        <input type="url" class="form-control" id="ai-product-placement-link" name="placement_link" value="{{ old('placement_link') }}" placeholder="{{ $t('fields.placement_link_placeholder') }}" required>
-                        @if($errors->has('placement_link'))<span class="help-block">{{ $errors->first('placement_link') }}</span>@endif
+    <form class="flt-card flt-filters ai-product-operation-filters" method="get" action="{{ route('ai-products.operation.index') }}" data-loading="region" data-loading-target=".ai-product-operation-records">
+        <div class="ai-product-operation-filter-grid">
+            <label>{{ $t('filters.keyword') }}<input type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ $t('filters.keyword_placeholder') }}" autocomplete="off"></label>
+            <div class="ai-product-status-field">
+                <span class="flt-field-label" id="ai-product-status-label">{{ $t('fields.review_status') }}</span>
+                <details class="flt-picker ai-product-status-picker" data-ai-product-status-picker>
+                    <summary aria-labelledby="ai-product-status-label" data-ai-product-status-summary>{{ $selectedStatusLabel }}</summary>
+                    <div class="flt-picker-panel">
+                        <input type="search" class="ai-product-status-search" placeholder="搜索审核状态" autocomplete="off" data-ai-product-status-search>
+                        <div class="flt-picker-options">
+                            <label data-ai-product-status-option><input type="radio" name="review_status" value="" @checked($selectedStatus === '')><span>{{ $t('common.all') }}</span></label>
+                            @foreach($statusLabels as $value => $label)<label data-ai-product-status-option><input type="radio" name="review_status" value="{{ $value }}" @checked($selectedStatus === (string) $value)><span>{{ $label }}</span></label>@endforeach
+                            <p data-ai-product-status-empty hidden>没有匹配的审核状态</p>
+                        </div>
                     </div>
-                </div>
-                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="btn btn-primary"><i class="fa fa-paper-plane"></i> {{ $t('operation.create_button') }}</button></div>
-            </form>
+                </details>
+            </div>
+            <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
         </div>
-    </div>
-    <div class="modal fade" id="ai-product-edit-modal" tabindex="-1" role="dialog" aria-labelledby="ai-product-edit-title">
-        <div class="modal-dialog" role="document">
-            <form method="post" action="" id="ai-product-edit-form" class="modal-content">
-                @csrf
-                @method('PUT')
-                <input type="hidden" name="_form" value="edit">
-                <input type="hidden" name="submission_id" value="{{ old('submission_id') }}">
-                <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ai-product-edit-title"><i class="fa fa-pencil"></i> {{ $t('operation.edit_title') }}</h4></div>
-                <div class="modal-body">
-                    <p class="text-muted">{{ $t('fields.report_no') }}：<strong id="ai-product-edit-report-no"></strong></p>
-                    <div class="form-group{{ $errors->has('placement_link') ? ' has-error' : '' }}">
-                        <label for="ai-product-edit-link">{{ $t('fields.placement_link') }} <span class="text-danger">*</span></label>
-                        <input type="url" class="form-control" id="ai-product-edit-link" name="placement_link" value="{{ old('placement_link') }}" placeholder="{{ $t('fields.placement_link_placeholder') }}" required>
-                        @if($errors->has('placement_link') && old('_form') === 'edit')<span class="help-block">{{ $errors->first('placement_link') }}</span>@endif
-                    </div>
-                </div>
-                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="btn btn-primary"><i class="fa fa-paper-plane"></i> {{ $t('operation.edit_button') }}</button></div>
-            </form>
-        </div>
-    </div>
-    <script>
-        jQuery(function ($) {
-            $(document).on('click', '[data-ai-edit-toggle]', function () {
-                var $button = $(this);
-                $('#ai-product-edit-form').attr('action', $button.data('edit-action'));
-                $('#ai-product-edit-link').val($button.data('edit-link'));
-                $('#ai-product-edit-report-no').text($button.data('edit-report-no'));
-                $('#ai-product-edit-modal').modal('show');
-            });
+        <div class="ai-product-operation-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="flt-btn" href="{{ route('ai-products.operation.index') }}"><i class="fa fa-refresh"></i> {{ $t('common.reset') }}</a></div>
+    </form>
 
-            @if($errors->has('placement_link'))
-                @if(old('_form') === 'edit' && old('submission_id'))
-                    // 编辑提交校验失败：重新打开编辑弹窗并回填
-                    $('#ai-product-edit-form').attr('action', '{{ route('ai-products.operation.update', ['submission' => '__SUBMISSION__']) }}'.replace('__SUBMISSION__', '{{ (int) old('submission_id') }}'));
-                    $('#ai-product-edit-link').val(@json(old('placement_link')));
-                    $('#ai-product-edit-modal').modal('show');
-                @else
-                    $('#ai-product-create-modal').modal('show');
-                @endif
-            @endif
-        });
-    </script>
+    <div class="flt-card flt-records ai-product-operation-records">
+        <div class="flt-toolbar"><div class="flt-selection"><strong>{{ $t('operation.list_title') }}</strong><span class="flt-toolbar-divider"></span><span>共 {{ $submissions->total() }} 条记录</span></div><div class="flt-toolbar-actions"><button type="button" class="flt-btn flt-primary" data-toggle="modal" data-target="#ai-product-create-modal"><i class="fa fa-plus"></i> {{ $t('operation.create_button') }}</button></div></div>
+        <div class="flt-table-region"><div class="flt-table-scroll ai-product-operation-table-scroll"><table class="ai-product-operation-table"><caption class="flt-sr-only">{{ $t('operation.list_title') }}</caption><thead><tr><th>{{ $t('fields.report_no') }}</th><th>{{ $t('fields.placement_link') }}</th><th>{{ $t('fields.reporter') }}</th><th>{{ $t('fields.remark') }}</th><th>{{ $t('fields.review_status') }}</th><th>{{ $t('fields.submitted_at') }}</th><th>{{ $t('fields.reviewed_at') }}</th><th>{{ $t('fields.operation') }}</th></tr></thead><tbody>
+            @forelse($submissions as $submission)
+                @php
+                    $statusTone = match ((string) $submission->review_status) {
+                        \App\Models\AiProductSubmission::REVIEW_PENDING => 'pending',
+                        \App\Models\AiProductSubmission::REVIEW_APPROVED => 'enabled',
+                        \App\Models\AiProductSubmission::REVIEW_REJECTED => 'rejected',
+                        default => 'disabled',
+                    };
+                @endphp
+                <tr><td class="ai-product-report-no">{{ $submission->report_no }}</td><td><a class="ai-product-link" href="{{ $submission->placement_link }}" target="_blank" rel="noopener" title="{{ $submission->placement_link }}">{{ $submission->placement_link }}</a></td><td>{{ $submission->operation_display_name }}</td><td class="ai-product-remark" title="{{ $submission->review_remark }}">{{ $submission->review_remark ?: '—' }}</td><td><span class="flt-status" data-status="{{ $statusTone }}">{{ $statusLabels[$submission->review_status] ?? $submission->review_status }}</span></td><td class="ai-product-time">{{ optional($submission->created_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td><td class="ai-product-time">{{ $submission->reviewed_at ? $submission->reviewed_at->timezone('Asia/Shanghai')->format('Y-m-d H:i') : '—' }}</td><td><div class="ai-product-operation-actions">@if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_REJECTED)<button type="button" class="flt-row-action" data-ai-edit-toggle data-edit-action="{{ route('ai-products.operation.update', $submission) }}" data-edit-link="{{ $submission->placement_link }}" data-edit-report-no="{{ $submission->report_no }}"><i class="fa fa-pencil"></i> {{ $t('operation.edit_button') }}</button>@endif @if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_PENDING)<button type="button" class="flt-row-action" data-action="delete" data-ai-delete data-delete-action="{{ route('ai-products.operation.destroy', $submission) }}" data-report-no="{{ $submission->report_no }}"><i class="fa fa-trash-o"></i> {{ $t('common.delete') }}</button>@endif @if($submission->review_status === \App\Models\AiProductSubmission::REVIEW_APPROVED)<span class="text-muted">—</span>@endif</div></td></tr>
+            @empty
+                <tr><td colspan="8"><div class="flt-empty"><i class="fa fa-inbox"></i><h4>{{ $t('common.no_records') }}</h4><p>可调整筛选条件后重新查询</p></div></td></tr>
+            @endforelse
+        </tbody></table></div></div>
+        <nav class="flt-pagination ai-product-operation-pagination" aria-label="{{ $t('operation.list_title') }}分页">
+            <span class="ai-product-pagination-total">显示 {{ $submissions->firstItem() ?? 0 }}-{{ $submissions->lastItem() ?? 0 }} 条，共 {{ $submissions->total() }} 条</span>
+            <form method="get" action="{{ request()->url() }}">@foreach($query as $key => $value)@if(!in_array($key, ['page', 'per_page'], true) && !is_array($value))<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endif @endforeach<label>每页显示 <select name="per_page" onchange="this.form.submit()">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($submissions->perPage() === $size)>{{ $size }}</option>@endforeach</select> 条</label></form>
+            <a class="flt-btn {{ $submissions->onFirstPage() ? 'is-disabled' : '' }}" href="{{ $submissions->previousPageUrl() ?: '#' }}"><i class="fa fa-angle-left"></i> 上一页</a><strong>第 {{ $currentPage }} / {{ $lastPage }} 页</strong><a class="flt-btn {{ $submissions->hasMorePages() ? '' : 'is-disabled' }}" href="{{ $submissions->nextPageUrl() ?: '#' }}">下一页 <i class="fa fa-angle-right"></i></a>
+            <form class="ai-product-page-jump" method="get" action="{{ request()->url() }}">@foreach($query as $key => $value)@if($key !== 'page' && !is_array($value))<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endif @endforeach<label>跳至 <input type="number" name="page" min="1" max="{{ $lastPage }}" value="{{ $currentPage }}"> 页</label><button class="flt-btn flt-primary" type="submit">跳转</button></form>
+        </nav>
+    </div>
+
+    <div class="modal fade ai-product-entry-modal" id="ai-product-create-modal" tabindex="-1" role="dialog" aria-labelledby="ai-product-create-title"><div class="modal-dialog" role="document"><form method="post" action="{{ route('ai-products.operation.store') }}" class="modal-content" data-ai-product-link-form>@csrf<input type="hidden" name="_form" value="create"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ai-product-create-title"><i class="fa fa-rocket"></i> {{ $t('operation.create_title') }}</h4></div><div class="modal-body"><div class="ai-product-entry-guidance"><i class="fa fa-info-circle"></i><div><strong>新增数据填写提示</strong><br>请填写完整的 http:// 或 https:// 投放链接；提交后记录进入待审核状态，可在列表中查看处理结果。</div></div><div class="form-group{{ $errors->has('placement_link') && old('_form') !== 'edit' ? ' has-error' : '' }}"><label for="ai-product-placement-link">{{ $t('fields.placement_link') }} <span class="text-danger">*</span></label><input type="url" class="form-control" id="ai-product-placement-link" name="placement_link" value="{{ old('_form') !== 'edit' ? old('placement_link') : '' }}" placeholder="{{ $t('fields.placement_link_placeholder') }}" required data-ai-product-link-input><small class="ai-product-field-tip"><i class="fa fa-link"></i> 示例：https://example.com/products/example</small>@if($errors->has('placement_link') && old('_form') !== 'edit')<span class="help-block">{{ $errors->first('placement_link') }}</span>@endif</div></div><div class="modal-footer"><button type="button" class="flt-btn" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="flt-btn flt-primary"><i class="fa fa-paper-plane"></i> {{ $t('operation.create_button') }}</button></div></form></div></div>
+    <div class="modal fade ai-product-entry-modal" id="ai-product-edit-modal" tabindex="-1" role="dialog" aria-labelledby="ai-product-edit-title"><div class="modal-dialog" role="document"><form method="post" action="" id="ai-product-edit-form" class="modal-content" data-ai-product-link-form>@csrf @method('PUT')<input type="hidden" name="_form" value="edit"><input type="hidden" name="submission_id" value="{{ old('submission_id') }}"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ai-product-edit-title"><i class="fa fa-pencil"></i> {{ $t('operation.edit_title') }}</h4></div><div class="modal-body"><div class="ai-product-entry-guidance"><i class="fa fa-info-circle"></i><div><strong>重新提交提示</strong><br>修改审核不通过的投放链接后，记录会重新进入待审核状态。</div></div><p class="text-muted">{{ $t('fields.report_no') }}：<strong id="ai-product-edit-report-no"></strong></p><div class="form-group{{ $errors->has('placement_link') && old('_form') === 'edit' ? ' has-error' : '' }}"><label for="ai-product-edit-link">{{ $t('fields.placement_link') }} <span class="text-danger">*</span></label><input type="url" class="form-control" id="ai-product-edit-link" name="placement_link" value="{{ old('_form') === 'edit' ? old('placement_link') : '' }}" placeholder="{{ $t('fields.placement_link_placeholder') }}" required data-ai-product-link-input><small class="ai-product-field-tip"><i class="fa fa-link"></i> 链接必须以 http:// 或 https:// 开头</small>@if($errors->has('placement_link') && old('_form') === 'edit')<span class="help-block">{{ $errors->first('placement_link') }}</span>@endif</div></div><div class="modal-footer"><button type="button" class="flt-btn" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="flt-btn flt-primary"><i class="fa fa-paper-plane"></i> {{ $t('operation.edit_button') }}</button></div></form></div></div>
+
+    <dialog class="flt-dialog ai-product-delete-dialog" data-ai-product-delete-dialog aria-labelledby="ai-product-delete-title"><form method="post" action="" data-ai-product-delete-form>@csrf @method('DELETE')<header><h3 id="ai-product-delete-title">确认删除投放连接提报</h3><button type="button" class="flt-icon-close" data-ai-product-delete-close aria-label="关闭">×</button></header><div class="flt-dialog-content"><span class="ai-product-delete-icon"><i class="fa fa-exclamation-triangle"></i></span><div class="ai-product-delete-copy"><strong>此操作无法撤销</strong><p>确定删除提报 <b data-ai-product-delete-report></b> 吗？删除后该条数据无法恢复。</p></div></div><footer><button type="button" class="flt-btn" data-ai-product-delete-close>取消</button><button type="submit" class="flt-btn flt-danger-outline"><i class="fa fa-trash-o"></i> 确认删除</button></footer></form></dialog>
+</section>
 @endsection
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+    var successMessage=@json(session('success'));
+    var errorMessage=@json(session('error'));
+    function notify(type,message){
+        if(!message)return;
+        if(window.ErpAdminNotifier){window.ErpAdminNotifier.notify({type:type,message:message});return;}
+        if(window.toastr&&typeof window.toastr[type]==='function'){window.toastr[type](message);}
+    }
+    notify('success',successMessage);
+    notify('error',errorMessage);
+    var picker=document.querySelector('[data-ai-product-status-picker]');
+    if(picker){var summary=picker.querySelector('[data-ai-product-status-summary]'),search=picker.querySelector('[data-ai-product-status-search]'),options=Array.prototype.slice.call(picker.querySelectorAll('[data-ai-product-status-option]')),empty=picker.querySelector('[data-ai-product-status-empty]');options.forEach(function(option){var input=option.querySelector('input');input.addEventListener('change',function(){summary.textContent=option.querySelector('span').textContent.trim();picker.removeAttribute('open');});});search.addEventListener('input',function(){var keyword=search.value.trim().toLowerCase(),visible=0;options.forEach(function(option){var matched=option.textContent.toLowerCase().indexOf(keyword)!==-1;option.hidden=!matched;if(matched)visible++;});empty.hidden=visible!==0;});picker.addEventListener('toggle',function(){if(picker.open){search.value='';options.forEach(function(option){option.hidden=false;});empty.hidden=true;window.setTimeout(function(){search.focus();},0);}});document.addEventListener('click',function(event){if(picker.open&&!picker.contains(event.target))picker.removeAttribute('open');});}
+    var deleteDialog=document.querySelector('[data-ai-product-delete-dialog]'),deleteForm=document.querySelector('[data-ai-product-delete-form]'),deleteReport=document.querySelector('[data-ai-product-delete-report]');document.querySelectorAll('[data-ai-delete]').forEach(function(button){button.addEventListener('click',function(){deleteForm.action=button.getAttribute('data-delete-action');deleteReport.textContent=button.getAttribute('data-report-no')||'';deleteDialog.showModal();});});document.querySelectorAll('[data-ai-product-delete-close]').forEach(function(button){button.addEventListener('click',function(){deleteDialog.close();});});if(deleteDialog)deleteDialog.addEventListener('click',function(event){if(event.target===deleteDialog)deleteDialog.close();});
+    document.querySelectorAll('[data-ai-product-link-form]').forEach(function(form){var input=form.querySelector('[data-ai-product-link-input]');if(!input)return;function validate(){var valid=/^https?:\/\/\S+$/i.test(input.value.trim());input.setCustomValidity(valid?'':@json($t('validation.link_invalid')));return valid;}input.addEventListener('input',function(){input.setCustomValidity('');});form.addEventListener('submit',function(event){if(!validate()){event.preventDefault();input.reportValidity();input.focus();}});});
+    jQuery(document).on('click','[data-ai-edit-toggle]',function(){var button=jQuery(this);jQuery('#ai-product-edit-form').attr('action',button.data('edit-action'));jQuery('#ai-product-edit-link').val(button.data('edit-link'));jQuery('#ai-product-edit-report-no').text(button.data('edit-report-no'));jQuery('#ai-product-edit-form [name="submission_id"]').val(button.data('edit-action').split('/').pop());jQuery('#ai-product-edit-modal').modal('show');});
+    @if($errors->has('placement_link'))
+        @if(old('_form') === 'edit' && old('submission_id'))
+            jQuery('#ai-product-edit-form').attr('action',@json(route('ai-products.operation.update',['submission'=>(int)old('submission_id')])));jQuery('#ai-product-edit-report-no').text(@json(old('submission_id')));jQuery('#ai-product-edit-modal').modal('show');
+        @else
+            jQuery('#ai-product-create-modal').modal('show');
+        @endif
+    @endif
+});
+</script>
+@endpush

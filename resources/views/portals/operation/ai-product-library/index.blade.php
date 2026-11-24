@@ -150,8 +150,6 @@
 
 @section('content')
 <section class="content aikaipin-product-library-page operation-ai-product-page flt">
-    @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
-    @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
     <form class="flt-card flt-filters operation-ai-template-filters" method="get" action="{{ route('operation.ai-product-library.index') }}">
         <div class="operation-ai-template-filter-grid">
             <label>{{ __('aikaipin.filters.keyword') }}<input type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __('aikaipin.filters.keyword_placeholder') }}" autocomplete="off"></label>
@@ -362,6 +360,22 @@
 
 @push('scripts')
 <script>
+(function () {
+    var successMessage = @json(session('success'));
+    var errorMessage = @json($errors->first());
+    function notify(type, message) {
+        if (!message) return;
+        if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
+            window.ErpAdminNotifier.notify({type: type, message: message});
+            return;
+        }
+        if (window.toastr && typeof window.toastr[type] === 'function') {
+            window.toastr[type](message);
+        }
+    }
+    notify('success', successMessage);
+    notify('error', errorMessage);
+})();
 (function () {
     var pickers=Array.prototype.slice.call(document.querySelectorAll('[data-operation-ai-template-picker]'));
     pickers.forEach(function(picker){
@@ -595,6 +609,17 @@
     var progressText = modal.querySelector('[data-operation-ai-material-progress-text]');
     var submit = form.querySelector('[type="submit"]');
 
+    function notify(type, message) {
+        if (!message) return;
+        if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
+            window.ErpAdminNotifier.notify({type: type, message: message});
+            return;
+        }
+        if (window.toastr && typeof window.toastr[type] === 'function') {
+            window.toastr[type](message);
+        }
+    }
+
     function setProgress(percent, text) {
         progress.hidden = false;
         progressBar.style.width = percent + '%';
@@ -656,23 +681,28 @@
             var payload = {};
             try { payload = JSON.parse(request.responseText || '{}'); } catch (ignore) {}
             if (request.status < 200 || request.status >= 300) {
-                error.textContent = uploadErrorMessage(payload, request.status);
+                var failureMessage = uploadErrorMessage(payload, request.status);
+                error.textContent = failureMessage;
                 error.hidden = false;
                 submit.disabled = false;
                 submit.innerHTML = '<i class="fa fa-upload"></i> 重新上传';
                 setProgress(0, '上传失败');
+                notify('error', failureMessage);
                 return;
             }
             setProgress(100, '上传完成：' + ((payload.video && payload.video.video_code) || '素材视频'));
             submit.innerHTML = '<i class="fa fa-check"></i> 上传成功';
+            notify('success', payload.message || '素材视频上传成功。');
             window.setTimeout(function () { window.jQuery(modal).modal('hide'); }, 700);
         };
         request.onerror = function () {
-            error.textContent = '网络异常，视频上传失败，请重试。';
+            var failureMessage = '网络异常，视频上传失败，请重试。';
+            error.textContent = failureMessage;
             error.hidden = false;
             submit.disabled = false;
             submit.innerHTML = '<i class="fa fa-upload"></i> 重新上传';
             setProgress(0, '上传失败');
+            notify('error', failureMessage);
         };
         request.send(new FormData(form));
     });

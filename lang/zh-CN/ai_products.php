@@ -29,7 +29,7 @@ return [
         'subtitle' => '',
         'create_button' => '发起提报',
         'create_title' => '发起已有产品投放连接提报',
-        'submit_success' => '提报成功，提报编号：:report_no',
+        'submit_success' => '提报成功，提报编号：:report_no。若当前列表未显示，请重置筛选条件后查看。',
         'update_success' => '已重新提交审核，提报编号：:report_no',
         'edit_button' => '重新编辑',
         'edit_title' => '重新编辑投放链接',
