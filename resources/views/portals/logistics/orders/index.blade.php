@@ -259,7 +259,14 @@
                                 <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.collection_account') }}</span><span class="logistics-payment-information-value">{{ $display($order->collection_account) }}</span></div>
                                 <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.collection_account_email') }}</span><span class="logistics-payment-information-value {{ $collectionAccountEmailMatched ? '' : 'is-unmatched' }}" title="{{ $collectionAccountEmail }}">{{ $collectionAccountEmail }}</span></div>
                             </td>
-                            <td class="logistics-amount-information"><div class="logistics-amount-information-line"><span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.paid_amount') }}</span><span class="logistics-amount-information-value js-money-cell">{{ $display($order->paid_amount_usd) }}</span></div><div class="logistics-amount-information-line"><span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.total_shipping') }}</span><span class="logistics-amount-information-value js-money-cell">{{ $display($order->total_shipping_usd) }}</span></div></td>
+                            <td class="logistics-amount-information">
+                                @php($amount = $sharedShopifyAmounts->get($order->getKey()))
+                                <div class="logistics-amount-information-line">
+                                    <span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.'.($amount ? 'order_total' : 'paid_amount')) }}</span>
+                                    <span class="logistics-amount-information-value js-money-cell" @if($amount) data-currency="{{ $amount->currency }}" @endif>{{ $display($amount?->total_amount ?? $order->paid_amount_usd) }}</span>
+                                </div>
+                                <div class="logistics-amount-information-line"><span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.total_shipping') }}</span><span class="logistics-amount-information-value js-money-cell">{{ $display($order->total_shipping_usd) }}</span></div>
+                            </td>
                             <td class="logistics-order-time-information"><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.stored') }}</span><span class="logistics-order-time-information-value">{{ $date($order->created_at) }}</span></div><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.ordered') }}</span><span class="logistics-order-time-information-value">{{ $date($order->order_created_at) }}</span></div><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.paid') }}</span><span class="logistics-order-time-information-value">{{ $date($order->paid_at) }}</span></div></td>
                             <td class="logistics-refund-summary" @if($paypalRefundCount > 0) title="{{ $paypalRefundTitle }}" @endif>
                                 @if($paypalRefundCount > 0)
@@ -389,7 +396,8 @@
                         cell.classList.add('logistics-number-cell');
                         if (headings[cell.cellIndex]) headings[cell.cellIndex].classList.add('logistics-number-heading');
                         if (value !== null) {
-                            cell.textContent = isRate ? value + '%' : '$' + value;
+                            var currency = cell.dataset.currency;
+                            cell.textContent = isRate ? value + '%' : (currency ? value + ' ' + currency : '$' + value);
                         } else {
                             cell.classList.add('logistics-empty-value');
                         }

@@ -36,6 +36,13 @@ Schedule::command('logistics:tracking:process --limit=80')
     ->withoutOverlapping(10)
     ->runInBackground();
 
+Schedule::command('shop-orders:backfill-shopify --pending')
+    ->everyMinute()
+    ->when(fn (): bool => \Illuminate\Support\Facades\Schema::connection(config('admin.database.connection') ?: config('database.default'))
+        ->hasTable('shop_order_logistics_pending'))
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 Schedule::command('logistics:tongtu-skus:refresh --limit=200')
     ->everyMinute()
     ->withoutOverlapping(5)

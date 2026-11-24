@@ -1,6 +1,22 @@
 <?php
 
 return [
+    'shop_order_backfill' => [
+        'projection_initializing' => '物流订单新表正在初始化，请在同步完成后重试。',
+        'projection_check' => '全量核对。缺订单 :missing_orders，订单字段不一致 :different_orders，商品行缺失或不一致 :different_items，多余订单 :extra_orders，多余商品行 :extra_items，待同步 :pending。',
+        'description' => '将历史 Shopify 物流订单回填到公共订单表',
+        'missing_table' => '缺少公共订单表 :table，请先核对建表结果。',
+        'invalid_range' => '起止订单 ID 必须为正整数，且结束 ID 不得小于起始 ID。',
+        'range' => '数据库 :database，扫描旧订单 ID :from 至 :to。',
+        'dry_run' => '预检，未写入',
+        'saved' => '回填',
+        'invalid_identity' => '旧订单 :id 缺少有效的 Shopify 店铺域名或订单 ID，已跳过。',
+        'conflict' => '旧订单 :id 的店铺域名与平台订单 ID 命中其他记录，待核对。',
+        'unknown_money' => '旧订单 :id 的平台总额或币种无法从已保存的报文确认，共用表对应字段留空。',
+        'unknown_order_time' => '旧订单 :id 的下单时间无法确认时区，共用表对应字段留空。',
+        'unknown_paid_time' => '旧订单 :id 的付款时间无法确认时区，共用表对应字段留空。',
+        'summary' => ':mode。可迁或已写入 :written，已有映射 :mapped，标识不全 :invalid_identity，标识冲突 :conflict，金额或币种待核对 :unknown_money，下单时间待核对 :unknown_order_time，付款时间待核对 :unknown_paid_time。每类列出前 10 个旧订单 ID。',
+    ],
     'common' => [
         'historical_domain_unknown' => '历史域名未确定',
         'store_domain' => '店铺域名',
@@ -197,6 +213,7 @@ return [
         ],
         'amount_identifiers' => [
             'paid_amount' => '实付金额：',
+            'order_total' => '订单总额：',
             'total_shipping' => '总运费：',
         ],
         'order_time_identifiers' => [

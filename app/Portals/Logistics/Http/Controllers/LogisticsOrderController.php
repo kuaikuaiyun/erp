@@ -5,6 +5,7 @@ namespace App\Portals\Logistics\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
+use App\Models\SharedLogisticsOrder;
 use App\Models\LogisticsSyncLog;
 use App\Models\LogisticsRefundDetail;
 use App\Models\LogisticsTongtuSkuMapping;
@@ -79,8 +80,21 @@ class LogisticsOrderController extends Controller
             return $context;
         }
 
+        $this->requireSharedOrders();
         $filters = $this->filters($request);
         $orders = $this->orderQuery($filters)
+            ->select([
+                'id', 'assistant_domain_store_id', 'assigned_owner_name', 'bill_number', 'buyer_email',
+                'buyer_name', 'collection_account', 'collection_account_email', 'created_at',
+                'data_status', 'destination', 'group_names', 'is_add_on', 'logistics_status',
+                'operator_name', 'order_created_at', 'paid_amount_usd', 'paid_at', 'payment_gateway',
+                'payment_method', 'payment_status', 'sale_product_weight', 'sale_quantity',
+                'shipping_company', 'shopify_order_id', 'shopify_order_number', 'sku_exception_reason',
+                'source_shop_domain', 'store_name', 'subscription_origin_order_id', 'subscription_status',
+                'subscription_type', 'tongtu_order_number', 'tongtu_product_code', 'tongtu_product_name',
+                'tongtu_sku', 'total_shipping_usd', 'tracking_number', 'tracking_sync_status',
+                'transaction_id', 'updated_at',
+            ])
             ->with([
                 'items' => fn ($query) => $query->orderBy('id'),
                 'store:id,domain',
@@ -98,6 +112,7 @@ class LogisticsOrderController extends Controller
         return view('portals.logistics.orders.index', [
             ...$this->viewContext($context),
             'orders' => $orders,
+            'sharedShopifyAmounts' => $this->sharedShopifyAmounts($orders->getCollection()),
             'historicalDomains' => app(\App\Portals\Assistant\AssistantStoreDomainTimelineService::class)
                 ->domainsForOrders($orders->getCollection()),
             'filters' => $filters,
@@ -109,6 +124,44 @@ class LogisticsOrderController extends Controller
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
             'nonRunnableProductKeys' => $nonRunnableProductKeys,
         ]);
+    }
+
+    private function sharedShopifyAmounts(Collection $orders): Collection
+    {
+        $first = $orders->first();
+        if ($first === null) {
+            return collect();
+        }
+
+        $db = $first->getConnection();
+        $schema = $db->getSchemaBuilder();
+        if (! $schema->hasTable('shop_order_list') || ! $schema->hasTable('shop_order_source_map')) {
+            return collect();
+        }
+
+        $snapshots = $db->table('shop_order_source_map as source')
+            ->join('shop_order_list as shared', 'shared.id', '=', 'source.order_id')
+            ->where('source.source_table', 'logistics_orders')
+            ->where('shared.source_platform', 'shopify')
+            ->where('shared.source_system', 'logistics')
+            ->whereIntegerInRaw('source.source_id', $orders->modelKeys())
+            ->whereNotNull('shared.currency')
+            ->whereNotNull('shared.total_amount')
+            ->get(['source.source_id', 'shared.total_amount', 'shared.currency', 'shared.updated_at'])
+            ->keyBy('source_id');
+
+        // The legacy amount field is retained in the projection for display compatibility.
+        return $orders->mapWithKeys(function (LogisticsOrder $order) use ($snapshots): array {
+            $snapshot = $snapshots->get($order->getKey());
+            if ($snapshot === null || $snapshot->updated_at === null
+                || $snapshot->updated_at !== $order->getRawOriginal('updated_at')
+                || ! is_numeric($order->getRawOriginal('paid_amount_usd'))
+                || (float) $snapshot->total_amount !== (float) $order->getRawOriginal('paid_amount_usd')) {
+                return [];
+            }
+
+            return [$order->getKey() => $snapshot];
+        });
     }
 
     public function create(Request $request): Response|View
@@ -237,6 +290,8 @@ class LogisticsOrderController extends Controller
             if (!$exists) throw $exception;
             throw ValidationException::withMessages(['shopify_order_id' => __('logistics.orders.manual.duplicate')]);
         }
+
+        $this->syncSharedOrders([$order->getKey()]);
 
         return redirect()->route('logistics.orders.index', ['shopify_order_id' => $order->shopify_order_id])->with('success', __('logistics.orders.manual.saved'));
     }
@@ -429,12 +484,15 @@ class LogisticsOrderController extends Controller
         return $order;
     }
 
-    public function edit(Request $request, LogisticsOrder $order): Response|View
+    public function edit(Request $request, string $order): Response|View
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
             return $context;
         }
+
+        $this->requireSharedOrders();
+        $order = SharedLogisticsOrder::query()->whereKey($order)->firstOrFail();
 
         return view('portals.logistics.orders.form', [
             ...$this->viewContext($context),
@@ -447,13 +505,15 @@ class LogisticsOrderController extends Controller
         ]);
     }
 
-    public function detail(Request $request, LogisticsOrder $order): Response|View
+    public function detail(Request $request, string $order): Response|View
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
             return $context;
         }
 
+        $this->requireSharedOrders();
+        $order = SharedLogisticsOrder::query()->whereKey($order)->firstOrFail();
         $order->load([
             'items' => fn ($query) => $query->with('skuMapping')->orderBy('id'),
             'paypalAccount',
@@ -516,6 +576,7 @@ class LogisticsOrderController extends Controller
             return $context;
         }
 
+        $this->requireSharedOrders();
         $validated = $request->validate([
             'scope' => ['required', 'in:selected,filtered'],
             'selected_ids' => ['required_if:scope,selected', 'array', 'min:1'],
@@ -610,6 +671,8 @@ class LogisticsOrderController extends Controller
             $this->tracking->scheduleForOrder($order);
         }
         $this->skuMappings->scheduleForOrder($order);
+
+        $this->syncSharedOrders([$order->getKey()]);
 
         return redirect()
             ->route('logistics.orders.index')
@@ -801,7 +864,7 @@ class LogisticsOrderController extends Controller
             ->whereNull('assistant_domain_store_id')
             ->orderBy('id')
             ->get();
-        $assigned = 0;
+        $assignedIds = [];
         $conflicts = 0;
 
         foreach ($orders as $order) {
@@ -835,11 +898,13 @@ class LogisticsOrderController extends Controller
             $this->ownerTimeline->applySnapshotIfMissing($order, $store);
             $order->save();
             $this->skuMappings->scheduleForOrder($order);
-            $assigned++;
+            $assignedIds[] = $order->getKey();
         }
 
+        $this->syncSharedOrders($assignedIds);
+
         return $this->indexRedirect($request)
-            ->with('success', '批量归属完成：已归属 '.$assigned.' 条，冲突跳过 '.$conflicts.' 条。');
+            ->with('success', '批量归属完成：已归属 '.count($assignedIds).' 条，冲突跳过 '.$conflicts.' 条。');
     }
 
     private function currentTrackingBatch(Request $request, int $actorId): ?LogisticsTrackingSyncBatch
@@ -963,19 +1028,46 @@ class LogisticsOrderController extends Controller
         return $filters;
     }
 
-    private function listedOrders(): Builder
+    private function listedOrders(?Builder $query = null): Builder
     {
-        return LogisticsOrder::query()
+        return ($query ?? LogisticsOrder::query())
             ->where(function (Builder $operator): void {
                 $operator->whereNull('operator_name')
                     ->orWhere('operator_name', 'not like', $this->contains('刷单'));
             });
     }
 
+    private function requireSharedOrders(): void
+    {
+        $db = (new LogisticsOrder())->getConnection();
+        abort_if(! $db->getSchemaBuilder()->hasTable('shop_order_logistics_pending')
+            || $db->table('shop_order_logistics_pending')->where('source_id', 0)->exists(),
+            503, __('logistics.shop_order_backfill.projection_initializing'));
+    }
+
+    private function syncSharedOrders(array $ids): void
+    {
+        $db = (new LogisticsOrder())->getConnection();
+        if ($ids === [] || ! $db->getSchemaBuilder()->hasTable('shop_order_logistics_pending')) {
+            return;
+        }
+
+        try {
+            $exit = \Illuminate\Support\Facades\Artisan::call('shop-orders:backfill-shopify', [
+                '--pending' => true, '--only' => $ids,
+            ]);
+            if ($exit !== 0) {
+                report(new \RuntimeException('Shared order synchronization failed for legacy IDs: '.implode(', ', $ids)));
+            }
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+    }
+
     /** @param array<string, string|int> $filters */
     private function orderQuery(array $filters): Builder
     {
-        $query = $this->listedOrders();
+        $query = $this->listedOrders(SharedLogisticsOrder::query());
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'group_names', 'staff_status', 'buyer_name', 'buyer_email',
@@ -1160,7 +1252,7 @@ class LogisticsOrderController extends Controller
     private function filterOptions(): array
     {
         $values = static function (string $column): array {
-            return LogisticsOrder::query()
+            return SharedLogisticsOrder::query()
                 ->where(function (Builder $operator): void {
                     $operator->whereNull('operator_name')
                         ->orWhere('operator_name', 'not like', '%刷单%');
@@ -1178,7 +1270,7 @@ class LogisticsOrderController extends Controller
         return [
             'stores' => $values('store_name'),
             'owners' => $this->ownerSnapshotColumnsExist()
-                ? LogisticsOrder::query()
+                ? SharedLogisticsOrder::query()
                     ->whereNotNull('assigned_owner_user_id')
                     ->selectRaw('assigned_owner_user_id, MAX(assigned_owner_name) as assigned_owner_name')
                     ->groupBy('assigned_owner_user_id')
