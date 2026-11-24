@@ -558,6 +558,8 @@ class OperationReportDashboardController extends Controller
             'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operator_user_id' => ['required', 'integer'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
+            'shop_domain' => ['nullable', 'string', 'max:255'],
+            'media_source' => ['nullable', 'string', 'max:255'],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
         ]);
@@ -580,8 +582,8 @@ class OperationReportDashboardController extends Controller
             $validated['type'],
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 10),
-            null,
-            null,
+            filled($validated['shop_domain'] ?? null) ? trim((string) $validated['shop_domain']) : null,
+            filled($validated['media_source'] ?? null) ? trim((string) $validated['media_source']) : null,
             (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE),
         ));
     }
