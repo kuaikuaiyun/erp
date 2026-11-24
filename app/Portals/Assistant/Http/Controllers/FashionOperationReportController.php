@@ -311,6 +311,8 @@ class FashionOperationReportController extends Controller
                 }];
         })->filter()->values();
 
+        $operatorOptions = $allRows->pluck('operator')->filter()->unique()->sort()->values();
+
         $departmentOptions = $fashionDepartmentIds->isNotEmpty()
             ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id)
                 // 部门树尚未配置子部门时，项目根部门本身也必须可筛选；
@@ -408,6 +410,7 @@ class FashionOperationReportController extends Controller
             'reportProject' => $project,
             'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'departmentOptions' => $departmentOptions,
+            'operatorOptions' => $operatorOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
                 'exclude_resigned' => $excludeResigned, 'personal_range' => $personalRangeMode, 'profit_coefficient' => $profitCoefficient,
                 'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],

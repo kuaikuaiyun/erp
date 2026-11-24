@@ -138,6 +138,13 @@ class OperationReportReviewController extends Controller
             ->orderBy('operation_department_name')
             ->get();
 
+        $operatorOptions = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
+            ->whereNotNull('operator_name')
+            ->where('operator_name', '<>', '')
+            ->distinct()
+            ->orderBy('operator_name')
+            ->pluck('operator_name');
+
         $reportsQuery = $this->scopeReports(OperationReport::withTrashed(), $context['user']);
         $reports = $reportsQuery
             ->with(['reviewer:id,name,username', 'operationDepartment:id,name'])
@@ -166,6 +173,7 @@ class OperationReportReviewController extends Controller
             'user' => $context['user'],
             'reports' => $reports,
             'teamOptions' => $teamOptions,
+            'operatorOptions' => $operatorOptions,
             'pendingCount' => $this->scopeReports(OperationReport::query(), $context['user'])
                 ->where('status', OperationReport::STATUS_PENDING)->count(),
             'filters' => [

@@ -5,18 +5,18 @@ namespace App\Portals\Assistant\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
-use App\Support\AppLovinGiftConsumption;
 use App\Models\AssistantDomainStore;
 use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
-use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AppLovinHistoricalSpendService;
-use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerAttributionService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Services\DepartmentAuthorizationService;
+use App\Support\AppLovinGiftConsumption;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
@@ -79,6 +79,13 @@ class AppLovinPerformanceReportController extends Controller
             'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
             'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
+            'sort_by' => ['nullable', Rule::in([
+                'first_subscription_orders', 'subscription_rate', 'first_subscription_revenue',
+                'first_orders', 'first_revenue', 'ad_spend', 'roi', 'pre_takeover_consumption',
+                'global_total_consumption', 'total_consumption', 'deducted_consumption',
+                'historical_revenue', 'estimated_total_roi',
+            ])],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $timezone = (string) ($filters['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $today = now($timezone)->startOfDay();
@@ -170,16 +177,12 @@ class AppLovinPerformanceReportController extends Controller
             }));
         $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
         $globalSpendTotals = $this->historicalSpend->totalsByAccountNumber();
+        $globalSpendLedger = $this->historicalSpend->ledgerByAccountNumber();
+        $giftAccountNumbers = AppLovinSpendScreenshot::query()->whereNotNull('account_number')->pluck('account_number')
+            ->map(fn ($number): string => AppLovinHistoricalSpendService::normalizeAccountNumber((string) $number))
+            ->filter()->unique()->values();
         unset($accountSpendRecords);
         gc_collect_cycles();
-        $giftScreenshots = AppLovinSpendScreenshot::query()
-            ->whereIn('operator_user_id', $accountSpendReports->pluck('operator_user_id')->filter()->unique()->values())
-            ->get()
-            ->keyBy(fn (AppLovinSpendScreenshot $screenshot): string => AppLovinGiftConsumption::accountIdentity(
-                (int) $screenshot->operator_user_id,
-                (string) $screenshot->account_number,
-                (string) $screenshot->account_key,
-            ));
         $historicalRevenueByAccount = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores, $calculatedByOperator, $dateFrom, $dateTo): array {
             $storeAds = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad): bool => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
@@ -192,7 +195,9 @@ class AppLovinPerformanceReportController extends Controller
                         (string) ($ad['account_number'] ?? '')
                     );
                     $storeId = (int) ($ad['assistant_domain_store_id'] ?? 0);
-                    if ($storeId < 1) $storeId = (int) ($bindings->get($accountKey) ?? 0);
+                    if ($storeId < 1) {
+                        $storeId = (int) ($bindings->get($accountKey) ?? 0);
+                    }
                     $domain = trim((string) ($ad['store_domain'] ?? $stores->get($storeId)?->domain ?? ''));
 
                     return $storeId > 0 && $domain !== '' ? [
@@ -315,25 +320,30 @@ class AppLovinPerformanceReportController extends Controller
 
         $rows = $dailyRows
             ->groupBy(fn (array $row) => implode('|', [$row['department_id'], $row['operator_user_id'], $row['store_id']]))
-            ->map(function ($group) use ($accountSpendTotals, $globalSpendTotals, $giftScreenshots, $historicalRevenueByAccount): array {
+            ->map(function ($group) use ($globalSpendTotals, $globalSpendLedger, $giftAccountNumbers, $historicalRevenueByAccount): array {
                 $first = $group->first();
                 $orders = (int) $group->sum('first_orders');
                 $revenue = round((float) $group->sum('first_revenue'), 2);
                 $subscriptionOrders = (int) $group->sum('first_subscription_orders');
                 $subscriptionRevenue = round((float) $group->sum('first_subscription_revenue'), 2);
                 $spend = round((float) $group->sum('ad_spend'), 2);
-                $giftEligibleKeys = $group->pluck('account_keys')->flatten()->unique()
-                    ->filter(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0) >= 5000);
-                $giftStatus = $giftEligibleKeys->isEmpty()
-                    ? 'not_eligible'
-                    : ($giftEligibleKeys->contains(fn ($key) => $giftScreenshots->has($key)) ? 'available' : 'pending_upload');
                 $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
                 $accountNumberValues = $group->pluck('account_numbers')->flatten()->filter()->unique()->values();
-                $deductedConsumption = round((float) $accountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
-                    $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
-
-                    return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
-                }), 2);
+                $giftEligibleNumbers = $accountNumberValues->filter(fn ($number): bool => (float) $globalSpendTotals->get(AppLovinHistoricalSpendService::normalizeAccountNumber((string) $number), 0) >= 5000
+                );
+                $giftStatus = $giftEligibleNumbers->isEmpty()
+                    ? 'not_eligible'
+                    : ($giftEligibleNumbers->contains(fn ($number): bool => $giftAccountNumbers->contains(AppLovinHistoricalSpendService::normalizeAccountNumber((string) $number)))
+                        ? 'available' : 'pending_upload');
+                $segmentMetrics = $this->historicalSpend->segmentMetricsForAccounts(
+                    $globalSpendLedger,
+                    $accountNumberValues,
+                    (int) $first['operator_user_id'],
+                    AppLovinHistoricalSpendService::SUBSCRIPTION_PROJECT,
+                    (string) $group->max('date'),
+                    $giftAccountNumbers,
+                );
+                $deductedConsumption = (float) $segmentMetrics['deducted_consumption'];
                 $historicalRevenue = round(max(
                     (float) $accountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
                     $revenue,
@@ -361,9 +371,14 @@ class AppLovinPerformanceReportController extends Controller
                     'average_order_value' => $orders > 0 ? $revenue / $orders : null,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
-                    'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
+                    'total_consumption' => (float) $segmentMetrics['segment_consumption'],
+                    'pre_takeover_consumption' => (float) $segmentMetrics['before_consumption'],
                     'global_total_consumption' => $this->historicalSpend->sumForAccountNumbers($globalSpendTotals, $accountNumberValues),
+                    'allocated_gift' => (float) $segmentMetrics['allocated_gift'],
                     'deducted_consumption' => $deductedConsumption,
+                    'all_gift_deducted' => (bool) $segmentMetrics['all_gift_deducted'],
+                    'gift_calculations' => $segmentMetrics['calculations'],
+                    'segment_keys' => $segmentMetrics['segment_keys'],
                     'historical_revenue' => $historicalRevenue,
                     'estimated_total_roi' => $deductedConsumption > 0 ? $historicalRevenue / $deductedConsumption : null,
                     'gift_status' => $giftStatus,
@@ -408,20 +423,24 @@ class AppLovinPerformanceReportController extends Controller
         }
 
         $displayMode = (string) ($filters['display_mode'] ?? 'performance');
-        $rows = $rows->sort(function (array $left, array $right) use ($displayMode): int {
-            if ($displayMode === 'team') {
-                $rank = static fn (array $row): int => match ($row['team_position'] ?? Department::POSITION_MEMBER) {
-                    Department::POSITION_MANAGER => 0,
-                    Department::POSITION_DEPUTY => 1,
-                    default => 2,
-                };
-
-                return [$left['department'], $rank($left), $left['operator'], $left['store_domain']]
-                    <=> [$right['department'], $rank($right), $right['operator'], $right['store_domain']];
+        $sortBy = (string) ($filters['sort_by'] ?? 'ad_spend');
+        $sortDirection = (string) ($filters['sort_direction'] ?? 'desc');
+        $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortDirection): int {
+            $leftValue = $left[$sortBy] ?? null;
+            $rightValue = $right[$sortBy] ?? null;
+            if ($leftValue === null || $rightValue === null) {
+                $comparison = $leftValue === $rightValue ? 0 : ($leftValue === null ? 1 : -1);
+            } else {
+                $comparison = (float) $leftValue <=> (float) $rightValue;
+            }
+            if ($sortDirection === 'desc' && $leftValue !== null && $rightValue !== null) {
+                $comparison *= -1;
             }
 
-            return [(int) $right['first_orders'], (float) $right['ad_spend']]
-                <=> [(int) $left['first_orders'], (float) $left['ad_spend']];
+            return $comparison !== 0
+                ? $comparison
+                : [$left['department'], $left['operator'], $left['store_domain']]
+                    <=> [$right['department'], $right['operator'], $right['store_domain']];
         })->values();
         $totals = [
             'stores' => $rows->pluck('store_domain')->unique()->count(),
@@ -434,17 +453,14 @@ class AppLovinPerformanceReportController extends Controller
         $totals['average_order_value'] = $totals['orders'] > 0 ? $totals['revenue'] / $totals['orders'] : null;
         $totals['subscription_rate'] = $totals['orders'] > 0 ? $totals['subscription_orders'] / $totals['orders'] : null;
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
-        $totals['total_consumption'] = round((float) $rows->pluck('account_keys')->flatten()->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2);
+        $totals['total_consumption'] = round((float) $rows->sum('total_consumption'), 2);
         $totals['global_total_consumption'] = $this->historicalSpend->sumForAccountNumbers(
             $globalSpendTotals,
             $rows->pluck('account_number_values')->flatten()->filter()->unique(),
         );
         $totalAccountKeys = $rows->pluck('account_keys')->flatten()->filter()->unique()->values();
-        $totals['deducted_consumption'] = round((float) $totalAccountKeys->sum(function ($key) use ($accountSpendTotals, $giftScreenshots): float {
-            $consumption = (float) ($accountSpendTotals->get($key) ?? 0);
-
-            return AppLovinGiftConsumption::net($consumption, $giftScreenshots->has($key));
-        }), 2);
+        $totals['pre_takeover_consumption'] = round((float) $rows->sum('pre_takeover_consumption'), 2);
+        $totals['deducted_consumption'] = round((float) $rows->sum('deducted_consumption'), 2);
         $totals['historical_revenue'] = round(max(
             (float) $totalAccountKeys->sum(fn ($key) => (float) ($historicalRevenueByAccount[$key] ?? 0)),
             (float) $totals['revenue'],
@@ -466,9 +482,11 @@ class AppLovinPerformanceReportController extends Controller
             'gift_status' => $row['gift_status'],
             'roi' => $row['roi'],
             'account_numbers' => $row['account_numbers'],
+            'pre_takeover_consumption' => $row['pre_takeover_consumption'],
             'total_consumption' => $row['total_consumption'],
             'global_total_consumption' => $row['global_total_consumption'],
             'deducted_consumption' => $row['deducted_consumption'],
+            'all_gift_deducted' => $row['all_gift_deducted'],
             'historical_revenue' => $row['historical_revenue'],
             'estimated_total_roi' => $row['estimated_total_roi'],
         ])->values();
@@ -479,6 +497,8 @@ class AppLovinPerformanceReportController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
             'displayMode' => $displayMode,
+            'sortBy' => $sortBy,
+            'sortDirection' => $sortDirection,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'timezone' => $timezone,
@@ -513,8 +533,12 @@ class AppLovinPerformanceReportController extends Controller
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
             $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
-            if ($value === '+08:00') $label .= '（北京时间）';
-            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) $label .= '（默认）';
+            if ($value === '+08:00') {
+                $label .= '（北京时间）';
+            }
+            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) {
+                $label .= '（默认）';
+            }
             $options[$value] = $label;
         }
 
