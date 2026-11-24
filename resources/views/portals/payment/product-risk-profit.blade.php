@@ -3,17 +3,13 @@
 @php
     $translationPrefix = 'payment.product_risk_profit';
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
-    $summary = $dashboard['summary'];
     $pagination = $dashboard['pagination'];
     $filters = $dashboard['filters'];
-    $money = static fn ($value) => '$'.number_format((float) $value, 2);
     $number = static fn ($value) => number_format((float) $value, ((float) $value == (int) $value) ? 0 : 2);
-    $rate = static fn ($value) => number_format((float) $value, 2).'%';
     $metricFilterText = $translationPrefix.'.metric_filters';
-    $rateFilterOrder = [
-        'paypal_refund_rate', 'credit_card_refund_rate', 'combined_refund_rate',
-        'paypal_dispute_rate', 'credit_card_dispute_rate',
-        'paypal_delivered_dispute_rate', 'credit_card_delivered_dispute_rate',
+    $rateFilterGroups = [
+        'refund_filters' => ['paypal_refund_rate', 'credit_card_refund_rate', 'combined_refund_rate'],
+        'dispute_filters' => ['paypal_dispute_rate', 'credit_card_dispute_rate', 'paypal_delivered_dispute_rate', 'credit_card_delivered_dispute_rate'],
     ];
     $metricValue = static function (string $metric, string $bound) use ($filters): string {
         $value = old($metric.'_'.$bound, $filters['metric_ranges'][$metric][$bound] ?? '');
@@ -21,17 +17,24 @@
         return is_scalar($value) ? (string) $value : '';
     };
     $metricFields = ['order_count_min'];
-    foreach ($rateFilterOrder as $metric) {
+    foreach (array_merge(...array_values($rateFilterGroups)) as $metric) {
         $metricFields[] = $metric.'_min';
         $metricFields[] = $metric.'_max';
     }
     $metricErrors = collect($metricFields)->flatMap(fn ($field) => $errors->get($field));
+    $exportFilters = array_intersect_key($filters, array_flip(['date_from', 'date_to', 'store', 'name', 'keyword', 'only_abnormal', 'sort', 'direction']));
+    foreach ($filters['metric_ranges'] ?? [] as $metric => $bounds) {
+        foreach ($bounds as $bound => $value) {
+            $exportFilters[$metric.'_'.$bound] = $value;
+        }
+    }
 @endphp
 
 @section('page_title', __($translationPrefix.'.page_title'))
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-metrics2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-21">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table8">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush
@@ -41,15 +44,33 @@
     <h1>{{ __($translationPrefix.'.page_title') }} <small>{{ __($translationPrefix.'.page_subtitle') }}</small></h1>
 </section>
 <section class="content payment-portal-page payment-product-risk-page">
-    <div class="box box-solid payment-filter-box"><div class="box-body">
-        <form class="payment-operation-filter-form" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter>
+    <div class="box box-solid payment-filter-box payment-risk-filter-panel"><div class="box-body">
+        <form class="payment-risk-filter-form flt" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter
+            data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
+            data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}">
             <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
             <input type="hidden" name="sort" value="{{ $filters['sort'] }}"><input type="hidden" name="direction" value="{{ $filters['direction'] }}">
-            <div class="payment-account-filter-field payment-account-date-mode-field"><span>{{ __('payment.account_risk.filters.date_mode') }}</span><input type="hidden" name="date_mode" value="{{ $filters['date_mode'] }}" data-payment-account-date-mode-input><div class="payment-account-date-mode" role="group" aria-label="{{ __('payment.account_risk.filters.date_mode') }}"><button type="button" class="{{ $filters['date_mode'] === 'order' ? 'active' : '' }}" data-payment-account-date-mode="order">{{ __('payment.account_risk.filters.payment_date') }}</button><button type="button" class="{{ $filters['date_mode'] === 'event' ? 'active' : '' }}" data-payment-account-date-mode="event">{{ __('payment.account_risk.filters.event_date') }}</button></div></div>
-            <label class="payment-operation-filter-field"><span>{{ __('payment.common.period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>@endforeach</select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.only_abnormal') }}</span><select class="form-control" name="only_abnormal"><option value="">{{ __($translationPrefix.'.filters.all_products') }}</option><option value="1" @selected($filters['only_abnormal'] === '1')>{{ __($translationPrefix.'.filters.abnormal') }}</option></select></label>
+            <div class="flt-filter-grid payment-risk-filter-grid">
+                <div><label class="flt-field-label" for="payment-risk-date-from">{{ __($translationPrefix.'.layout.order_date') }}</label><div class="flt-time-range">
+                    <input id="payment-risk-date-from" class="form-control" type="date" name="date_from" aria-label="{{ __($translationPrefix.'.layout.date_from') }}" value="{{ $filters['date_from'] }}">
+                    <input class="form-control" type="date" name="date_to" aria-label="{{ __($translationPrefix.'.layout.date_to') }}" value="{{ $filters['date_to'] }}">
+                </div></div>
+                <div><label class="flt-field-label" for="payment-risk-store">{{ __($translationPrefix.'.filters.store') }}</label>
+                    <select id="payment-risk-store" class="form-control" name="store" data-filter-searchable>
+                        <option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>
+                        @foreach(array_unique(array_filter([$filters['store'], ...$dashboard['stores']])) as $store)
+                            <option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div><label class="flt-field-label" for="payment-risk-keyword">{{ __($translationPrefix.'.filters.product') }}</label>
+                    <input id="payment-risk-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}">
+                </div>
+                <div><label class="flt-field-label" for="payment-risk-status">{{ __($translationPrefix.'.filters.only_abnormal') }}</label>
+                    <select id="payment-risk-status" class="form-control" name="only_abnormal"><option value="">{{ __($translationPrefix.'.filters.all_products') }}</option><option value="1" @selected($filters['only_abnormal'] === '1')>{{ __($translationPrefix.'.filters.abnormal') }}</option></select>
+                </div>
+            </div>
+            <p class="payment-risk-refund-scope">{{ __($translationPrefix.'.layout.refund_scope') }}</p>
             <details class="payment-product-metric-filters" @if(!empty($filters['metric_ranges']) || $metricErrors->isNotEmpty()) open @endif>
                 <summary>{{ __($metricFilterText.'.title') }}</summary>
                 <div class="payment-product-metric-filter-content">
@@ -61,7 +82,7 @@
                             @endforeach
                         </ul>
                     @endif
-                    <div class="payment-product-metric-filter-grid">
+                    <div class="payment-product-metric-filter-grid payment-risk-metric-count">
                         <fieldset>
                             <legend>{{ __($metricFilterText.'.metrics.order_count') }}</legend>
                             <div class="payment-product-metric-bounds payment-product-metric-bounds-single">
@@ -71,7 +92,12 @@
                                 </label>
                             </div>
                         </fieldset>
-                        @foreach($rateFilterOrder as $metric)
+                    </div>
+                    @foreach($rateFilterGroups as $groupLabel => $metrics)
+                        <section class="payment-risk-metric-section" aria-labelledby="payment-risk-{{ $groupLabel }}">
+                        <h3 id="payment-risk-{{ $groupLabel }}">{{ __($translationPrefix.'.layout.'.$groupLabel) }}</h3>
+                        <div class="payment-product-metric-filter-grid">
+                        @foreach($metrics as $metric)
                             @php($metricLabel = __($metricFilterText.'.metrics.'.$metric))
                             <fieldset>
                                 <legend>{{ $metricLabel }}</legend>
@@ -87,24 +113,60 @@
                                 </div>
                             </fieldset>
                         @endforeach
-                    </div>
+                        </div>
+                        </section>
+                    @endforeach
                 </div>
             </details>
-            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" data-payment-product-export data-export-url="{{ route('payment.product-risk-profit.export') }}"><i class="fa fa-file-excel-o"></i> {{ __($translationPrefix.'.export.button') }}</button></div>
+            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a></div>
         </form>
     </div></div>
-
-    <div class="payment-kpi-grid payment-kpi-grid-three">
-        <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-blue"><i class="fa fa-cubes"></i></span><div><p>{{ __($translationPrefix.'.kpis.products') }}</p><strong>{{ $number($summary['product_count']) }} / {{ $number($summary['sales']) }}</strong><small>{{ __($translationPrefix.'.kpis.products_real_note') }}</small></div></article>
-        <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-cyan"><i class="fa fa-usd"></i></span><div><p>{{ __($translationPrefix.'.kpis.receipts') }}</p><strong>{{ $money($summary['revenue']) }}</strong><small>{{ __($translationPrefix.'.kpis.receipts_real_note') }}</small></div></article>
-        <article class="payment-kpi-card payment-tone-warning"><span class="payment-kpi-icon payment-kpi-icon-orange"><i class="fa fa-reply"></i></span><div><p>{{ __($translationPrefix.'.kpis.refund') }} <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.refund_amount_rate') }}"></i></p><strong>{{ $money($summary['actual_refunds']) }} / {{ $rate($dashboard['refund_rate']) }}</strong><small>{{ __($translationPrefix.'.kpis.refund_real_note') }}</small></div></article>
-    </div>
 
     <section class="payment-refund-reason-report is-collapsed" data-payment-refund-report data-url="{{ route('payment.product-risk-profit.tab') }}" data-loaded="false">
         <header><div><h3><i class="fa fa-pie-chart"></i> {{ __($translationPrefix.'.refund_report.title') }}</h3><p>{{ __($translationPrefix.'.refund_report.hint') }}</p></div><div class="payment-refund-report-actions"><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="{{ __($translationPrefix.'.refund_report.expand') }}" data-collapse-text="{{ __($translationPrefix.'.refund_report.collapse') }}"><i class="fa fa-angle-down"></i> <span>{{ __($translationPrefix.'.refund_report.expand') }}</span></button></div></header>
     </section>
 
-    <div class="payment-tab-panel payment-product-risk-primary-panel">@include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])</div>
+    <div class="payment-tab-panel payment-product-risk-primary-panel">
+        <div class="flt-toolbar payment-risk-list-toolbar">
+            <div class="flt-selection">
+                <span>{{ __('frontend_list_template.records', ['count' => $number($pagination['total'])]) }}</span>
+                <span class="flt-toolbar-divider" aria-hidden="true"></span>
+                <span aria-live="polite" data-payment-risk-selected data-count-label="{{ __('frontend_list_template.selected_records') }}">{{ __('frontend_list_template.selected_records', ['count' => 0]) }}</span>
+                <button type="button" class="flt-btn" data-payment-risk-clear disabled>{{ __('frontend_list_template.clear_selected') }}</button>
+            </div>
+            <div class="flt-toolbar-actions">
+                <button class="flt-btn" type="button" data-payment-product-export aria-haspopup="dialog" aria-controls="payment-risk-export-modal" @disabled($pagination['total'] === 0)>
+                    <i class="fa fa-download" aria-hidden="true"></i> {{ __('frontend_list_template.export') }}
+                </button>
+            </div>
+        </div>
+        @include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])
+    </div>
+
+    <div class="modal fade" id="payment-risk-export-modal" tabindex="-1" role="dialog" aria-labelledby="payment-risk-export-title">
+        <div class="modal-dialog modal-sm" role="document">
+            <form class="modal-content" method="post" action="{{ route('payment.product-risk-profit.export-list') }}" data-payment-risk-export-form>
+                @csrf
+                @foreach($exportFilters as $field => $value)
+                    <input type="hidden" name="{{ $field }}" value="{{ $value }}">
+                @endforeach
+                <input type="hidden" name="page" value="{{ $pagination['current_page'] }}">
+                <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button>
+                    <h4 id="payment-risk-export-title" class="modal-title">{{ __('frontend_list_template.export_title') }}</h4>
+                </div>
+                <div class="modal-body payment-risk-export-choices">
+                    <label><input type="radio" name="scope" value="filtered" checked> {{ __('frontend_list_template.export_filtered', ['count' => $number($pagination['total'])]) }}</label>
+                    <label><input type="radio" name="scope" value="selected" disabled> <span data-payment-risk-export-selected data-count-label="{{ __($translationPrefix.'.layout.export_selected') }}">{{ __($translationPrefix.'.layout.export_selected', ['count' => 0]) }}</span></label>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="flt-btn" data-dismiss="modal">{{ __('frontend_list_template.cancel') }}</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa fa-download" aria-hidden="true"></i> {{ __('frontend_list_template.export') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <div class="modal fade payment-product-image-modal" id="payment-product-image-modal" tabindex="-1" role="dialog" aria-labelledby="payment-product-image-title"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span>&times;</span></button><h4 id="payment-product-image-title">{{ __($translationPrefix.'.image_preview.title') }}</h4><p data-payment-product-image-name></p></div><div class="modal-body"><img data-payment-product-image-preview src="" alt=""></div></div></div></div>
 
@@ -119,6 +181,7 @@
 
 @push('scripts')
 <script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')) };</script>
-<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
+<script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=5" defer></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-export7"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

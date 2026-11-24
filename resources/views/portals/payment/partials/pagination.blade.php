@@ -3,8 +3,10 @@
     $pageRoute = $routeName ?? request()->route()->getName();
     $pageUrl = static fn (int $page) => route($pageRoute, array_merge($query, ['page' => $page, 'per_page' => $pagination['per_page']]));
 @endphp
-<div class="payment-unified-pagination">
-    <span>{{ __('payment.common.pagination.summary', ['from' => $pagination['from'], 'to' => $pagination['to'], 'total' => $pagination['total']]) }}</span>
+<div @class(['payment-unified-pagination', 'payment-pagination-controls-only' => $controlsOnly ?? false])>
+    @unless($controlsOnly ?? false)
+        <span>{{ __('payment.common.pagination.summary', ['from' => $pagination['from'], 'to' => $pagination['to'], 'total' => $pagination['total']]) }}</span>
+    @endunless
     <form method="get" action="{{ route($pageRoute) }}" class="payment-pagination-form">
         @foreach($query as $key => $value)
             @if(is_scalar($value))

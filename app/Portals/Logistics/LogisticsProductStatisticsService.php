@@ -3444,11 +3444,12 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function applyDateFilters(object $query, array $filters, string $orderTable = 'logistics_orders'): void
     {
+        $column = $orderTable.(($filters['date_mode'] ?? '') === 'placed' ? '.order_created_at' : '.paid_at');
         if (trim((string) ($filters['date_from'] ?? '')) !== '') {
-            $query->where($orderTable.'.paid_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
+            $query->where($column, '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
         }
         if (trim((string) ($filters['date_to'] ?? '')) !== '') {
-            $query->where($orderTable.'.paid_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+            $query->where($column, '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
         }
     }
 

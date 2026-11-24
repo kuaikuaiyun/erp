@@ -35,14 +35,6 @@
 
         initFormulaTooltips(page);
 
-        page.on('click', '[data-payment-product-filter] [data-payment-account-date-mode]', function () {
-            var button = $(this);
-            var form = button.closest('form');
-            form.find('[data-payment-account-date-mode-input]').val(String(button.data('paymentAccountDateMode') || 'order'));
-            form.find('[data-payment-account-date-mode]').removeClass('active').attr('aria-pressed', 'false');
-            button.addClass('active').attr('aria-pressed', 'true');
-        });
-
         page.on('click', '[data-payment-refund-report-toggle]', function () {
             var button = $(this);
             var panel = button.closest('[data-payment-refund-report-panel]');
@@ -76,17 +68,74 @@
             button.find('span').text(collapsed ? String(button.data('expandText') || '') : String(button.data('collapseText') || ''));
         });
 
-        page.on('click', '[data-payment-product-export]', function () {
-            var button = $(this);
+        var riskExportModal = page.find('#payment-risk-export-modal');
+        var riskPanel = page.find('.payment-product-risk-primary-panel');
+        var riskChecks = riskPanel.find('[data-payment-risk-check]');
+        var riskCheckPage = riskPanel.find('[data-payment-risk-check-page]');
+
+        function updateRiskSelection() {
+            var count = riskChecks.filter(':checked').length;
+            riskCheckPage.prop({
+                checked: count > 0 && count === riskChecks.length,
+                indeterminate: count > 0 && count < riskChecks.length,
+                disabled: riskChecks.length === 0
+            });
+            riskPanel.find('[data-payment-risk-clear]').prop('disabled', count === 0);
+            riskExportModal.find('[name="scope"][value="selected"]').prop('disabled', count === 0);
+            riskPanel.find('[data-payment-risk-selected]').add(riskExportModal.find('[data-payment-risk-export-selected]')).each(function () {
+                this.textContent = this.dataset.countLabel.replace(':count', count);
+            });
+        }
+
+        function clearRiskSelection() {
+            riskChecks.prop('checked', false);
+            updateRiskSelection();
+        }
+
+        if (riskExportModal.length) {
+            clearRiskSelection();
+            window.addEventListener('pageshow', clearRiskSelection);
+            riskCheckPage.on('change', function () {
+                riskChecks.prop('checked', this.checked);
+                updateRiskSelection();
+            });
+            riskChecks.on('change', updateRiskSelection);
+            riskPanel.on('click', '[data-payment-risk-clear]', clearRiskSelection);
+            riskPanel.on('click', '[data-payment-product-export]', function () {
+                riskExportModal.find('[name="scope"][value="filtered"]').prop('checked', true);
+                riskExportModal.modal('show');
+            });
+            riskExportModal.on('hidden.bs.modal', function () {
+                riskPanel.find('[data-payment-product-export]').trigger('focus');
+            });
+        }
+
+        riskExportModal.on('submit', '[data-payment-risk-export-form]', function (event) {
+            event.preventDefault();
+            var form = this;
+            var button = $(form).find('[type="submit"]');
             if (button.prop('disabled')) return;
-            var url = String(button.data('exportUrl') || '');
-            if (!url) return;
+            var scope = form.elements.scope.value;
+            var selected = riskChecks.filter(':checked');
+            if (scope === 'selected' && !selected.length) return;
+            var body = new URLSearchParams(new FormData(form));
+            if (scope === 'selected') {
+                selected.each(function () { body.append('product_ids[]', this.value); });
+            }
             var text = config.productExport || {};
             var originalHtml = button.html();
             button.prop('disabled', true).attr('aria-busy', 'true').html('<i class="fa fa-spinner fa-spin"></i> ' + $('<div>').text(text.exporting || '').html());
 
-            fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function (response) {
-                if (!response.ok) throw new Error('HTTP ' + response.status);
+            fetch(form.action, {
+                method: 'POST',
+                body: body,
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+            }).then(function (response) {
+                var contentType = response.headers.get('Content-Type') || '';
+                if (!response.ok || response.redirected || !contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+                    throw new Error('HTTP ' + response.status);
+                }
                 var disposition = response.headers.get('Content-Disposition') || '';
                 return response.blob().then(function (blob) { return { blob: blob, disposition: disposition }; });
             }).then(function (result) {
@@ -103,6 +152,7 @@
                 link.click();
                 link.remove();
                 window.setTimeout(function () { window.URL.revokeObjectURL(objectUrl); }, 1000);
+                riskExportModal.modal('hide');
             }).catch(function () {
                 notify('error', text.failed_title || '', text.failed_message || '');
             }).then(function () {
@@ -1339,7 +1389,7 @@
                 channelRisk = channelRisk || {};
                 var channelSummary = ['paypal', 'credit_card'].map(function (channel) {
                     var risk = channelRisk[channel] || {};
-                    return '<article><span>' + pEscape(channel === 'paypal' ? text.paypal_initial : text.credit_card_initial) + '</span><strong>' + pEscape(pRate(risk.dispute_rate || 0)) + '</strong><small>' + pEscape(pNumber(risk.dispute_count || 0) + text.record_unit + ' / ' + pNumber(risk.eligible_order_count || 0) + text.record_unit) + '</small></article>';
+                    return '<article><span>' + pEscape(channel === 'paypal' ? text.paypal_initial : text.credit_card_initial) + '</span><strong>' + pEscape(pRate(risk.dispute_rate || 0)) + '</strong><small>' + pEscape(pNumber(risk.dispute_count || 0) + text.record_unit + ' ÷ ' + pNumber(risk.eligible_order_count || 0) + text.record_unit) + '</small><small>' + pEscape(text.initial_dispute_note) + '</small><small>' + pEscape(text.history_scope) + '</small></article>';
                 }).join('');
                 var channelGroups = detail.channel_groups || {};
                 var channelPanels = ['paypal', 'credit_card'].map(function (channel) {
@@ -1355,14 +1405,29 @@
                             var lost = Math.max(0, previousSubscriptionCount - currentCount);
                             var lostRate = previousSubscriptionCount > 0 ? lost / previousSubscriptionCount * 100 : 0;
                             var churnFormula = replaceProductTokens(formulas.churn_rate, { previous: pNumber(previousSubscriptionCount), current: pNumber(currentCount), lost: pNumber(lost) });
-                            connector = '<div class="payment-product-lifecycle-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</strong></div>';
+                            connector = '<tr class="payment-risk-churn-row"><td colspan="6"><div class="payment-product-lifecycle-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</strong></div></td></tr>';
                         }
                         if (key === 'first_charge' || /^renewal_\d+$/.test(key)) previousSubscriptionCount = currentCount;
-                        return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape(lifecycleLabel(key, group)) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape(text.record_unit) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pRate(group.dispute_rate)) + '<small>' + pEscape(pNumber(group.dispute_count) + text.record_unit + ' / ' + pNumber(group.order_count) + text.record_unit) + '</small></dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
+                        var refundFormula = replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) });
+                        var disputeFormula = replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) });
+                        return connector + '<tr><th scope="row">' + pEscape(lifecycleLabel(key, group)) + '</th>' +
+                            '<td>' + pEscape(pNumber(group.order_count) + ' ' + text.record_unit) + '</td>' +
+                            '<td>' + pEscape(pMoney(group.received_amount)) + '</td>' +
+                            '<td>' + pEscape(pRate(group.refund_rate)) + formulaIcon(refundFormula) + '</td>' +
+                            '<td>' + pEscape(pRate(group.dispute_rate)) + formulaIcon(disputeFormula) + '<small>' +
+                            pEscape(pNumber(group.dispute_count) + text.record_unit + ' ÷ ' + pNumber(group.order_count) + text.record_unit) + '</small></td>' +
+                            '<td>' + pEscape(pMoney(group.realised_loss)) + formulaIcon(formulas.realised_loss) + '</td></tr>';
                     }).join('');
-                    return '<section class="payment-channel-lifecycle"><h4>' + pEscape(channel === 'paypal' ? text.paypal_channel : text.credit_card_channel) + '</h4><div class="payment-lifecycle-grid">' + rows + '</div></section>';
+                    var title = channel === 'paypal' ? text.paypal_channel : text.credit_card_channel;
+                    var headings = ['stage', 'order_count', 'received_amount', 'refund_rate', 'dispute_rate', 'realised_loss'].map(function (key) {
+                        return '<th scope="col">' + pEscape(text[key]) + '</th>';
+                    }).join('');
+                    return '<section class="payment-channel-lifecycle"><h4>' + pEscape(title) + '</h4>' +
+                        '<div class="payment-risk-analysis-scroll" tabindex="0" role="region" aria-label="' + pEscape(title) + '">' +
+                        '<table class="payment-risk-analysis-table"><thead><tr>' + headings + '</tr></thead><tbody>' + rows + '</tbody></table></div></section>';
                 }).join('');
-                return '<section class="payment-order-analysis-channel-summary">' + channelSummary + '</section>' + (channelPanels || '<div class="payment-lifecycle-grid">' + cards + '</div>');
+                return '<section class="payment-order-analysis-channel-summary">' + channelSummary + '</section>' +
+                    (channelPanels ? '<p class="payment-risk-analysis-scope">' + pEscape(text.cohort_scope) + '</p>' + channelPanels : '<div class="payment-lifecycle-grid">' + cards + '</div>');
             }
 
             function renderRefundSelection(row) {
@@ -1492,8 +1557,7 @@
                     detail_type: productModal.find('[name="detail_type"]').val(),
                     detail_outcome: productModal.find('[name="detail_outcome"]').val(),
                     date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
-                    date_mode: page.find('[name="date_mode"]').val(),
-                    store: page.find('[name="store"]').val(), keyword: page.find('[name="keyword"]').val()
+                    store: page.find('[data-payment-product-filter] [name="store"]').val(), keyword: page.find('[data-payment-product-filter] [name="keyword"]').val()
                 };
                 var cacheKey = String(config.productDetailUrl) + '?' + $.param(query);
                 var cached = productState.cache[cacheKey];

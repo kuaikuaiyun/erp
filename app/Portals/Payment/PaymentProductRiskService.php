@@ -118,6 +118,32 @@ class PaymentProductRiskService
         ];
     }
 
+    /** @param list<string>|null $selectedIds */
+    public function exportList(array $filters, ?array $selectedIds): iterable
+    {
+        if ($selectedIds !== null) {
+            foreach ($this->productList($filters)['products'] as $product) {
+                if (in_array($product['id'], $selectedIds, true)) {
+                    yield $product;
+                }
+            }
+
+            return;
+        }
+
+        $filters['per_page'] = 100;
+        for ($page = 1; ; $page++) {
+            $result = $this->productList([...$filters, 'page' => $page]);
+            if ($result['pagination']['current_page'] !== $page) {
+                return;
+            }
+            yield from $result['products'];
+            if ($page >= $result['pagination']['last_page']) {
+                return;
+            }
+        }
+    }
+
     private function productList(array $filters): array
     {
         $ranges = (array) ($filters['metric_ranges'] ?? []);
@@ -306,8 +332,7 @@ class PaymentProductRiskService
             ->where(function ($query): void {
                 $query->whereNull('orders.operator_name')->orWhere('orders.operator_name', 'not like', '%刷单%');
             });
-        if (($filters['date_from'] ?? '') !== '') $orders->where('orders.paid_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
-        if (($filters['date_to'] ?? '') !== '') $orders->where('orders.paid_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+        $this->applyOrderDateRange($orders, $filters);
         if (($filters['store'] ?? '') !== '') $orders->where('orders.store_name', $filters['store']);
         if ($productKey !== null) {
             $orders->whereRaw("{$expression} = ?", [$productKey]);
@@ -405,7 +430,7 @@ class PaymentProductRiskService
         $query = $database->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereRaw("{$expression} = ?", [$productKey]);
-        $this->applyPaidAtRange($query, $filters);
+        $this->applyOrderDateRange($query, $filters);
         if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
 
         $timeline = (clone $query)->selectRaw('MIN(orders.paid_at) as first_order_at, MAX(orders.paid_at) as last_order_at')->first();
@@ -605,7 +630,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @param array<string,mixed> $options */
     private function applyVariantFilters(object $query, array $filters, array $options): void
     {
-        $this->applyPaidAtRange($query, $filters);
+        $this->applyOrderDateRange($query, $filters);
         if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
         $keyword = trim((string) ($options['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -658,7 +683,7 @@ class PaymentProductRiskService
             'orders.shopify_order_number', 'orders.payment_gateway_order_id',
         ];
         $baseOrdersQuery = $ordersQuery();
-        $this->applyPaidAtRange($baseOrdersQuery, $filters);
+        $this->applyOrderDateRange($baseOrdersQuery, $filters);
         if (($filters['store'] ?? '') !== '') $baseOrdersQuery->where('orders.store_name', $filters['store']);
         $baseOrders = $baseOrdersQuery->select($columns)->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
         $cohortReferences = $baseOrders
@@ -778,15 +803,16 @@ class PaymentProductRiskService
     }
 
     /** @param array<string,mixed> $filters */
-    private function applyPaidAtRange(object $query, array $filters, string $column = 'orders.paid_at'): void
+    private function applyOrderDateRange(object $query, array $filters): void
     {
+        $column = ($filters['date_mode'] ?? '') === 'placed' ? 'orders.order_created_at' : 'orders.paid_at';
         $from = trim((string) ($filters['date_from'] ?? ''));
         $to = trim((string) ($filters['date_to'] ?? ''));
         if ($from !== '') {
-            $query->where($column, '>=', Carbon::parse($from)->startOfDay()->toDateTimeString());
+            $query->where($column, '>=', Carbon::parse($from, 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
         }
         if ($to !== '') {
-            $query->where($column, '<', Carbon::parse($to)->addDay()->startOfDay()->toDateTimeString());
+            $query->where($column, '<', Carbon::parse($to, 'Asia/Shanghai')->addDay()->startOfDay()->utc()->toDateTimeString());
         }
     }
 }

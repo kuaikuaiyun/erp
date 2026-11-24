@@ -357,6 +357,24 @@ class PaymentPortalController extends Controller
         );
     }
 
+    public function exportProductRiskList(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $selection = $request->validate([
+            'scope' => ['required', Rule::in(['filtered', 'selected'])],
+            'product_ids' => ['required_if:scope,selected', 'array', 'max:100'],
+            'product_ids.*' => ['required', 'string', 'max:512', 'distinct'],
+        ]);
+        $filters = $this->productRiskFilters($request);
+        $selectedIds = $selection['scope'] === 'selected' ? $selection['product_ids'] : null;
+
+        return $this->productAlertExport->downloadRiskList($this->productRisk->exportList($filters, $selectedIds));
+    }
+
     public function exportProductAlerts(Request $request): Response
     {
         $context = $this->portalContext($request);
@@ -791,7 +809,7 @@ class PaymentPortalController extends Controller
         return [
             'date_from' => (string) ($input['date_from'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'date_to' => (string) ($input['date_to'] ?? $today->format('Y-m-d')),
-            'date_mode' => (string) ($input['date_mode'] ?? 'order'),
+            'date_mode' => 'placed',
             'store' => trim((string) ($input['store'] ?? '')),
             'name' => trim((string) ($input['name'] ?? '')),
             'keyword' => trim((string) ($input['keyword'] ?? '')),

@@ -541,6 +541,7 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
     Route::get('/account-risk/accounts/{account}/monthly-report/export', [PaymentPortalController::class, 'exportAccountMonthlyReport'])->name('payment.account-risk.accounts.monthly-report.export');
     Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');
     Route::get('/product-risk-profit/export', [PaymentPortalController::class, 'exportProductRiskProfit'])->name('payment.product-risk-profit.export');
+    Route::post('/product-risk-profit/export', [PaymentPortalController::class, 'exportProductRiskList'])->name('payment.product-risk-profit.export-list');
     Route::get('/product-risk-profit/tab', [PaymentPortalController::class, 'productRiskProfitTab'])->name('payment.product-risk-profit.tab');
     Route::get('/product-risk-profit/detail', [PaymentPortalController::class, 'productRiskProfitDetail'])->name('payment.product-risk-profit.detail');
     Route::get('/product-alerts', [PaymentPortalController::class, 'productAlerts'])->name('payment.product-alerts.index');

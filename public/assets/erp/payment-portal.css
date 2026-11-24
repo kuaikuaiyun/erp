@@ -2,18 +2,34 @@
 .payment-alert-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(92px,1fr));gap:8px}.payment-alert-summary-grid span{display:flex;flex-direction:column;gap:2px}.payment-alert-summary-grid small{color:#6d8297}.payment-alert-summary-grid strong{color:#123d63;font-size:14px}.payment-alert-summary-grid em{color:#7890a5;font-size:11px;font-style:normal}.payment-alert-store-panel{margin-top:14px}.payment-product-order-range{display:flex;align-items:center;gap:8px;margin:8px 0 12px;color:#55728d}.payment-product-order-range b{color:#244d70}.payment-product-store-distribution>div>span{display:flex;flex-direction:column;gap:3px}.payment-product-store-distribution>div>span:last-child{text-align:right}.payment-product-store-distribution small{color:#71879b;font-weight:400}@media(max-width:900px){.payment-alert-summary-grid{grid-template-columns:repeat(2,minmax(120px,1fr))}}
 .payment-refund-report-loader{display:flex;align-items:center;justify-content:center;min-height:86px;margin:14px 0;padding:18px;border:1px solid #d5e2ed;border-radius:7px;background:#fff;color:#66829b}.payment-refund-report-loader i{margin-right:7px;color:#258dca}.payment-refund-report-loader.is-error{color:#d9534f}.payment-refund-reason-report{margin:14px 0;border:1px solid #d5e2ed;border-radius:7px;background:#fff;overflow:hidden}.payment-refund-reason-report>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 16px;border-bottom:1px solid #d5e2ed;background:#f8fbfd}.payment-refund-reason-report h3{margin:0;color:#173f63;font-size:16px;font-weight:700}.payment-refund-reason-report h3 i{margin-right:7px;color:#278fc9}.payment-refund-reason-report header p{margin:4px 0 0;color:#71879a;font-size:12px}.payment-refund-report-total{display:flex;align-items:center;gap:8px;white-space:nowrap}.payment-refund-report-total span,.payment-refund-report-total strong{padding:5px 9px;border:1px solid #cfe1ef;border-radius:14px;background:#eef7fd;color:#23618e;font-size:12px}.payment-refund-report-total strong{color:#0f527e}.payment-refund-reason-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.payment-refund-reason-columns>article{padding:13px 16px}.payment-refund-reason-columns>article+article{border-left:1px solid #dce7ef}.payment-refund-reason-columns h4{margin:0 0 8px;color:#244e70;font-size:14px;font-weight:700}.payment-refund-reason-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed #dfe8ef}.payment-refund-reason-row:last-child{border-bottom:0}.payment-refund-reason-row>div{min-width:0}.payment-refund-reason-row strong{display:block;overflow:hidden;color:#294e6c;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.payment-refund-reason-row small{display:block;margin-top:2px;color:#8094a6;font-size:11px}.payment-refund-reason-row>span{flex:0 0 auto;color:#153f61;font-size:13px;font-weight:700;text-align:right}.payment-refund-reason-row>span small{font-weight:400}.payment-refund-report-empty{margin:0;padding:22px;text-align:center;color:#8ba0b2}.payment-refund-reason-report.is-product-detail{margin-top:14px}@media(max-width:900px){.payment-refund-reason-report>header{align-items:flex-start;flex-direction:column}.payment-refund-report-total{flex-wrap:wrap}.payment-refund-reason-columns{grid-template-columns:1fr}.payment-refund-reason-columns>article+article{border-top:1px solid #dce7ef;border-left:0}}
 .payment-refund-report-actions{display:flex;align-items:center;gap:9px}.payment-refund-report-actions .btn{white-space:nowrap}.payment-refund-reason-report.is-collapsed .payment-refund-reason-columns{display:none}.payment-refund-reason-report.is-collapsed>header{border-bottom:0}@media(max-width:900px){.payment-refund-report-actions{align-items:flex-start;flex-direction:column}}
-.payment-product-risk-page .payment-operation-filter-form { grid-template-columns: minmax(260px, 1fr) minmax(270px, 1.08fr) repeat(3, minmax(135px, .66fr)) auto; }
-.payment-product-risk-page .payment-account-filter-field > span { display: block; margin-bottom: 6px; color: #5e7891; font-size: 12px; font-weight: 600; }
-.payment-product-risk-page .payment-account-date-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; height: 36px; border: 1px solid #d8e3ed; border-radius: 5px; background: #fbfdff; }
-.payment-product-risk-page .payment-account-date-mode button { min-width: 0; padding: 0 10px; border: 0; border-right: 1px solid #d8e3ed; background: transparent; color: #52718d; font-size: 12px; white-space: nowrap; }
-.payment-product-risk-page .payment-account-date-mode button:last-child { border-right: 0; }
-.payment-product-risk-page .payment-account-date-mode button:hover,
-.payment-product-risk-page .payment-account-date-mode button:focus { background: #edf6fd; color: #1f6ea7; outline: 0; }
-.payment-product-risk-page .payment-account-date-mode button.active { background: #338dc7; color: #fff; }
-
-@media (max-width: 1399px) {
-    .payment-product-risk-page .payment-operation-filter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .payment-product-risk-page .payment-operation-filter-actions { grid-column: auto; }
+.payment-product-risk-page .payment-risk-filter-form {
+    padding-bottom: 0;
+}
+.payment-product-risk-page .payment-risk-filter-grid {
+    grid-template-columns: minmax(260px, 1.3fr) repeat(3, minmax(0, 1fr));
+    align-items: start;
+}
+.payment-product-risk-page .payment-risk-filter-grid .flt-field-label {
+    margin-bottom: 6px;
+}
+.payment-product-risk-page .payment-risk-refund-scope {
+    margin: 4px 0 12px;
+    color: #526e87;
+    font-size: 12px;
+}
+.payment-product-risk-page .payment-risk-metric-count {
+    grid-template-columns: minmax(0, 240px);
+}
+.payment-product-risk-page .payment-risk-metric-section h3 {
+    margin: 12px 0 6px;
+    color: #244e70;
+    font-size: 13px;
+    font-weight: 700;
+}
+@media (max-width: 1000px) {
+    .payment-product-risk-page .payment-risk-filter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 .payment-product-risk-page .payment-product-metric-filters {
     grid-column: 1 / -1;
@@ -91,13 +107,13 @@
 @media (max-width: 599px) {
     .payment-product-risk-page .payment-product-metric-filter-grid { grid-template-columns: minmax(0, 1fr); }
 }
-.payment-product-risk-page .payment-operation-filter-form > .payment-operation-filter-actions {
-    grid-column: 1 / -1;
+.payment-product-risk-page .payment-risk-filter-form > .payment-operation-filter-actions {
+    margin-top: 12px;
     justify-content: flex-end;
 }
-.payment-product-risk-page .payment-product-sort-group { flex-wrap: wrap; gap: 5px 10px; }
-.payment-product-risk-page .payment-product-compact-table thead .payment-product-metric-sort i { opacity: 1; }
-.payment-product-risk-page .payment-product-compact-table thead .payment-product-metric-sort:focus-visible {
+.payment-product-risk-page .payment-product-column-sorts { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; }
+.payment-product-risk-page .payment-product-grouped-table thead .payment-product-metric-sort i { opacity: 1; }
+.payment-product-risk-page .payment-product-grouped-table thead .payment-product-metric-sort:focus-visible {
     outline: 2px solid #4b9ac7;
     outline-offset: 2px;
 }
@@ -107,3 +123,149 @@
 @media(max-width:767px){.payment-renewal-page .payment-page-heading{align-items:flex-start;flex-direction:column}.payment-renewal-filter{grid-template-columns:1fr}.payment-renewal-keyword,.payment-renewal-filter-actions{grid-column:span 1}.payment-renewal-filter-actions{justify-content:flex-start;flex-wrap:wrap}.payment-renewal-upsell>div{grid-template-columns:1fr}.payment-renewal-heading-summary{display:none}}
 .payment-renewal-detail-tabs{margin:8px 14px}.payment-renewal-detail-tabs a{display:inline-flex;align-items:center;min-height:30px;padding:5px 12px;border-radius:4px;color:#5b7892;font-size:12px;font-weight:600;text-decoration:none}.payment-renewal-detail-tabs a.active,.payment-renewal-detail-tabs a:hover,.payment-renewal-detail-tabs a:focus{background:#2f76dd;color:#fff;outline:0}.payment-renewal-detail .payment-renewal-risk-detail{min-width:185px;max-width:220px;white-space:normal}.payment-renewal-risk-detail>strong{display:block;color:#1e4d74}.payment-renewal-risk-detail>div{padding:3px 0;border-bottom:1px dashed #dce7ef}.payment-renewal-risk-detail>div:last-child{border-bottom:0}.payment-renewal-risk-detail b{color:#335d80;font-weight:600}
 .payment-renewal-metric-section{margin:0 0 14px;padding:14px 15px 12px;border:1px solid #d8e4ef;border-radius:8px;background:#fff;box-shadow:0 1px 4px rgba(23,59,91,.025)}.payment-renewal-metric-section>header{display:flex;align-items:baseline;gap:10px;margin:0 0 11px}.payment-renewal-metric-section h2{margin:0;color:#173f63;font-size:16px;font-weight:700}.payment-renewal-metric-section header p{margin:0;color:#7890a6;font-size:12px}.payment-renewal-metric-section .payment-renewal-kpis{margin-bottom:8px}.payment-renewal-metric-formula{display:flex;align-items:flex-start;gap:6px;margin:0;color:#71889d;font-size:12px;line-height:1.55}.payment-renewal-metric-formula i{margin-top:2px;color:#278fc9}.payment-renewal-metric-formula span{margin-left:6px;color:#8aa0b2}.payment-renewal-kpi-subscription>i{background:#fff1df;color:#bf7416}.payment-renewal-kpi-subscription-paypal>i{background:#e7f1ff;color:#1675c4}.payment-renewal-kpi-subscription-credit_card>i{background:#f1edff;color:#7555bf}@media(max-width:767px){.payment-renewal-metric-section>header{align-items:flex-start;flex-direction:column;gap:3px}.payment-renewal-metric-formula{flex-wrap:wrap}.payment-renewal-metric-formula span{width:100%;margin-left:20px}}
+
+.payment-product-risk-page .payment-risk-filter-panel,
+.payment-product-risk-page .payment-product-risk-primary-panel {
+    padding: 0;
+    border: 1px solid #d8e4ef;
+    border-radius: 8px;
+    background: #fff;
+}
+.payment-product-risk-page .payment-kpi-card {
+    border-color: #d8e4ef;
+    border-radius: 8px;
+}
+.payment-product-risk-page .payment-risk-list-toolbar {
+    padding: 10px 14px;
+}
+.payment-product-risk-page .payment-pagination-controls-only {
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding-inline: 12px;
+}
+.payment-product-risk-page .payment-risk-export-choices {
+    display: grid;
+    gap: 8px;
+}
+.payment-product-risk-page .payment-risk-export-choices label {
+    margin: 0;
+    padding: 10px;
+    border: 1px solid #d8e4ef;
+    border-radius: 6px;
+    font-weight: 400;
+}
+.payment-product-risk-page .payment-product-scroll-table {
+    max-width: 100%;
+    overflow-x: auto;
+}
+.payment-product-risk-page .payment-product-grouped-table { min-width: 1800px; }
+.payment-product-risk-page .payment-product-grouped-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-product-group-headings th {
+    background: #e3eff8;
+    text-align: center;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-product-column-headings th {
+    background: #f2f7fb;
+    vertical-align: middle;
+    text-align: right;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-product-column-headings th:first-child { text-align: left; }
+.payment-product-risk-page .payment-product-group-headings th:not(:last-child),
+.payment-product-risk-page .payment-product-column-headings th:nth-child(4),
+.payment-product-risk-page .payment-product-column-headings th:nth-child(10),
+.payment-product-risk-page .payment-product-grouped-table td:nth-child(5),
+.payment-product-risk-page .payment-product-grouped-table td:nth-child(11) {
+    border-right: 1px solid #cfdde9;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-risk-check-cell {
+    width: 36px;
+    text-align: center;
+    vertical-align: middle;
+}
+.payment-product-risk-page .payment-risk-check-cell input { margin: 0; }
+.payment-product-risk-page .payment-product-value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.payment-product-risk-page .payment-product-grouped-table > tbody > tr > td.payment-product-value {
+    vertical-align: top;
+}
+.payment-product-risk-page .payment-product-grouped-table td.payment-product-value > strong {
+    line-height: 28px;
+}
+.payment-product-risk-page .payment-product-value .payment-product-rate-card {
+    height: 28px;
+    padding-block: 0;
+    line-height: 18px;
+    vertical-align: top;
+}
+.payment-product-risk-page .payment-product-grouped-table td.payment-product-value > small {
+    margin-top: 3px;
+    color: #60788f;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-product-info-cell {
+    box-sizing: border-box;
+    width: 220px;
+    max-width: 220px;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-real-product-identity {
+    min-width: 0;
+    align-items: center;
+}
+.payment-product-risk-page .payment-product-grouped-table .payment-real-product-identity > div { min-width: 0; }
+.payment-product-risk-page .payment-risk-analysis-scope {
+    margin: 0;
+    color: #526e87;
+    font-size: 12px;
+}
+.payment-product-risk-page .payment-risk-analysis-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+.payment-product-risk-page .payment-risk-analysis-table {
+    width: 100%;
+    min-width: 700px;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+.payment-product-risk-page .payment-risk-analysis-table th,
+.payment-product-risk-page .payment-risk-analysis-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #e1eaf2;
+    color: #173f63;
+    text-align: right;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.payment-product-risk-page .payment-risk-analysis-table th:first-child { text-align: left; }
+.payment-product-risk-page .payment-risk-analysis-table thead th { background: #edf4fa; }
+.payment-product-risk-page .payment-risk-analysis-table tbody tr:last-child > * { border-bottom: 0; }
+.payment-product-risk-page .payment-risk-analysis-table small {
+    display: block;
+    color: #60788f;
+    font-size: 11px;
+}
+.payment-product-risk-page .payment-risk-analysis-table .payment-risk-churn-row td {
+    padding: 0;
+    text-align: left;
+    white-space: normal;
+}
+.payment-product-risk-page .payment-order-analysis-channel-summary article {
+    border-radius: 8px;
+    background: #fff;
+}
+.payment-product-risk-page .payment-order-analysis-channel-summary small {
+    color: #526e87;
+}
+@media (max-width: 767px) {
+    .payment-product-risk-page .payment-risk-filter-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .payment-product-risk-page .payment-kpi-grid-three {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
