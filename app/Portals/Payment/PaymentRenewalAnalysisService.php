@@ -4,6 +4,7 @@ namespace App\Portals\Payment;
 
 use App\Models\LogisticsCreditCardRefund;
 use App\Models\LogisticsOrder;
+use App\Models\SharedLogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
@@ -87,7 +88,7 @@ class PaymentRenewalAnalysisService
         $module=$this->moduleFilters($filters,'initial');
         $cacheFilters=$detail;
         unset($cacheFilters['detail_page'],$cacheFilters['detail_per_page']);
-        $key='payment:renewal-detail-summary:v24:'.sha1(json_encode([$module,$cacheFilters]));
+        $key='payment:renewal-detail-summary:shared-v1:'.sha1(json_encode([$module,$cacheFilters]));
         $stats=Cache::remember($key,now()->addMinutes(5),function () use ($module,$detail): array {
             $scope=$summary=$this->emptyRiskTotal();
             $stores=[];
@@ -156,7 +157,7 @@ class PaymentRenewalAnalysisService
 
     private function hydrateDetails(array $ids,array $module,array $window): \Generator
     {
-        $orders=LogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$ids)->get()->keyBy('id');
+        $orders=SharedLogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$ids)->get()->keyBy('id');
         $risk=$this->riskMaps($ids,['timezone'=>$module['timezone']],$window['from'],$window['to']);
         $identifiers=$this->paymentIdentifiers($ids);
         foreach ($ids as $id) {
@@ -207,7 +208,7 @@ class PaymentRenewalAnalysisService
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
-        return Cache::remember('payment:renewal-summary:v23:'.sha1(json_encode($cache)),now()->addMinutes(5),
+        return Cache::remember('payment:renewal-summary:shared-v1:'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
 
@@ -230,7 +231,7 @@ class PaymentRenewalAnalysisService
 
     private function firstQuery(array $filters,array $window): Builder
     {
-        $query=LogisticsOrder::query()->whereBetween('paid_at',[$window['from'],$window['to']])
+        $query=SharedLogisticsOrder::query()->whereBetween('paid_at',[$window['from'],$window['to']])
             ->where(function ($q): void {
                 $q->where(function ($q): void {
                     $q->where('subscription_type','订阅首次购买')->where(function ($q): void {
@@ -282,7 +283,7 @@ class PaymentRenewalAnalysisService
     private function rootIndex(array $filters,array $w): array
     {
         $refs=$stores=[];
-        $candidates=LogisticsOrder::query()->where(function ($q) use ($w): void {
+        $candidates=SharedLogisticsOrder::query()->where(function ($q) use ($w): void {
             $q->whereBetween('paid_at',[$w['from'],$w['to']])->orWhereBetween('paid_at',[$w['previous_from'],$w['previous_to']]);
         })->select(['id','subscription_origin_order_id','subscription_type','store_name'])->lazyById(500);
         foreach ($candidates as $order) {
@@ -296,7 +297,8 @@ class PaymentRenewalAnalysisService
         $ids=$map=[];
         foreach (array_chunk($keys,300) as $chunk) {
             $numeric=array_values(array_filter($chunk,static fn ($v)=>ctype_digit((string)$v)));
-            $query=LogisticsOrder::query()->select(self::ORDER_FIELDS)->where('subscription_type','订阅首次购买')
+            $query=SharedLogisticsOrder::query()->select($filters['first_only'] ? ['id', 'store_name'] : self::ORDER_FIELDS)
+                ->where('subscription_type','订阅首次购买')
                 ->whereNotNull('paid_at')->where('paid_at','<=',$w['to'])
                 ->where(function ($q): void {$q->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id','');})
                 ->where(function ($q): void {$q->whereNull('operator_name')->orWhere('operator_name','not like','%刷单%');})
@@ -322,7 +324,7 @@ class PaymentRenewalAnalysisService
     private function lifecycleBatches(array $filters,array $index,array $w): \Generator
     {
         foreach (array_chunk($index['ids'],100) as $rootIds) {
-            $roots=LogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
+            $roots=SharedLogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
             $entries=$refs=$seen=[];
             foreach ($roots as $root) {
                 $entries[]=['order'=>$root,'initial'=>$root,'number'=>0];
@@ -330,7 +332,7 @@ class PaymentRenewalAnalysisService
             }
             if ($entries) yield $entries;
             if (!$refs) continue;
-            $query=LogisticsOrder::query()->whereIn('subscription_origin_order_id',array_keys($refs))
+            $query=SharedLogisticsOrder::query()->whereIn('subscription_origin_order_id',array_keys($refs))
                 ->whereNotNull('paid_at')->where('paid_at','<=',$w['to']);
             foreach ($this->orderedBatches($query) as $orders) {
                 $entries=[];
@@ -570,24 +572,28 @@ class PaymentRenewalAnalysisService
     private function collectionAliases(array $orderIds): array
     {
         if (!$orderIds) return [];
-        $query=LogisticsOrder::query()->whereIn('id',$orderIds)
-            ->whereRaw("TRIM(COALESCE(collection_account, '')) = ''");
-        $driver=$query->getModel()->getConnection()->getDriverName();
-        if ($driver==='mysql') {
-            $query->select('id')->selectRaw(
-                "CASE WHEN JSON_VALID(shopify_payload) THEN JSON_UNQUOTE(JSON_EXTRACT(shopify_payload, REPLACE(JSON_UNQUOTE(JSON_SEARCH(shopify_payload, 'one', ?, NULL, '$.customAttributes[*].key')), '.key', '.value'))) END AS payment_alias",
+        $orders=SharedLogisticsOrder::query()->whereIn('id',$orderIds)
+            ->whereRaw("TRIM(COALESCE(collection_account, '')) = ''")->select(['id', 'shared_order_id']);
+        $database=(new SharedLogisticsOrder())->getConnection();
+        $query=$database->query()->fromSub($orders, 'orders')
+            ->join('shop_order_payloads as payload', 'payload.order_id', '=', 'orders.shared_order_id')
+            ->where('payload.payload_type', 'platform_order');
+        $driver=$database->getDriverName();
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            $query->select('orders.id')->selectRaw(
+                "CASE WHEN JSON_VALID(payload.payload) THEN JSON_UNQUOTE(JSON_EXTRACT(payload.payload, REPLACE(JSON_UNQUOTE(JSON_SEARCH(payload.payload, 'one', ?, NULL, '$.customAttributes[*].key')), '.key', '.value'))) END AS payment_alias",
                 ['yx\_payments\_alias'],
             );
         } elseif ($driver==='sqlite') {
-            $query->select('id')->selectRaw(
-                "(SELECT json_extract(attribute.value, '$.value') FROM json_each(CASE WHEN json_valid(shopify_payload) THEN shopify_payload ELSE '{}' END, '$.customAttributes') AS attribute WHERE CASE WHEN attribute.type = 'object' THEN json_extract(attribute.value, '$.key') END = ? LIMIT 1) AS payment_alias",
+            $query->select('orders.id')->selectRaw(
+                "(SELECT json_extract(attribute.value, '$.value') FROM json_each(CASE WHEN json_valid(payload.payload) THEN payload.payload ELSE '{}' END, '$.customAttributes') AS attribute WHERE CASE WHEN attribute.type = 'object' THEN json_extract(attribute.value, '$.key') END = ? LIMIT 1) AS payment_alias",
                 ['yx_payments_alias'],
             );
         } else {
-            // Other database drivers read one missing-account payload at a time.
+            // Read only missing-account payloads in bounded batches on other drivers.
             $aliases=[];
-            foreach ((clone $query)->select('id')->lazyById(100) as $record) {
-                $payload=json_decode((string)LogisticsOrder::query()->whereKey($record->id)->value('shopify_payload'),true);
+            foreach ((clone $query)->select(['orders.id', 'payload.payload'])->lazyById(100, 'orders.id', 'id') as $record) {
+                $payload=json_decode((string)$record->payload,true);
                 foreach (is_array($payload['customAttributes'] ?? null) ? $payload['customAttributes'] : [] as $attribute) {
                     if (is_array($attribute) && ($attribute['key'] ?? '')==='yx_payments_alias') {
                         $value=$attribute['value'] ?? null;
@@ -683,7 +689,7 @@ class PaymentRenewalAnalysisService
     /** @param array<string,mixed> $filters @return array<string,array{subscription_orders:int,total_orders:int,rate:float}> */
     private function subscriptionRate(Carbon $from, Carbon $to, array $filters): array
     {
-        $query = LogisticsOrder::query()
+        $query = SharedLogisticsOrder::query()
             ->whereNotNull('paid_at')
             ->whereBetween('paid_at', [$from, $to])
             ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])

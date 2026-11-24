@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Portals\Payment\PaymentRenewalAnalysisService;
 use App\Portals\Payment\PaymentRenewalAnalysisExportService;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\Logistics\SharedLogisticsOrderProjection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -27,6 +28,7 @@ class PaymentRenewalAnalysisTest extends TestCase
             $table->text('shopify_payload')->nullable();
             $table->unsignedInteger('paypal_account_id')->nullable();
         });
+        $this->createSharedOrderFixtures();
         Schema::create('logistics_paypal_transactions', function (Blueprint $table): void {
             $table->increments('id'); $table->unsignedInteger('logistics_order_id')->nullable();
             $table->string('event_code')->nullable(); $table->string('status')->nullable(); $table->string('payment_transaction_id')->nullable();
@@ -54,6 +56,77 @@ class PaymentRenewalAnalysisTest extends TestCase
         $this->order(9, '2026-11-01 12:00:00', '无订阅', 'credit_card', '', 'Test', ['operator_name' => '刷单']);
         $this->order(11, '2026-11-02 12:00:00', '订阅复购', 'paypal', '1');
         $this->order(10, '2026-11-01 12:00:00', '无订阅', 'credit_card', '999');
+    }
+
+    private function createSharedOrderFixtures(): void
+    {
+        (require database_path('migrations/2026_11_23_000300_create_shop_order_tables.php'))->up();
+        $columns = Schema::getColumnListing('logistics_orders');
+        $shared = array_filter(SharedLogisticsOrderProjection::SHARED_FIELDS,
+            static fn (string $alias): bool => in_array($alias, $columns, true));
+        $details = array_values(array_diff($columns, [
+            ...SharedLogisticsOrderProjection::SHARED_FIELDS,
+            ...SharedLogisticsOrderProjection::PAYLOAD_FIELDS,
+        ]));
+        $detailColumns = implode(', ', $details);
+        DB::statement("CREATE TABLE shop_order_logistics AS SELECT {$detailColumns} FROM logistics_orders WHERE 0");
+        DB::statement('CREATE UNIQUE INDEX fixture_logistics_id ON shop_order_logistics(id)');
+        DB::statement('CREATE INDEX fixture_logistics_paid ON shop_order_logistics(paid_at, id)');
+
+        $sharedColumns = implode(', ', array_keys($shared));
+        $sharedValues = implode(', ', array_map(static fn (string $column): string => 'NEW.'.$column, array_values($shared)));
+        $detailValues = implode(', ', array_map(static fn (string $column): string => 'NEW.'.$column, $details));
+        $sharedUpdates = implode(', ', array_map(
+            static fn (string $column, string $alias): string => $column.' = NEW.'.$alias,
+            array_keys($shared), array_values($shared)));
+        $detailUpdates = implode(', ', array_map(static fn (string $column): string => $column.' = NEW.'.$column, $details));
+        $payload = "INSERT INTO shop_order_payloads (order_id, payload_type, payload)
+            SELECT NEW.id + 1000000, 'platform_order', NEW.shopify_payload WHERE NEW.shopify_payload IS NOT NULL;";
+
+        DB::unprepared("CREATE TRIGGER fixture_orders_insert AFTER INSERT ON logistics_orders BEGIN
+            INSERT INTO shop_order_list (id, source_platform, source_domain, external_order_id, source_system, {$sharedColumns})
+                VALUES (NEW.id + 1000000, 'shopify', 'fixture.myshopify.com', CAST(NEW.id AS TEXT), 'logistics', {$sharedValues});
+            INSERT INTO shop_order_source_map (source_table, source_id, order_id)
+                VALUES ('logistics_orders', NEW.id, NEW.id + 1000000);
+            INSERT INTO shop_order_logistics ({$detailColumns}) VALUES ({$detailValues});
+            {$payload}
+        END");
+        DB::unprepared("CREATE TRIGGER fixture_orders_update AFTER UPDATE ON logistics_orders BEGIN
+            UPDATE shop_order_list SET {$sharedUpdates} WHERE id = NEW.id + 1000000;
+            UPDATE shop_order_logistics SET {$detailUpdates} WHERE id = OLD.id;
+            DELETE FROM shop_order_payloads WHERE order_id = NEW.id + 1000000 AND payload_type = 'platform_order';
+            {$payload}
+        END");
+        DB::unprepared("CREATE TRIGGER fixture_orders_delete AFTER DELETE ON logistics_orders BEGIN
+            DELETE FROM shop_order_payloads WHERE order_id = OLD.id + 1000000;
+            DELETE FROM shop_order_logistics WHERE id = OLD.id;
+            DELETE FROM shop_order_source_map WHERE source_table = 'logistics_orders' AND source_id = OLD.id;
+            DELETE FROM shop_order_list WHERE id = OLD.id + 1000000;
+        END");
+        (require database_path('migrations/2026_11_24_000003_index_payment_renewal_shared_orders.php'))->up();
+    }
+
+    public function test_dashboard_and_details_read_shared_orders_without_falling_back_to_legacy_orders(): void
+    {
+        $this->freezeTime();
+        $queries = [];
+        DB::listen(static function ($event) use (&$queries): void {
+            $queries[] = $event->sql;
+        });
+        $service = app(PaymentRenewalAnalysisService::class);
+        $before = $service->dashboard($this->filters());
+        $details = $service->initialOrderDetails($this->filters(), $this->detailFilters());
+        self::assertNotEmpty($details['rows']);
+        self::assertTrue(collect($queries)->contains(static fn ($sql) => str_contains($sql, 'shop_order_list')));
+        self::assertFalse(collect($queries)->contains(static fn ($sql) => preg_match('/from ["`]logistics_orders["`]/i', $sql)));
+        foreach (['insert', 'update', 'delete'] as $event) {
+            DB::unprepared('DROP TRIGGER fixture_orders_'.$event);
+        }
+        DB::table('logistics_orders')->update(['paid_amount_usd' => 9999, 'subscription_type' => 'legacy-only']);
+        \Illuminate\Support\Facades\Cache::flush();
+        $after = $service->dashboard($this->filters());
+        self::assertSame($before, $after);
+        self::assertSame($details['rows'], $service->initialOrderDetails($this->filters(), $this->detailFilters())['rows']);
     }
 
     private function order(int $id, string $time, string $type, string $channel, string $origin = '', string $store = 'Test', array $extra = []): void
