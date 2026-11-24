@@ -1,0 +1,238 @@
+.am-list-template {
+    --am-template-ink: #24455b;
+    --am-template-muted: #7c90a0;
+    --am-template-line: #e1eaf1;
+    --am-template-blue: #1884bf;
+    color: var(--am-template-ink);
+    font-size: 13px;
+}
+.am-list-template *,
+.am-list-template + .modal * {
+    box-sizing: border-box;
+}
+.am-list-template h2 {
+    margin: 0 0 5px;
+    color: #24455b;
+    font-size: 22px;
+    font-weight: 600;
+}
+.am-list-template .am-panel,
+.am-list-template .am-card {
+    border: 1px solid var(--am-template-line);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(22, 63, 99, .06);
+}
+.am-list-template .am-template-filters {
+    padding: 20px 22px 16px;
+    overflow: visible;
+}
+.am-list-template .am-template-filters .am-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px 24px;
+    margin-bottom: 12px;
+}
+.am-list-template .am-template-filters label {
+    position: relative;
+    min-width: 0;
+    margin: 0;
+    color: #24455b;
+    font-weight: 500;
+}
+.am-list-template .am-template-filters label > .form-control,
+.am-list-template .am-template-filters label > .assistant-filter-multiselect {
+    margin-top: 8px;
+}
+.am-list-template .form-control {
+    min-height: 36px;
+    padding: 8px 11px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    background: #fff;
+    color: #24455b;
+    box-shadow: none;
+}
+.am-list-template .form-control:focus {
+    border-color: #339dd3;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1);
+}
+.am-list-template .am-filter-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+.am-list-template .btn {
+    border-radius: 5px;
+}
+.am-list-template .btn-primary {
+    border-color: #2188be;
+    background: #2188be;
+}
+.am-list-template .am-toolbar {
+    justify-content: flex-end;
+    gap: 9px;
+    padding: 12px 0;
+}
+.am-list-template .am-table-wrap {
+    margin-bottom: 0;
+    padding: 0;
+    border-radius: 10px 10px 0 0;
+    overflow: auto;
+}
+.am-list-template .am-template-table {
+    margin: 0;
+}
+.am-list-template .am-template-table > thead > tr > th {
+    padding: 14px 10px;
+    border-color: #dfe9f1;
+    background: #f8fafc;
+    color: #577184;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.am-list-template .am-template-table > tbody > tr > td {
+    padding: 15px 10px;
+    border-color: #eef2f6;
+    background: #fff;
+    text-align: center;
+    vertical-align: middle;
+}
+.am-list-template .am-template-table > tbody > tr:nth-child(even) > td {
+    background: #fcfdff;
+}
+.am-list-template .am-template-table > tbody > tr:hover > td {
+    background: #f3f9fd;
+}
+.am-list-template input[type='checkbox'],
+.am-list-template input[type='radio'] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: var(--am-template-blue);
+    cursor: pointer;
+}
+.am-list-template select[data-filter-multiselect][hidden] {
+    display: none !important;
+}
+.am-list-template .assistant-filter-multiselect {
+    position: relative;
+    width: 100%;
+}
+.am-list-template .assistant-filter-multiselect summary {
+    position: relative;
+    display: block;
+    min-height: 36px;
+    padding: 8px 32px 8px 11px;
+    overflow: hidden;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+    list-style: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.am-list-template .assistant-filter-multiselect summary::-webkit-details-marker {
+    display: none;
+}
+.am-list-template .assistant-filter-multiselect summary::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    width: 6px;
+    height: 6px;
+    border-right: 1px solid #7b95a6;
+    border-bottom: 1px solid #7b95a6;
+    transform: translateY(-65%) rotate(45deg);
+}
+.am-list-template .assistant-filter-multiselect[open] summary {
+    border-color: #339dd3;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1);
+}
+.am-list-template .flt-picker-panel {
+    position: absolute;
+    z-index: 2050;
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    min-width: 220px;
+    padding: 10px;
+    border: 1px solid #d5e3ed;
+    border-radius: 7px;
+    background: #fff;
+    box-shadow: 0 8px 30px rgba(40, 77, 104, .16);
+}
+.am-list-template .assistant-filter-multiselect-search {
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    outline: 0;
+}
+.am-list-template .flt-picker-options {
+    max-height: 230px;
+    margin-top: 5px;
+    overflow: auto;
+}
+.am-list-template .flt-picker-options label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 9px;
+    border-radius: 4px;
+    font-weight: 400;
+    cursor: pointer;
+}
+.am-list-template .flt-picker-options label:hover,
+.am-list-template .flt-picker-options label:has(input:checked) {
+    background: #eaf5fd;
+    color: #1779b1;
+}
+.am-list-template .flt-picker-options p {
+    margin: 0;
+    padding: 12px;
+    color: var(--am-template-muted);
+    text-align: center;
+}
+.am-list-template .flt-picker-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 5px;
+    padding-top: 4px;
+    border-top: 1px solid #e4edf3;
+}
+.am-list-template .flt-picker-actions button {
+    padding: 8px;
+    border: 0;
+    background: transparent;
+    color: #2188be;
+    font-size: 12px;
+}
+.am-list-template .assistant-filter-multiselect.is-single .flt-picker-actions {
+    display: none;
+}
+.am-list-template .assistant-ad-pagination {
+    margin-top: 0;
+    border: 1px solid var(--am-template-line);
+    border-top: 0;
+    border-radius: 0 0 10px 10px;
+}
+@media (max-width: 900px) {
+    .am-list-template .am-template-filters .am-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 600px) {
+    .am-list-template {
+        padding: 10px;
+    }
+    .am-list-template .am-template-filters .am-grid {
+        grid-template-columns: 1fr;
+    }
+}

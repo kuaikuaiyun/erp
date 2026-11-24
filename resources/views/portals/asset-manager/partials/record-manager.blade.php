@@ -1,7 +1,8 @@
 @push('styles')
 <link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261118-2">
+@if($kind!=='computers')<link rel="stylesheet" href="{{ asset('css/assistant-asset-list-template.css') }}?v=20261124-1">@endif
 @endpush
-<div class="am-workspace" id="asset-manager">
+<div class="am-workspace {{ $kind!=='computers' ? 'am-list-template' : '' }}" id="asset-manager">
 <h2>{{ __('asset_manager.titles.'.$kind) }}</h2><p class="text-muted">{{ __('asset_manager.expired_hint') }}</p>
 <div id="am-notice" role="status"></div>
 @if($kind==='ipfoxy')
@@ -27,9 +28,9 @@
 </div>
 @endif
 
-<form method="get" id="am-filters" class="am-panel"><div class="am-grid">
+<form method="get" id="am-filters" class="am-panel am-template-filters"><div class="am-grid">
 @foreach($fields as $key=>$type)<label>{{ $labels[$key] }}
-@if(in_array($type,['user','department']))<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}"><select class="form-control" name="filter[{{ $key }}]"><option value="">{{ __('asset_manager.all') }}</option>
+@if(in_array($type,['user','department']))@if($kind==='computers')<input class="form-control am-option-search" placeholder="{{ __('asset_manager.search') }}">@endif<select class="form-control" name="filter[{{ $key }}]" @if($kind!=='computers') data-filter-multiselect data-placeholder="{{ __('asset_manager.all') }}" data-search-placeholder="输入关键词搜索" @endif><option value="">{{ __('asset_manager.all') }}</option>
 @if($kind==='computers' && $key==='owner_department_id' && $user->isAdministrator())
 <option value="0" @selected(request('filter.owner_department_id')==='0')>{{ __('asset_manager.computer_unassigned') }}</option>
 @endif
@@ -52,20 +53,20 @@
 
 @if($kind==='codex-renewals')@foreach(['renewal_from','renewal_to'] as $dateKey)<label>{{ __('asset_manager.'.$dateKey) }}<input class="form-control" type="date" name="{{ $dateKey }}" value="{{ request($dateKey) }}"></label>
 @endforeach
-<label>{{ __('asset_manager.status') }}<select class="form-control" name="reminder"><option value="">{{ __('asset_manager.all') }}</option>@foreach(['expired','today','upcoming','unset'] as $status)<option value="{{ $status }}" @selected(request('reminder')===$status)>{{ __('asset_manager.'.$status) }}</option>
+<label>{{ __('asset_manager.status') }}<select class="form-control" name="reminder" data-filter-multiselect data-placeholder="{{ __('asset_manager.all') }}" data-search-placeholder="输入状态搜索"><option value="">{{ __('asset_manager.all') }}</option>@foreach(['expired','today','upcoming','unset'] as $status)<option value="{{ $status }}" @selected(request('reminder')===$status)>{{ __('asset_manager.'.$status) }}</option>
 @endforeach
 </select></label>
 @endif
 
-<label>{{ __('asset_manager.per_page') }}<select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option @selected($rows->perPage()===$size)>{{ $size }}</option>
+@if($kind==='computers')<label>{{ __('asset_manager.per_page') }}<select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option @selected($rows->perPage()===$size)>{{ $size }}</option>
 @endforeach
-</select></label></div><button class="btn btn-primary">{{ __('asset_manager.search') }}</button> <a class="btn btn-default" href="{{ route($routePrefix.'.index',$kind) }}">{{ __('asset_manager.reset') }}</a></form>
+</select></label>@endif</div><div class="am-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> {{ __('asset_manager.search') }}</button> <a class="btn btn-default" href="{{ route($routePrefix.'.index',$kind) }}">{{ __('asset_manager.reset') }}</a></div></form>
 <div class="am-toolbar">@if($canManage && $kind!=='ipfoxy')<button class="btn btn-primary" id="am-add">{{ __('asset_manager.add') }}</button><button class="btn btn-default" id="am-import">{{ __('asset_manager.import') }}</button>
 @endif
  @if($kind!=='ipfoxy')<a class="btn btn-default" href="{{ route($routePrefix.'.export',['kind'=>$kind,'template'=>1]) }}">{{ __('asset_manager.template') }}</a>
 @endif
 <button class="btn btn-default" id="am-export">{{ __('asset_manager.export') }}</button><button class="btn btn-default" id="am-export-selected">{{ __('asset_manager.export_selected') }}</button></div>
-<div class="am-panel am-table-wrap"><table class="table table-bordered table-hover"><thead><tr><th><input type="checkbox" id="am-select-all" aria-label="{{ __('asset_manager.all') }}"></th>@foreach($fields as $key=>$type)<th>{{ $labels[$key] }}</th>
+<div class="am-panel am-table-wrap"><table class="table table-bordered table-hover am-template-table"><thead><tr><th><input type="checkbox" id="am-select-all" aria-label="{{ __('asset_manager.all') }}"></th>@foreach($fields as $key=>$type)<th>{{ $labels[$key] }}</th>
 @endforeach
  @if($kind!=='ipfoxy')<th>{{ $labels['created_at'] }}</th>
 @endif
@@ -97,11 +98,7 @@ $days=(int) \Carbon\CarbonImmutable::now('Asia/Shanghai')->startOfDay()->diffInD
 <tr><td colspan="20">{{ __('asset_manager.empty') }}</td></tr>
 @endforelse
 
-</tbody></table></div><div class="am-toolbar"><span>{{ __('asset_manager.total',['count'=>$rows->total()]) }} · {{ $rows->currentPage() }} / {{ $rows->lastPage() }}</span>@if($rows->previousPageUrl())<a class="btn btn-default" href="{{ $rows->previousPageUrl() }}">{{ __('asset_manager.previous') }}</a>
-@endif
- @if($rows->nextPageUrl())<a class="btn btn-default" href="{{ $rows->nextPageUrl() }}">{{ __('asset_manager.next') }}</a>
-@endif
-</div>
+</tbody></table></div>@if($kind==='computers')<div class="am-toolbar"><span>{{ __('asset_manager.total',['count'=>$rows->total()]) }} · {{ $rows->currentPage() }} / {{ $rows->lastPage() }}</span>@if($rows->previousPageUrl())<a class="btn btn-default" href="{{ $rows->previousPageUrl() }}">{{ __('asset_manager.previous') }}</a>@endif @if($rows->nextPageUrl())<a class="btn btn-default" href="{{ $rows->nextPageUrl() }}">{{ __('asset_manager.next') }}</a>@endif</div>@else @include('portals.assistant.partials.advertising-template-pagination', ['paginator' => $rows, 'unit' => '条记录']) @endif
 <div class="modal fade" id="am-modal" tabindex="-1" role="dialog" aria-labelledby="am-modal-title"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button class="close" data-dismiss="modal" aria-label="{{ __('asset_manager.cancel') }}">×</button><h4 id="am-modal-title"></h4></div><form id="am-form"><div class="modal-body"><div id="am-errors" role="alert"></div><div class="am-grid" id="am-fields"></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('asset_manager.cancel') }}</button><button class="btn btn-primary" id="am-save">{{ __('asset_manager.save') }}</button></div></form></div></div></div>
 <div class="modal fade" id="am-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h4>{{ __('asset_manager.import') }}</h4></div><div class="modal-body"><p>{{ __('asset_manager.import_help') }}</p>
 <label>{{ __('asset_manager.fields.owner_department_id') }}<select class="form-control" id="am-import-owner">
@@ -115,5 +112,6 @@ $days=(int) \Carbon\CarbonImmutable::now('Asia/Shanghai')->startOfDay()->diffInD
 $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>$departments,'ownerDepartments'=>$ownerDepartments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>$assetBase,'csrf'=>csrf_token()];
 @endphp
 <script>window.AssetManagerConfig=@json($clientConfig);</script>
+@if($kind!=='computers')<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-2"></script>@endif
 <script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-2"></script>
 @endpush
