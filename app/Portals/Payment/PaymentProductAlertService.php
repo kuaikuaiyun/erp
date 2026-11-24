@@ -458,7 +458,12 @@ class PaymentProductAlertService
     }
 
     /** @return Collection<int,array<string,mixed>> */
-    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = []): Collection
+    public function initialOrderTotals(array $productKeys): object
+    {
+        return $productKeys === [] ? (object) [] : ($this->metricRows(false, $productKeys, acrossProducts: true)->first() ?? (object) []);
+    }
+
+    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $acrossProducts = false): Collection
     {
         $database = $this->database();
         $productKey = $this->productKeyExpression('items');
@@ -467,7 +472,7 @@ class PaymentProductAlertService
         // de-duplication boundary: quantity does not increase the order count,
         // while an order containing several products belongs once to each one.
         $productOrders = $this->initialPaidProductOrders()
-            ->selectRaw("{$productKey} as product_key")
+            ->selectRaw(($acrossProducts ? "'summary'" : $productKey).' as product_key')
             ->addSelect('orders.id as order_id')
             ->selectRaw('MIN(items.id) as first_item_id')
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as unit_count')
@@ -477,7 +482,7 @@ class PaymentProductAlertService
             ->selectRaw('MAX(orders.payment_method) as payment_method')
             ->selectRaw('MAX(orders.logistics_status) as logistics_status')
             ->selectRaw('MAX(orders.paid_at) as paid_at')
-            ->groupByRaw("{$productKey}, orders.id");
+            ->groupByRaw($acrossProducts ? 'orders.id' : "{$productKey}, orders.id");
         $this->applyOrderPaidAtRange($productOrders, $filters);
         if (($filters['store'] ?? '') !== '') $productOrders->where('orders.store_name', $filters['store']);
         if ($productKeys !== []) {
@@ -563,6 +568,10 @@ class PaymentProductAlertService
             ->selectRaw("MAX(CASE WHEN {$creditCard} THEN product_orders.paid_at ELSE NULL END) as card_latest_paid_at")
             ->groupBy('product_orders.product_key')
             ->get();
+
+        if ($acrossProducts) {
+            return $rows;
+        }
 
         $globalDisputeAmount = $this->globalInitialPayPalDisputeAmount($disputes);
 

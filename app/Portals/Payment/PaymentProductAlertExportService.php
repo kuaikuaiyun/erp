@@ -61,6 +61,7 @@ class PaymentProductAlertExportService
             'order_count' => 'compact.order_count',
             'revenue' => 'compact.sales_amount',
             'combined_refund_rate' => 'table.combined_refund',
+            'combined_initial_refund_amount_rate' => 'layout.combined_initial_refund_amount_rate',
             'paypal_refund_rate' => 'compact.refund_rate',
             'paypal_dispute_rate' => 'compact.dispute_rate',
             'paypal_description_mismatch_rate' => 'compact.description_mismatch_rate',
@@ -76,17 +77,17 @@ class PaymentProductAlertExportService
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle(__($prefix.'export.sheet_name'));
         $sheet->freezePane('A3');
-        foreach (['A:F' => 'product_info', 'G:L' => 'paypal_fee_info', 'M:P' => 'card_fee_info'] as $range => $group) {
+        foreach (['A:G' => 'product_info', 'H:M' => 'paypal_fee_info', 'N:Q' => 'card_fee_info'] as $range => $group) {
             [$start, $end] = explode(':', $range);
             $sheet->mergeCells($start.'1:'.$end.'1');
             $sheet->setCellValue($start.'1', __($prefix.'table.'.$group));
         }
         $header = array_map(static fn (string $key): string => __($prefix.$key), array_values($columns));
         $sheet->fromArray($header, null, 'A2');
-        $sheet->getStyle('A1:P2')->getFont()->setBold(true);
-        $sheet->getStyle('A1:P2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('A1:P2')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E3EFF8');
-        foreach (range('A', 'P') as $letter) {
+        $sheet->getStyle('A1:Q2')->getFont()->setBold(true);
+        $sheet->getStyle('A1:Q2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('A1:Q2')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E3EFF8');
+        foreach (range('A', 'Q') as $letter) {
             $sheet->getColumnDimension($letter)->setWidth($letter === 'A' ? 34 : 25);
         }
 
@@ -110,7 +111,7 @@ class PaymentProductAlertExportService
         }
         if ($rowNumber > 3) {
             $sheet->getStyle('E3:E'.($rowNumber - 1))->getNumberFormat()->setFormatCode('"$"#,##0.00');
-            $sheet->getStyle('F3:P'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00%');
+            $sheet->getStyle('F3:Q'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00%');
         }
 
         return $spreadsheet;

@@ -34,7 +34,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-21">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-table10">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-summary14">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush
@@ -126,6 +126,23 @@
         <header><div><h3><i class="fa fa-pie-chart"></i> {{ __($translationPrefix.'.refund_report.title') }}</h3><p>{{ __($translationPrefix.'.refund_report.hint') }}</p></div><div class="payment-refund-report-actions"><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="{{ __($translationPrefix.'.refund_report.expand') }}" data-collapse-text="{{ __($translationPrefix.'.refund_report.collapse') }}"><i class="fa fa-angle-down"></i> <span>{{ __($translationPrefix.'.refund_report.expand') }}</span></button></div></header>
     </section>
 
+    <details class="payment-risk-summary-card" data-payment-risk-summary
+        data-url="{{ route('payment.product-risk-profit.tab', [...$exportFilters, 'tab' => 'all_products_summary']) }}"
+        data-loading="{{ __($translationPrefix.'.layout.summary_loading') }}"
+        data-failed="{{ __($translationPrefix.'.layout.summary_failed') }}">
+        <summary>
+            <span>
+                <strong><i class="fa fa-table" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.all_products_summary') }}</strong>
+                <small>{{ __($translationPrefix.'.layout.summary_hint') }}</small>
+            </span>
+            <span class="btn btn-default btn-sm payment-risk-summary-toggle">
+                <span class="payment-risk-summary-expand"><i class="fa fa-angle-down" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.summary_expand') }}</span>
+                <span class="payment-risk-summary-collapse"><i class="fa fa-angle-up" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.summary_collapse') }}</span>
+            </span>
+        </summary>
+        <div data-payment-risk-summary-body aria-live="polite"></div>
+    </details>
+
     <div class="payment-tab-panel payment-product-risk-primary-panel">
         <div class="flt-toolbar payment-risk-list-toolbar">
             <div class="flt-selection">
@@ -197,6 +214,6 @@
 @push('scripts')
 <script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=5" defer></script>
-<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-formula10"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-summary12"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

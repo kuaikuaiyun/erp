@@ -180,10 +180,10 @@
 }
 .payment-product-risk-page .payment-product-grouped-table .payment-product-column-headings th:first-child { text-align: left; }
 .payment-product-risk-page .payment-product-group-headings th:not(:last-child),
-.payment-product-risk-page .payment-product-column-headings th:nth-child(4),
-.payment-product-risk-page .payment-product-column-headings th:nth-child(10),
-.payment-product-risk-page .payment-product-grouped-table td:nth-child(5),
-.payment-product-risk-page .payment-product-grouped-table td:nth-child(11) {
+.payment-product-risk-page .payment-product-column-headings th:nth-child(5),
+.payment-product-risk-page .payment-product-column-headings th:nth-child(11),
+.payment-product-risk-page .payment-product-grouped-table td:nth-child(6),
+.payment-product-risk-page .payment-product-grouped-table td:nth-child(12) {
     border-right: 1px solid #cfdde9;
 }
 .payment-product-risk-page .payment-product-grouped-table .payment-risk-check-cell {
@@ -282,4 +282,71 @@
     .payment-product-risk-page .payment-kpi-grid-three {
         grid-template-columns: minmax(0, 1fr);
     }
+}
+
+.payment-product-risk-page .payment-risk-summary-card {
+    margin-bottom: 14px;
+    border: 1px solid #d8e4ef;
+    border-radius: 8px;
+    background: #fff;
+}
+.payment-product-risk-page .payment-risk-summary-card > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 13px 16px;
+    color: #173f63;
+    background: #f8fbfd;
+    border-radius: 8px;
+    list-style: none;
+    cursor: pointer;
+}
+.payment-product-risk-page .payment-risk-summary-card > summary::-webkit-details-marker { display: none; }
+.payment-product-risk-page .payment-risk-summary-card > summary strong {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+.payment-product-risk-page .payment-risk-summary-card > summary strong i {
+    margin-right: 7px;
+    color: #278fc9;
+}
+.payment-product-risk-page .payment-risk-summary-card > summary small {
+    display: block;
+    margin-top: 4px;
+    color: #71879a;
+    font-size: 12px;
+}
+.payment-product-risk-page .payment-risk-summary-toggle { flex-shrink: 0; }
+.payment-product-risk-page .payment-risk-summary-card:not([open]) .payment-risk-summary-collapse,
+.payment-product-risk-page .payment-risk-summary-card[open] .payment-risk-summary-expand { display: none; }
+.payment-product-risk-page [data-payment-risk-summary-body] { padding: 12px 14px; }
+.payment-product-risk-page .payment-risk-summary-scroll { overflow-x: auto; }
+.payment-product-risk-page .payment-risk-summary-table {
+    margin: 0;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.payment-product-risk-page .payment-risk-summary-table thead { background: #edf4fa; }
+.payment-product-risk-page .payment-risk-summary-table thead tr:first-child th {
+    background: #e3eff8;
+    text-align: center;
+}
+.payment-product-risk-page .payment-risk-summary-table thead tr:last-child th,
+.payment-product-risk-page .payment-risk-summary-table td { text-align: right; }
+.payment-product-risk-page .payment-risk-summary-table tbody td { vertical-align: top; }
+.payment-product-risk-page .payment-risk-summary-table thead tr:first-child th:not(:last-child),
+.payment-product-risk-page .payment-risk-summary-table thead tr:last-child th:nth-child(4),
+.payment-product-risk-page .payment-risk-summary-table thead tr:last-child th:nth-child(10),
+.payment-product-risk-page .payment-risk-summary-table tbody td:nth-child(4),
+.payment-product-risk-page .payment-risk-summary-table tbody td:nth-child(10) {
+    border-right: 1px solid #cfdde9;
+}
+.payment-product-risk-page .payment-risk-summary-table td strong { color: #173f63; }
+.payment-product-risk-page .payment-risk-summary-table td small {
+    display: block;
+    margin-top: 4px;
+    color: #60788f;
+    font-size: 11px;
 }

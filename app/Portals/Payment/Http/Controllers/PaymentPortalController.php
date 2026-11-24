@@ -266,7 +266,7 @@ class PaymentPortalController extends Controller
             return $context;
         }
         $validated = $request->validate([
-            'tab' => ['required', Rule::in(['risk_metrics', 'loss_profit', 'refund_reason'])],
+            'tab' => ['required', Rule::in(['risk_metrics', 'loss_profit', 'refund_reason', 'all_products_summary'])],
         ]);
         $tab = (string) $validated['tab'];
 
@@ -804,11 +804,9 @@ class PaymentPortalController extends Controller
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function normaliseProductRiskFilters(array $input): array
     {
-        $today = now('Asia/Shanghai');
-
         return [
-            'date_from' => (string) ($input['date_from'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
-            'date_to' => (string) ($input['date_to'] ?? $today->format('Y-m-d')),
+            'date_from' => (string) ($input['date_from'] ?? ''),
+            'date_to' => (string) ($input['date_to'] ?? ''),
             'date_mode' => 'placed',
             'store' => trim((string) ($input['store'] ?? '')),
             'name' => trim((string) ($input['name'] ?? '')),

@@ -68,6 +68,33 @@
             button.find('span').text(collapsed ? String(button.data('expandText') || '') : String(button.data('collapseText') || ''));
         });
 
+        page.find('[data-payment-risk-summary]').each(function () {
+            var card = this;
+            var body = card.querySelector('[data-payment-risk-summary-body]');
+            var loaded = false;
+            var request = null;
+            card.addEventListener('toggle', function () {
+                if (!card.open || loaded || request) return;
+
+                body.textContent = card.dataset.loading;
+                body.setAttribute('aria-busy', 'true');
+                request = $.get(card.dataset.url).done(function (html) {
+                    var content = $(html).filter('.payment-risk-summary-scroll');
+                    if (content.length !== 1) {
+                        body.textContent = card.dataset.failed;
+                        return;
+                    }
+                    $(body).empty().append(content);
+                    loaded = true;
+                }).fail(function () {
+                    body.textContent = card.dataset.failed;
+                }).always(function () {
+                    request = null;
+                    body.removeAttribute('aria-busy');
+                });
+            });
+        });
+
         var formulaModal = page.find('#payment-risk-formula-modal');
         if (formulaModal.length) {
             var formulaBody = formulaModal.find('[data-payment-risk-formula-body]');

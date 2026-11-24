@@ -1,7 +1,7 @@
 @php
     $translationPrefix = 'payment.product_risk_profit';
-    $pagination = $dashboard['pagination'];
-    $filters = $dashboard['filters'];
+    $pagination = $dashboard['pagination'] ?? [];
+    $filters = $dashboard['filters'] ?? request()->only(['date_from', 'date_to', 'store']);
     $money = static fn ($value) => '$'.number_format((float) $value, 2);
     $number = static fn ($value) => number_format((float) $value, ((float) $value == (int) $value) ? 0 : 2);
     $rate = static fn ($value) => number_format((float) $value, 2).'%';
@@ -14,6 +14,7 @@
             ['compact.order_count', ['order_count' => 'compact.order_count']],
             ['compact.sales_amount', ['revenue' => 'compact.sales_amount']],
             ['table.combined_refund', ['combined_refund_rate' => 'table.combined_refund']],
+            ['layout.combined_initial_refund_amount_rate', []],
         ],
         'paypal_fee_info' => [
             ['compact.refund_rate', ['paypal_refund_rate' => 'compact.refund_rate']],
@@ -33,11 +34,17 @@
     $columnCount = array_sum(array_map('count', $columnGroups));
     $formulaText = $translationPrefix.'.formula_details';
     $formulaScopes = [
-        'selected' => __($formulaText.'.selected_dates', ['from' => $filters['date_from'] ?? '-', 'to' => $filters['date_to'] ?? '-']),
+        'selected' => empty($filters['date_from']) && empty($filters['date_to'])
+            ? __($formulaText.'.all_dates')
+            : __($formulaText.'.selected_dates', [
+                'from' => ($filters['date_from'] ?? '') ?: __($formulaText.'.open_date'),
+                'to' => ($filters['date_to'] ?? '') ?: __($formulaText.'.open_date'),
+            ]),
         'history' => __($formulaText.'.historical'),
     ];
     $formulaLabels = [
         'combined_refund_rate' => 'table.combined_refund',
+        'combined_initial_refund_amount_rate' => 'layout.combined_initial_refund_amount_rate',
         'paypal_refund_rate' => 'compact.refund_rate',
         'paypal_dispute_rate' => 'compact.dispute_rate',
         'paypal_description_mismatch_rate' => 'compact.description_mismatch_rate',
@@ -66,7 +73,71 @@
     }
 @endphp
 
-@if(($tab ?? 'risk_metrics') === 'refund_reason')
+@if(($tab ?? 'risk_metrics') === 'all_products_summary')
+    <div class="payment-risk-summary-scroll" tabindex="0" role="region" aria-label="{{ __($translationPrefix.'.layout.all_products_summary') }}">
+        <table class="table payment-risk-summary-table">
+            <thead>
+                <tr>
+                    <th colspan="4" scope="colgroup">{{ __($translationPrefix.'.layout.summary_overall') }}</th>
+                    <th colspan="6" scope="colgroup">{{ __($translationPrefix.'.table.paypal_fee_info') }}</th>
+                    <th colspan="4" scope="colgroup">{{ __($translationPrefix.'.table.card_fee_info') }}</th>
+                </tr>
+                <tr>
+                    @foreach($dashboard['all_products_summary'] as $metric => $value)
+                        <th scope="col">{{ __($translationPrefix.'.'.($formulaLabels[$metric] ?? match ($metric) {
+                            'order_count' => 'compact.order_count',
+                            'revenue' => 'compact.sales_amount',
+                        })) }}</th>
+                    @endforeach
+                </tr>
+            </thead>
+            <tbody><tr>
+                @foreach($dashboard['all_products_summary'] as $metric => $data)
+                    <td>
+                        <strong>{{ match ($metric) {
+                            'order_count' => $number($data['value']),
+                            'revenue' => $money($data['value']),
+                            default => $rate($data['value']),
+                        } }}</strong>
+                        @if(isset($data['denominator']))
+                            <small>
+                                @if((float) $data['denominator'] === 0.0)
+                                    {{ __($translationPrefix.'.layout.summary_zero_denominator') }}
+                                @elseif($data['amount'])
+                                    {{ __($translationPrefix.'.layout.summary_amount_formula', ['numerator' => $money($data['numerator']), 'denominator' => $money($data['denominator'])]) }}
+                                @else
+                                    {{ __($translationPrefix.'.metric_filters.order_ratio_formula', ['numerator' => $number($data['numerator']), 'denominator' => $number($data['denominator'])]) }}
+                                @endif
+                            </small>
+                        @endif
+                        @if(isset($formulaDetails[$metric], $data['denominator']))
+                            @php
+                                [$scope, $description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
+                                $format = $data['amount'] ? $money : $number;
+                                $values = ['numerator' => $format($data['numerator']), 'denominator' => $format($data['denominator']), 'rate' => $rate($data['value'])];
+                                $group = $loop->index < 4 ? 'layout.summary_overall' : ($loop->index < 10 ? 'table.paypal_fee_info' : 'table.card_fee_info');
+                                $heading = __($formulaText.'.heading', ['metric' => __($translationPrefix.'.'.$group).' · '.__($translationPrefix.'.'.$formulaLabels[$metric])]);
+                            @endphp
+                            <button type="button" class="btn btn-link btn-xs" data-payment-risk-formula data-formula-title="{{ $heading }}" aria-haspopup="dialog" aria-controls="payment-risk-formula-modal">{{ __($formulaText.'.open') }}</button>
+                            <template data-payment-risk-formula-content>
+                                <p>{{ __($formulaText.'.expression', ['numerator' => $numeratorLabel, 'denominator' => $denominatorLabel]) }}</p>
+                                <p><strong>{{ (float) $data['denominator'] === 0.0 ? __($formulaText.'.zero') : __($formulaText.'.substitution', $values) }}</strong></p>
+                                <p>{{ __($formulaText.'.scope', ['value' => $description]) }}</p>
+                                @if($scope === 'selected')
+                                    <p>{{ __($formulaText.'.store', ['value' => ($filters['store'] ?? '') ?: __($translationPrefix.'.filters.all_stores')]) }}</p>
+                                @endif
+                                <p>{{ __($formulaText.'.summary_deduplication') }}</p>
+                                @if(in_array($metric, $refundOrderRates, true))
+                                    <p>{{ __($formulaText.'.refund_link') }}</p>
+                                @endif
+                            </template>
+                        @endif
+                    </td>
+                @endforeach
+            </tr></tbody>
+        </table>
+    </div>
+@elseif(($tab ?? 'risk_metrics') === 'refund_reason')
     @include('portals.payment.partials.refund-reason-report', ['report' => $dashboard['refund_reason_report'] ?? []])
 @else
 
@@ -151,6 +222,7 @@
                 @php
                     $operands = [
                         'combined_refund_rate' => [$combinedRefundOrderCount, $paidOrderCount],
+                        'combined_initial_refund_amount_rate' => [$product['combined_initial_refund_amount'], $product['combined_initial_received_amount'], true],
                         'paypal_refund_rate' => [$paypalRefundOrderCount, $paypalOrderCount],
                         'paypal_dispute_rate' => [$paypalDisputeOrderCount, $paypalOrderCount],
                         'paypal_description_mismatch_rate' => [$product['paypal_description_mismatch_amount'] ?? 0, $product['paypal_initial_dispute_amount'] ?? 0, true],

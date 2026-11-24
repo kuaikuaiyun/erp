@@ -41,7 +41,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:product-risk-dashboard:v5:'.sha1((string) json_encode(
+        $cacheKey = 'payment:product-risk-dashboard:v7:'.sha1((string) json_encode(
             $filters,
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
@@ -72,7 +72,11 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function tab(array $filters, string $tab): array
     {
-        $cacheKey = 'payment:product-risk-tab:v5:'.sha1((string) json_encode([
+        if ($tab === 'all_products_summary') {
+            $filters = [...$filters, 'page' => 1, 'per_page' => 50];
+        }
+
+        $cacheKey = 'payment:product-risk-tab:v8:'.sha1((string) json_encode([
             'filters' => $filters,
             'tab' => $tab,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -87,6 +91,10 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     private function buildTab(array $filters, string $tab): array
     {
+        if ($tab === 'all_products_summary') {
+            return ['all_products_summary' => $this->allProductsSummary($filters)];
+        }
+
         if ($tab !== 'refund_reason') {
             return [
                 ...$this->productList($filters),
@@ -144,7 +152,54 @@ class PaymentProductRiskService
         }
     }
 
-    private function productList(array $filters): array
+    private function allProductsSummary(array $filters): array
+    {
+        $keys = $this->productList($filters, keysOnly: true);
+        $orders = $keys === [] ? (object) [] : $this->statistics->paymentOrderTotals($filters, $keys);
+        $first = $this->alerts->initialOrderTotals($keys);
+        $paypalRefund = (float) ($first->paypal_refund_amount ?? 0);
+        $cardRefund = (float) ($first->card_refund_amount ?? 0);
+        $paypalReceived = (float) ($first->paypal_received_amount ?? 0);
+        $cardReceived = (float) ($first->card_received_amount ?? 0);
+
+        $amountRates = [
+            'combined_initial_refund_amount_rate',
+            'paypal_description_mismatch_rate',
+            'paypal_initial_refund_amount_rate',
+            'credit_card_initial_refund_amount_rate',
+        ];
+        $operands = [
+            'combined_refund_rate' => [$orders->combined_refund_order_count ?? 0, $orders->paid_order_count ?? 0],
+            'combined_initial_refund_amount_rate' => [$paypalRefund + $cardRefund, $paypalReceived + $cardReceived],
+            'paypal_refund_rate' => [$orders->paypal_refund_order_count ?? 0, $orders->paypal_order_count ?? 0],
+            'paypal_dispute_rate' => [$orders->paypal_dispute_order_count ?? 0, $orders->paypal_order_count ?? 0],
+            'paypal_description_mismatch_rate' => [$first->description_mismatch_amount ?? 0, $first->paypal_dispute_amount ?? 0],
+            'paypal_initial_dispute_rate' => [$first->paypal_dispute_count ?? 0, $first->paypal_order_count ?? 0],
+            'paypal_delivered_dispute_rate' => [$first->paypal_delivered_dispute_order_count ?? 0, $first->paypal_delivered_order_count ?? 0],
+            'paypal_initial_refund_amount_rate' => [$paypalRefund, $paypalReceived],
+            'credit_card_refund_rate' => [$orders->credit_card_refund_order_count ?? 0, $orders->credit_card_order_count ?? 0],
+            'credit_card_dispute_rate' => [$first->card_dispute_count ?? 0, $first->card_order_count ?? 0],
+            'credit_card_delivered_dispute_rate' => [$first->card_delivered_dispute_order_count ?? 0, $first->card_delivered_order_count ?? 0],
+            'credit_card_initial_refund_amount_rate' => [$cardRefund, $cardReceived],
+        ];
+
+        $metrics = [
+            'order_count' => ['value' => (int) ($orders->order_count ?? 0)],
+            'revenue' => ['value' => (float) ($orders->revenue ?? 0)],
+        ];
+        foreach ($operands as $metric => [$numerator, $denominator]) {
+            $metrics[$metric] = [
+                'value' => $denominator > 0 ? round($numerator / $denominator * 100, 2) : 0.0,
+                'numerator' => $numerator,
+                'denominator' => $denominator,
+                'amount' => in_array($metric, $amountRates, true),
+            ];
+        }
+
+        return $metrics;
+    }
+
+    private function productList(array $filters, bool $keysOnly = false): array
     {
         $ranges = (array) ($filters['metric_ranges'] ?? []);
         $sort = (string) ($filters['sort'] ?? '');
@@ -153,7 +208,9 @@ class PaymentProductRiskService
             [...array_keys($ranges), $sort],
         ));
         if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
-            return $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]), $filters);
+            $data = $this->statistics->page([...$filters, 'skip_refund_report' => true], $keysOnly);
+
+            return $keysOnly ? $data : $this->withPaymentProductNames($data, $filters);
         }
 
         $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics, $filters): void {
@@ -168,9 +225,9 @@ class PaymentProductRiskService
                     $query->selectRaw("COALESCE(payment_dispute_rates.{$rate}, 0) as {$rate}");
                 }
             }
-        });
+        }, $keysOnly);
 
-        return $this->withPaymentProductNames($data, $filters);
+        return $keysOnly ? $data : $this->withPaymentProductNames($data, $filters);
     }
 
     /** @param list<string> $keys */
@@ -248,6 +305,11 @@ class PaymentProductRiskService
             $product['credit_card_dispute_rate'] = (float) ($card['dispute_rate'] ?? 0);
             $product['credit_card_initial_refund_amount'] = (float) ($card['refund_amount'] ?? 0);
             $product['credit_card_initial_received_amount'] = (float) ($card['received_amount'] ?? 0);
+            $product['combined_initial_refund_amount'] = $product['paypal_initial_refund_amount'] + $product['credit_card_initial_refund_amount'];
+            $product['combined_initial_received_amount'] = $product['paypal_initial_received_amount'] + $product['credit_card_initial_received_amount'];
+            $product['combined_initial_refund_amount_rate'] = $product['combined_initial_received_amount'] > 0
+                ? round($product['combined_initial_refund_amount'] / $product['combined_initial_received_amount'] * 100, 2)
+                : 0.0;
             $product['credit_card_initial_refund_amount_rate'] = (float) ($card['refund_amount_rate'] ?? 0);
             $product['credit_card_delivered_order_count'] = (int) ($card['delivered_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_count'] = (int) ($card['delivered_dispute_order_count'] ?? 0);

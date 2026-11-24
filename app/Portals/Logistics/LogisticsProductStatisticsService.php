@@ -43,13 +43,16 @@ class LogisticsProductStatisticsService
      * @param array<string, mixed> $filters
      * @return array{products:list<array<string,mixed>>,summary:array<string,mixed>,pagination:array<string,int>}
      */
-    public function page(array $filters): array
+    public function page(array $filters, bool $keysOnly = false): array
     {
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) ($filters['page'] ?? 1));
 
         if ($this->canUseLightweightPageQuery($filters)) {
             $candidates = $this->lightweightProductCandidates($filters);
+            if ($keysOnly) {
+                return $candidates->pluck('product_key')->all();
+            }
             $summary = $this->cachedLightweightSummary($candidates, $filters);
             $total = $candidates->count();
             $lastPage = max(1, (int) ceil($total / $perPage));
@@ -69,6 +72,9 @@ class LogisticsProductStatisticsService
         } else {
             // Specialised sorts use the complete statistics data set.
             $query = $this->productStatisticsQuery($filters, false);
+            if ($keysOnly) {
+                return $query->pluck('product_statistics.product_key')->all();
+            }
             $summary = $this->overallSummaryFromQuery($query, $filters);
             $total = (clone $query)->count();
             $lastPage = max(1, (int) ceil($total / $perPage));
@@ -109,7 +115,7 @@ class LogisticsProductStatisticsService
      * @param list<string> $extraMetrics
      * @param Closure(Builder, Builder): void $addMetrics
      */
-    public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics): array
+    public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics, bool $keysOnly = false): array
     {
         $sort = (string) $filters['sort'];
         $baseSort = in_array($sort, $extraMetrics, true) ? '' : $sort;
@@ -119,7 +125,7 @@ class LogisticsProductStatisticsService
             'paypal_refund_amount', 'paypal_refund_rate', 'paypal_dispute_count',
             'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate',
         ] : [];
-        $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v2', $filters)
+        $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v3', $filters)
             .'.'.sha1(json_encode([$ranges, $extraMetrics, $useFullQuery, $filters['only_abnormal']]));
 
         $selection = Cache::flexible($cacheKey, [120, 600], function () use ($filters, $ranges, $baseMetrics, $useFullQuery, $addMetrics): array {
@@ -169,6 +175,9 @@ class LogisticsProductStatisticsService
         });
 
         $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
+        if ($keysOnly) {
+            return $candidates->pluck('product_key')->all();
+        }
         $total = $candidates->count();
         $perPage = (int) $filters['per_page'];
         $lastPage = max(1, (int) ceil($total / $perPage));
@@ -2112,9 +2121,15 @@ class LogisticsProductStatisticsService
     }
 
     /** @param array<string,mixed> $filters */
-    private function productOrderStatisticsQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null): Builder
+    public function paymentOrderTotals(array $filters, array $productKeys): object
     {
-        $orders = $this->productOrderQuery($filters, $withOverviewModules, $productKeys);
+        return $this->productOrderStatisticsQuery($filters, false, $productKeys, acrossProducts: true)->first() ?? (object) [];
+    }
+
+    private function productOrderStatisticsQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null, bool $acrossProducts = false): Builder
+    {
+        $useStoredCardMethod = !$withOverviewModules && ($filters['date_mode'] ?? '') === 'placed';
+        $orders = $this->productOrderQuery($filters, $withOverviewModules, $productKeys, includeShopifyPayload: !$useStoredCardMethod, acrossProducts: $acrossProducts);
         $paypalRefunds = $this->paypalRefundAggregateQuery($filters);
         $paypalDisputes = $this->paypalDisputeAggregateQuery($withOverviewModules, $filters);
         $creditCardRefunds = $this->creditCardRefundAggregateQuery();
@@ -2126,7 +2141,7 @@ class LogisticsProductStatisticsService
         // The Shopify tag is the stable source of truth for the independent
         // credit-card platform. Presentation gateway fields are not reliable.
         $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
-        $creditCard = $creditCardTag;
+        $creditCard = $useStoredCardMethod ? "(product_orders.payment_method = 'cc')" : $creditCardTag;
         $query = $this->database()->query()
             ->fromSub($orders, 'product_orders')
             ->leftJoinSub($paypalRefunds, 'paypal_refunds', function ($join): void {
@@ -2203,6 +2218,9 @@ class LogisticsProductStatisticsService
         }
 
         return $query
+            ->when($acrossProducts, fn (Builder $query) => $query
+                ->selectRaw('COUNT(*) as order_count')
+                ->selectRaw('SUM(product_orders.matched_revenue) as revenue'))
             ->selectRaw("SUM(CASE WHEN {$paid} THEN 1 ELSE 0 END) as paid_order_count")
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} THEN 1 ELSE 0 END) as paypal_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
@@ -2219,7 +2237,7 @@ class LogisticsProductStatisticsService
     }
 
     /** @param array<string,mixed> $filters */
-    private function productOrderQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null): Builder
+    private function productOrderQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null, bool $includeShopifyPayload = true, bool $acrossProducts = false): Builder
     {
         $key = $this->productKeyExpression('items', 'sku_mappings');
         $query = $this->baseItemQuery($filters);
@@ -2228,21 +2246,28 @@ class LogisticsProductStatisticsService
         }
 
         $query
-            ->selectRaw("{$key} as product_key")
+            ->selectRaw(($acrossProducts ? "'summary'" : $key).' as product_key')
             ->addSelect('orders.id as order_id')
             ->selectRaw('MAX(orders.paid_at) as paid_at')
             ->selectRaw('MAX(COALESCE(orders.paid_amount_usd, 0)) as paid_amount_usd')
             ->selectRaw('MAX(orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
             ->selectRaw('MAX(orders.payment_method) as payment_method')
-            ->selectRaw('MAX(orders.payment_gateway) as payment_gateway')
-            ->selectRaw('MAX(orders.shopify_payload) as shopify_payload');
+            ->selectRaw('MAX(orders.payment_gateway) as payment_gateway');
+
+        if ($includeShopifyPayload) {
+            $query->selectRaw('MAX(orders.shopify_payload) as shopify_payload');
+        }
 
         if ($withOverviewModules) {
             $query
                 ->selectRaw('SUM(COALESCE(items.quantity, 0)) as unit_count')
                 ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
                 ->selectRaw('MAX(orders.logistics_status) as logistics_status');
+        }
+
+        if ($acrossProducts) {
+            return $query->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as matched_revenue')->groupBy('orders.id');
         }
 
         return $query->groupByRaw("{$key}, orders.id");
@@ -2389,7 +2414,7 @@ class LogisticsProductStatisticsService
      */
     private function uniqueRefundSummary(Builder $products, array $filters, ?array $keys = null): array
     {
-        $orders = $this->productOrderQuery($filters, false, $keys);
+        $orders = $this->productOrderQuery($filters, false, $keys, includeShopifyPayload: false);
         $selectedOrders = $this->database()->query()
             ->fromSub($orders, 'product_orders');
         if ($keys === null) {
@@ -2413,7 +2438,7 @@ class LogisticsProductStatisticsService
     private function uniqueRefundSummaryForBaseFilters(array $filters): array
     {
         $selectedOrders = $this->database()->query()
-            ->fromSub($this->productOrderQuery($filters, false), 'product_orders')
+            ->fromSub($this->productOrderQuery($filters, false, includeShopifyPayload: false), 'product_orders')
             ->select('product_orders.order_id')
             ->selectRaw('MAX(product_orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(product_orders.paypal_association_source) as paypal_association_source')
