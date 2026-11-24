@@ -93,7 +93,7 @@ class LogisticsOrderController extends Controller
                 'source_shop_domain', 'store_name', 'subscription_origin_order_id', 'subscription_status',
                 'subscription_type', 'tongtu_order_number', 'tongtu_product_code', 'tongtu_product_name',
                 'tongtu_sku', 'total_shipping_usd', 'tracking_number', 'tracking_sync_status',
-                'transaction_id', 'updated_at',
+                'transaction_id', 'updated_at', 'total_amount', 'currency',
             ])
             ->with([
                 'items' => fn ($query) => $query->orderBy('id'),
@@ -128,39 +128,15 @@ class LogisticsOrderController extends Controller
 
     private function sharedShopifyAmounts(Collection $orders): Collection
     {
-        $first = $orders->first();
-        if ($first === null) {
-            return collect();
-        }
-
-        $db = $first->getConnection();
-        $schema = $db->getSchemaBuilder();
-        if (! $schema->hasTable('shop_order_list') || ! $schema->hasTable('shop_order_source_map')) {
-            return collect();
-        }
-
-        $snapshots = $db->table('shop_order_source_map as source')
-            ->join('shop_order_list as shared', 'shared.id', '=', 'source.order_id')
-            ->where('source.source_table', 'logistics_orders')
-            ->where('shared.source_platform', 'shopify')
-            ->where('shared.source_system', 'logistics')
-            ->whereIntegerInRaw('source.source_id', $orders->modelKeys())
-            ->whereNotNull('shared.currency')
-            ->whereNotNull('shared.total_amount')
-            ->get(['source.source_id', 'shared.total_amount', 'shared.currency', 'shared.updated_at'])
-            ->keyBy('source_id');
-
-        // The legacy amount field is retained in the projection for display compatibility.
-        return $orders->mapWithKeys(function (LogisticsOrder $order) use ($snapshots): array {
-            $snapshot = $snapshots->get($order->getKey());
-            if ($snapshot === null || $snapshot->updated_at === null
-                || $snapshot->updated_at !== $order->getRawOriginal('updated_at')
-                || ! is_numeric($order->getRawOriginal('paid_amount_usd'))
-                || (float) $snapshot->total_amount !== (float) $order->getRawOriginal('paid_amount_usd')) {
+        return $orders->mapWithKeys(function (LogisticsOrder $order): array {
+            if ($order->total_amount === null || $order->currency === null) {
                 return [];
             }
 
-            return [$order->getKey() => $snapshot];
+            return [$order->getKey() => (object) [
+                'total_amount' => $order->total_amount,
+                'currency' => $order->currency,
+            ]];
         });
     }
 
@@ -513,7 +489,7 @@ class LogisticsOrderController extends Controller
         }
 
         $this->requireSharedOrders();
-        $order = SharedLogisticsOrder::query()->whereKey($order)->firstOrFail();
+        $order = SharedLogisticsOrder::query()->whereKey($order)->withPayloads()->firstOrFail();
         $order->load([
             'items' => fn ($query) => $query->with('skuMapping')->orderBy('id'),
             'paypalAccount',
@@ -589,7 +565,8 @@ class LogisticsOrderController extends Controller
         }
 
         $orders = $query
-            ->select($this->spreadsheets->requiredOrderColumns())
+            ->select(array_diff($this->spreadsheets->requiredOrderColumns(), ['shopify_payload']))
+            ->withPayloads(['platform_order'])
             ->with([
                 'paypalRefunds' => fn ($refunds) => $refunds->orderByDesc('refunded_at')->orderByDesc('id'),
                 'creditCardRefunds' => fn ($refunds) => $refunds->orderByDesc('occurred_at')->orderByDesc('id'),
@@ -1251,8 +1228,20 @@ class LogisticsOrderController extends Controller
     /** @return array<string, array<int, mixed>> */
     private function filterOptions(): array
     {
-        $values = static function (string $column): array {
-            return SharedLogisticsOrder::query()
+        $columns = [
+            'stores' => 'store_name',
+            'groups' => 'group_names',
+            'paymentMethods' => 'payment_method',
+            'paymentGateways' => 'payment_gateway',
+            'collectionAccounts' => 'collection_account',
+            'subscriptionTypes' => 'subscription_type',
+            'subscriptionStatuses' => 'subscription_status',
+            'sourceDomains' => 'source_shop_domain',
+        ];
+        $db = (new SharedLogisticsOrder())->getConnection();
+        $choices = null;
+        foreach ($columns as $key => $column) {
+            $values = SharedLogisticsOrder::query()
                 ->where(function (Builder $operator): void {
                     $operator->whereNull('operator_name')
                         ->orWhere('operator_name', 'not like', '%刷单%');
@@ -1262,13 +1251,19 @@ class LogisticsOrderController extends Controller
                 ->distinct()
                 ->orderBy($column)
                 ->limit(200)
-                ->pluck($column)
-                ->map(static fn ($value): string => (string) $value)
-                ->all();
-        };
+                ->selectRaw('? as filter_key', [$key])
+                ->addSelect($column.' as filter_value');
+            // Each option retains its own database collation, ordering and limit.
+            $optionQuery = $db->query()->fromSub($values, 'options')->select('options.*');
+            $choices = $choices === null ? $optionQuery : $choices->unionAll($optionQuery);
+        }
+        $options = array_fill_keys(array_keys($columns), []);
+        foreach ($choices->orderBy('filter_key')->orderBy('filter_value')->get() as $choice) {
+            $options[$choice->filter_key][] = (string) $choice->filter_value;
+        }
 
         return [
-            'stores' => $values('store_name'),
+            ...$options,
             'owners' => $this->ownerSnapshotColumnsExist()
                 ? SharedLogisticsOrder::query()
                     ->whereNotNull('assigned_owner_user_id')
@@ -1282,13 +1277,6 @@ class LogisticsOrderController extends Controller
                     ])
                     ->all()
                 : [],
-            'groups' => $values('group_names'),
-            'paymentMethods' => $values('payment_method'),
-            'paymentGateways' => $values('payment_gateway'),
-            'collectionAccounts' => $values('collection_account'),
-            'subscriptionTypes' => $values('subscription_type'),
-            'subscriptionStatuses' => $values('subscription_status'),
-            'sourceDomains' => $values('source_shop_domain'),
         ];
     }
 
