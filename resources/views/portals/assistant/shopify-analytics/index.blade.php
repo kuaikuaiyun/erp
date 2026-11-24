@@ -66,6 +66,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261023-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ asset('css/assistant-store-analytics-template-controls.css') }}?v=20261124-1">
 @endpush
 
 @section('content')
@@ -163,7 +164,7 @@
                     </div>
                     <div class="form-group">
                         <label for="assistant-shopify-timezone">{{ $t('filters.timezone') }}</label>
-                        <select id="assistant-shopify-timezone" name="timezone" class="form-control">
+                        <select id="assistant-shopify-timezone" name="timezone" class="form-control" data-filter-multiselect data-placeholder="请选择统计时区" data-search-placeholder="搜索统计时区">
                             @foreach ($timezoneOptions as $value => $label)
                                 <option value="{{ $value }}" @selected($filters['timezone'] === $value)>{{ $label }}</option>
                             @endforeach
@@ -171,36 +172,11 @@
                     </div>
                     <div class="form-group">
                         <label id="assistant-shopify-team-label">{{ $t('table.team') }}</label>
-                        <div class="assistant-team-picker"
-                             data-team-picker
-                             data-empty-label="{{ $t('filters.team_all') }}"
-                             data-selected-label="{{ $t('filters.team_selected', ['count' => '__count__']) }}">
-                            <button type="button" class="form-control assistant-team-picker-toggle" data-team-picker-toggle aria-haspopup="true" aria-expanded="false" aria-labelledby="assistant-shopify-team-label assistant-shopify-team-summary">
-                                <span id="assistant-shopify-team-summary" data-team-picker-summary>{{ $filters['team'] === [] ? $t('filters.team_all') : '' }}</span>
-                                <i class="fa fa-angle-down" aria-hidden="true"></i>
-                            </button>
-                            <div class="assistant-team-picker-menu" data-team-picker-menu hidden>
-                                <div class="assistant-team-picker-head">
-                                    <strong>{{ $t('table.team') }}</strong>
-                                    <button type="button" class="btn btn-link btn-xs" data-team-picker-clear>{{ $t('filters.team_clear') }}</button>
-                                </div>
-                                <div class="assistant-team-picker-options">
-                                    @forelse (collect($teamOptions)->merge($filters['team'])->unique()->values() as $teamOption)
-                                        <label class="assistant-team-picker-option">
-                                            <input type="checkbox" name="team[]" value="{{ $teamOption }}" @checked(in_array($teamOption, $filters['team'], true))>
-                                            <span class="assistant-team-picker-check"><i class="fa fa-check"></i></span>
-                                            <span>{{ $teamOption }}</span>
-                                        </label>
-                                    @empty
-                                        <span class="assistant-team-picker-empty">{{ $t('filters.team_empty') }}</span>
-                                    @endforelse
-                                </div>
-                            </div>
-                        </div>
+                        <select class="form-control" name="team[]" multiple data-filter-multiselect data-placeholder="{{ $t('filters.team_all') }}" data-search-placeholder="搜索团队" data-no-results="{{ $t('filters.team_empty') }}" data-select-all-text="全选" data-clear-text="{{ $t('filters.team_clear') }}">@foreach (collect($teamOptions)->merge($filters['team'])->unique()->values() as $teamOption)<option value="{{ $teamOption }}" @selected(in_array($teamOption, $filters['team'], true))>{{ $teamOption }}</option>@endforeach</select>
                     </div>
                     <div class="form-group">
                         <label for="assistant-shopify-owner-assignment">{{ $t('filters.owner_assignment') }}</label>
-                        <select id="assistant-shopify-owner-assignment" name="owner_assignment" class="form-control">
+                        <select id="assistant-shopify-owner-assignment" name="owner_assignment" class="form-control" data-filter-multiselect data-placeholder="{{ __('assistant.domain_stores.common.all') }}" data-search-placeholder="搜索归属状态">
                             <option value="">{{ __('assistant.domain_stores.common.all') }}</option>
                             <option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option>
                             <option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option>
@@ -208,7 +184,7 @@
                     </div>
                     <div class="form-group">
                         <label for="assistant-shopify-email-purchased">{{ $t('table.email_purchased') }}</label>
-                        <select id="assistant-shopify-email-purchased" name="email_purchased" class="form-control">
+                        <select id="assistant-shopify-email-purchased" name="email_purchased" class="form-control" data-filter-multiselect data-placeholder="{{ __('assistant.domain_stores.common.all') }}" data-search-placeholder="搜索邮箱购买状态">
                             <option value="">{{ __('assistant.domain_stores.common.all') }}</option>
                             <option value="1" @selected($filters['email_purchased'] === '1')>{{ __('assistant.domain_stores.common.yes') }}</option>
                             <option value="0" @selected($filters['email_purchased'] === '0')>{{ __('assistant.domain_stores.common.no') }}</option>
@@ -538,6 +514,7 @@
 @endsection
 
 @push('scripts')
+    <script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-2"></script>
     <script>
         window.ErpAssistantShopifyAnalyticsConfig = @json($shopifyAnalyticsJavascript);
     </script>

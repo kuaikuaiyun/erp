@@ -38,6 +38,7 @@ class AppLovinSpendController extends Controller
             'account_number' => ['nullable', 'string', 'max:150'],
             'department_id' => ['nullable', 'integer'],
             'operator_id' => ['nullable', 'integer'],
+            'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $reports = $this->reportsFor($user)->orderBy('report_date')->get();
 
@@ -172,7 +173,11 @@ class AppLovinSpendController extends Controller
     private function paginate($items, Request $request): LengthAwarePaginator
     {
         $page=max(1,(int)$request->query('page',1));
-        return new LengthAwarePaginator($items->forPage($page,20)->values(),$items->count(),20,$page,['path'=>$request->url(),'query'=>$request->query()]);
+        $perPage = in_array((int) $request->query('per_page', 20), [20, 50, 100], true)
+            ? (int) $request->query('per_page', 20)
+            : 20;
+
+        return new LengthAwarePaginator($items->forPage($page,$perPage)->values(),$items->count(),$perPage,$page,['path'=>$request->url(),'query'=>$request->query()]);
     }
 
 }

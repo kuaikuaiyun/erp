@@ -4,13 +4,11 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/css/frontend-list-template.css?v=20261124-20">
     <style>
-        .operation-ai-product-page .aikaipin-operation-column { width:300px; text-align:center; }
-        .operation-ai-product-page .aikaipin-operation-cell { text-align:center; }
-        .operation-ai-product-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; width:100%; max-width:286px; margin:0 auto; }
-        .operation-ai-product-actions .btn { display:inline-flex; min-width:0; height:30px; align-items:center; justify-content:center; gap:5px; padding:5px 8px; border-radius:4px; font-size:12px; line-height:18px; white-space:nowrap; }
-        .operation-ai-product-actions .btn .fa { width:13px; margin:0; text-align:center; }
-        @media (max-width:1199px) { .operation-ai-product-page .aikaipin-operation-column { width:270px; } .operation-ai-product-actions { gap:5px; } .operation-ai-product-actions .btn { padding-right:5px; padding-left:5px; } }
+        .operation-ai-product-page .aikaipin-operation-column { width:330px; text-align:center; }
+        .operation-ai-product-page .aikaipin-operation-cell { text-align:center; vertical-align:middle; }
+        @media (max-width:1199px) { .operation-ai-product-page .aikaipin-operation-column { width:300px; } }
         .operation-ai-push-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 12px; margin-bottom:12px; padding:10px 12px; border:1px solid #dce8ef; border-radius:6px; background:#f6fafc; }
         .operation-ai-push-search { position:relative; width:100%; }
         .operation-ai-push-search .fa { position:absolute; top:10px; left:11px; color:#94a2af; }
@@ -145,70 +143,30 @@
         @media (max-width:767px) { .operation-ai-store-options { grid-template-columns:1fr; max-height:220px; } .operation-ai-store-heading { align-items:flex-start; flex-direction:column; } .operation-ai-store-search { width:100%; max-width:none; } .operation-ai-publish-actions > span { display:none; } .operation-ai-publish-actions { justify-content:flex-end; } }
         .operation-ai-material-upload-progress { height:9px; margin:12px 0 5px; }
         @media (max-width:767px) { .operation-ai-detail-grid,.operation-ai-detail-pages,.operation-ai-detail-videos { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
+        .operation-ai-product-page.flt{padding:15px}.operation-ai-product-page .operation-ai-template-filters{margin-bottom:15px;padding:18px 20px 15px}.operation-ai-template-filter-grid{display:grid;grid-template-columns:minmax(280px,2fr) repeat(3,minmax(170px,1fr));align-items:start;gap:14px 18px}.operation-ai-template-filter-grid>label>input{margin-top:8px}.operation-ai-template-picker-field{min-width:0}.operation-ai-template-picker-field>.flt-field-label{margin-bottom:8px}.operation-ai-template-picker[open] summary:after{transform:translateY(-20%) rotate(225deg)}.operation-ai-template-picker .flt-picker-panel{z-index:108}.operation-ai-template-picker-search{min-height:34px!important;margin-bottom:5px;padding:7px 10px!important}.operation-ai-template-picker .flt-picker-options{margin-top:0}.operation-ai-template-picker .flt-picker-options label{font-weight:400}.operation-ai-template-filter-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:13px}.operation-ai-template-records{overflow:hidden}.operation-ai-template-records .flt-toolbar{padding:12px 18px}.operation-ai-template-table-scroll{max-height:calc(100vh - 285px);overflow:auto}.operation-ai-template-table{min-width:1120px!important;margin:0!important;border-collapse:separate!important;border-spacing:0!important}.operation-ai-template-table thead th{position:sticky;top:0;z-index:4;padding:11px 10px!important;background:#eaf4fa!important;color:#345c75!important;border-right:1px solid #dce8ef!important}.operation-ai-template-table tbody td{padding:11px 10px!important;border-right:1px solid #e7eef3!important;border-bottom:1px solid #e7eef3!important}.operation-ai-template-table tbody tr:nth-child(odd)>td{background:#fff}.operation-ai-template-table tbody tr:nth-child(even)>td{background:#f3f9fd}.operation-ai-template-table tbody tr:hover>td{background:#eaf5fb!important}.operation-ai-product-actions{display:grid;grid-template-columns:repeat(3,minmax(82px,1fr));gap:6px;width:100%;max-width:318px;margin:0 auto}.operation-ai-product-actions .flt-row-action{display:inline-flex;align-items:center;justify-content:center;gap:5px;width:100%;min-width:0;min-height:30px;white-space:nowrap}.operation-ai-product-actions button.flt-row-action{border-left:0}.operation-ai-product-actions .flt-row-action .fa{width:13px;margin:0;text-align:center}.operation-ai-template-pagination{border-top:1px solid #e3edf4}.operation-ai-template-pagination .operation-ai-pagination-total{margin-right:auto}.operation-ai-template-pagination .operation-ai-page-size{margin-right:auto}.operation-ai-template-pagination .is-disabled{pointer-events:none;opacity:.45}.operation-ai-template-pagination form{display:flex;align-items:center;gap:8px;margin:0}.operation-ai-template-pagination input[type=hidden]{display:none}.operation-ai-template-pagination .operation-ai-page-jump input{width:64px!important}@media(max-width:1100px){.operation-ai-template-filter-grid{grid-template-columns:repeat(2,minmax(180px,1fr))}}@media(max-width:650px){.operation-ai-template-filter-grid{grid-template-columns:1fr}.operation-ai-product-actions{grid-template-columns:repeat(2,minmax(82px,1fr))}.operation-ai-template-pagination{justify-content:center}.operation-ai-template-pagination .operation-ai-pagination-total,.operation-ai-template-pagination .operation-ai-page-size{width:100%;margin:0;justify-content:center}}
+        .operation-ai-template-table .aikaipin-name-cell{min-width:260px;max-width:420px}.operation-ai-template-table .aikaipin-name-cell>strong{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;word-break:break-word}.operation-ai-template-table .aikaipin-sku-line{display:flex;width:100%;max-width:100%;align-items:center}.operation-ai-template-table .aikaipin-sku-line>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.operation-ai-template-table .aikaipin-sku-more{flex:0 0 auto}
     </style>
 @endpush
 
 @section('content')
-<section class="content aikaipin-product-library-page operation-ai-product-page">
+<section class="content aikaipin-product-library-page operation-ai-product-page flt">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
-    <div class="box box-solid aikaipin-filter-box">
-        <div class="box-body">
-            <form class="aikaipin-filter-form" method="get" action="{{ route('operation.ai-product-library.index') }}">
-                <div class="aikaipin-filter-grid">
-                    <div class="aikaipin-filter-field aikaipin-filter-keyword">
-                        <label for="operation-ai-product-keyword">{{ __('aikaipin.filters.keyword') }}</label>
-                        <input id="operation-ai-product-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}"
-                            placeholder="{{ __('aikaipin.filters.keyword_placeholder') }}" autocomplete="off">
-                    </div>
-                    <div class="aikaipin-filter-field">
-                        <label for="operation-ai-product-category">{{ __('aikaipin.filters.category') }}</label>
-                        <select id="operation-ai-product-category" class="form-control" name="category">
-                            <option value="">{{ __('aikaipin.filters.all') }}</option>
-                            @foreach ($categories as $category)
-                                <option value="{{ $category }}" @selected($filters['category'] === $category)>{{ $category }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="aikaipin-filter-field">
-                        <label for="operation-ai-product-source">{{ __('aikaipin.filters.source') }}</label>
-                        <select id="operation-ai-product-source" class="form-control" name="source">
-                            <option value="">{{ __('aikaipin.filters.all') }}</option>
-                            @foreach (trans('aikaipin.upload.source_options') as $value => $label)
-                                <option value="{{ $value }}" @selected($filters['source'] === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="aikaipin-filter-field">
-                        <label for="operation-ai-product-type">{{ __('aikaipin.filters.type') }}</label>
-                        <select id="operation-ai-product-type" class="form-control" name="type">
-                            <option value="">{{ __('aikaipin.filters.all') }}</option>
-                            @foreach (trans('aikaipin.upload.type_options') as $value => $label)
-                                <option value="{{ $value }}" @selected($filters['type'] === $value)>{{ $label }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="aikaipin-filter-actions">
-                        <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('aikaipin.filters.search') }}</button>
-                        <a class="btn btn-default" href="{{ route('operation.ai-product-library.index') }}"><i class="fa fa-undo"></i> {{ __('aikaipin.filters.reset') }}</a>
-                    </div>
-                </div>
-            </form>
+    <form class="flt-card flt-filters operation-ai-template-filters" method="get" action="{{ route('operation.ai-product-library.index') }}">
+        <div class="operation-ai-template-filter-grid">
+            <label>{{ __('aikaipin.filters.keyword') }}<input type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __('aikaipin.filters.keyword_placeholder') }}" autocomplete="off"></label>
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.category'),'name'=>'category','selected'=>$filters['category'],'options'=>[''=>__('aikaipin.filters.all')] + collect($categories)->mapWithKeys(fn($category)=>[$category=>$category])->all(),'searchable'=>true])
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.source'),'name'=>'source','selected'=>$filters['source'],'options'=>[''=>__('aikaipin.filters.all')] + trans('aikaipin.upload.source_options')])
+            @include('portals.operation.ai-product-library.partials.filter-single-picker',['label'=>__('aikaipin.filters.type'),'name'=>'type','selected'=>$filters['type'],'options'=>[''=>__('aikaipin.filters.all')] + trans('aikaipin.upload.type_options')])
+            <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
         </div>
-    </div>
+        <div class="operation-ai-template-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ __('aikaipin.filters.search') }}</button><a class="flt-btn" href="{{ route('operation.ai-product-library.index') }}"><i class="fa fa-refresh"></i> {{ __('aikaipin.filters.reset') }}</a></div>
+    </form>
 
-    <div class="box box-solid aikaipin-table-box">
-        <div class="box-header with-border aikaipin-list-toolbar">
-            <div class="aikaipin-list-toolbar-actions">
-                <div class="aikaipin-list-toolbar-summary">
-                    <i class="fa fa-cubes"></i>
-                    <span>{{ trans_choice('aikaipin.product_library.record_count', $products->total(), ['count' => $products->total()]) }}</span>
-                </div>
-            </div>
-        </div>
-        <div class="box-body no-padding">
-            <div class="table-responsive">
-                <table class="table table-hover aikaipin-product-table">
+    <div class="flt-card flt-records operation-ai-template-records">
+        <div class="flt-toolbar"><div class="flt-selection"><i class="fa fa-cubes"></i><span>{{ trans_choice('aikaipin.product_library.record_count', $products->total(), ['count' => $products->total()]) }}</span></div></div>
+        <div class="flt-table-scroll operation-ai-template-table-scroll">
+                <table class="aikaipin-product-table operation-ai-template-table">
                     <thead><tr>
                         <th class="aikaipin-image-column">{{ __('aikaipin.table.image') }}</th>
                         <th class="aikaipin-product-code-column">{{ __('aikaipin.table.product_code') }}</th>
@@ -237,7 +195,7 @@
                             </td>
                             <td class="aikaipin-product-code-cell"><span class="aikaipin-product-code">{{ $product->product_code }}</span></td>
                             <td class="aikaipin-name-cell">
-                                <strong>{{ $product->name }}</strong>
+                                <strong title="{{ $product->name }}">{{ $product->name }}</strong>
                                 @if ($skus !== [])
                                     <span class="aikaipin-sku-line" title="{{ implode(', ', $skus) }}">
                                         <span>{{ $skus[0] }}</span>
@@ -271,30 +229,30 @@
                             <td class="aikaipin-operation-cell">
                                 <div class="operation-ai-product-actions">
                                 @if($product->referenceFilePayload())
-                                    <a class="btn btn-primary btn-sm" href="{{ route('operation.ai-product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
+                                    <a class="flt-row-action action-primary" href="{{ route('operation.ai-product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
                                         <i class="fa fa-external-link"></i> 参考页
                                     </a>
                                 @endif
-                                <button type="button" class="btn btn-default btn-sm" data-operation-ai-detail
+                                <button type="button" class="flt-row-action" data-operation-ai-detail
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
-                                <button type="button" class="btn btn-info btn-sm" data-operation-ai-material-upload-trigger
+                                <button type="button" class="flt-row-action action-primary" data-operation-ai-material-upload-trigger
                                     data-upload-url="{{ route('operation.ai-product-library.reference-videos.upload', absolute: false) }}"
                                     data-product-id="{{ $product->getKey() }}"
                                     data-product-label="{{ $product->product_code }} · {{ $product->name }}">
                                     <i class="fa fa-upload"></i> 上传素材
                                 </button>
-                                <button type="button" class="btn btn-warning btn-sm" data-operation-ai-placement
+                                <button type="button" class="flt-row-action action-warning" data-operation-ai-placement
                                     data-placement-url="{{ route('operation.ai-product-library.placement-evaluations.form', $product) }}">
                                     <i class="fa fa-line-chart"></i> 投放测评
                                 </button>
-                                <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
+                                <button type="button" class="flt-row-action action-success" data-operation-ai-publish
                                     data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
                                     <i class="fa fa-cloud-upload"></i> 上架
                                 </button>
                                 @if($canPushProducts)
-                                    <button type="button" class="btn btn-danger btn-sm" data-operation-ai-push
+                                    <button type="button" class="flt-row-action action-danger" data-operation-ai-push
                                         data-members-url="{{ route('operation.ai-product-library.push-members', $product) }}"
                                         data-push-url="{{ route('operation.ai-product-library.push-members.store', $product) }}">
                                         <i class="fa fa-paper-plane"></i> 推送
@@ -310,12 +268,9 @@
                     @endforelse
                     </tbody>
                 </table>
-            </div>
         </div>
         @if ($products->total() > 0)
-            <div class="box-footer clearfix">
-                @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])
-            </div>
+            @include('portals.operation.ai-product-library.partials.pagination', ['paginator' => $products])
         @endif
     </div>
 </section>
@@ -407,6 +362,16 @@
 
 @push('scripts')
 <script>
+(function () {
+    var pickers=Array.prototype.slice.call(document.querySelectorAll('[data-operation-ai-template-picker]'));
+    pickers.forEach(function(picker){
+        var summary=picker.querySelector('[data-picker-summary]'),search=picker.querySelector('[data-picker-search]'),options=picker.querySelectorAll('[data-picker-option]'),empty=picker.querySelector('[data-picker-empty]');
+        picker.querySelectorAll('input[type="radio"]').forEach(function(input){input.addEventListener('change',function(){summary.textContent=input.closest('label').querySelector('span').textContent;picker.removeAttribute('open');});});
+        if(search)search.addEventListener('input',function(){var keyword=search.value.trim().toLowerCase(),visible=0;options.forEach(function(option){var show=!keyword||option.textContent.toLowerCase().indexOf(keyword)!==-1;option.hidden=!show;if(show)visible++;});empty.hidden=visible!==0;});
+        picker.addEventListener('toggle',function(){if(picker.open&&search){search.value='';options.forEach(function(option){option.hidden=false;});empty.hidden=true;setTimeout(function(){search.focus();},0);}});
+    });
+    document.addEventListener('click',function(event){pickers.forEach(function(picker){if(!picker.contains(event.target))picker.removeAttribute('open');});});
+})();
 (function () {
     var modal = document.getElementById('operation-ai-product-push-modal');
     if (!modal) return;

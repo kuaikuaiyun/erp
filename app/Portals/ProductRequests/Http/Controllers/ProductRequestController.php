@@ -1824,7 +1824,7 @@ class ProductRequestController extends Controller
         $runnableFilter = $nonRunnableLibrary ? '0' : (string) $request->query('is_runnable', '');
         $reasonFilter = (string) $request->query('not_runnable_reason', '');
         $perPage = (int) $request->query('per_page', 10);
-        if (!in_array($perPage, [10, 20], true)) {
+        if (!in_array($perPage, [10, 20, 50, 100], true)) {
             $perPage = 10;
         }
         $links = ProductRequestLinkSku::query()
@@ -1871,7 +1871,7 @@ class ProductRequestController extends Controller
                 'per_page' => $perPage,
             ],
             'libraryTitle' => $nonRunnableLibrary ? '禁跑清单' : '已有产品库',
-            'libraryDescription' => $nonRunnableLibrary ? '查看已有产品库中已标记为不可跑的产品数据（只读）' : '查看和搜索已录入的 PCL SKU 产品数据（只读）',
+            'libraryDescription' => $nonRunnableLibrary ? '查看已有产品库中已标记为不可跑的产品数据' : '查看和搜索已录入的 PCL SKU 产品数据',
             'libraryRoute' => $nonRunnableLibrary
                 ? 'product-requests.operation.non-runnable-product-library'
                 : 'product-requests.operation.existing-product-library',

@@ -6,10 +6,11 @@
 .aas-kpi.band-low{border-left-color:#27ae60}.aas-kpi.band-middle{border-left-color:#f39c12}.aas-kpi.band-high{border-left-color:#e74c3c}.aas-kpi.band-low strong{color:#218c50}.aas-kpi.band-middle strong{color:#c8780c}.aas-kpi.band-high strong{color:#c0392b}.aas-kpi-link{display:block;color:inherit;text-decoration:none!important;transition:transform .15s,box-shadow .15s}.aas-kpi-link:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(31,67,98,.16)}.aas-count-link{display:inline-block;padding:4px 8px;border-radius:12px;background:#f2f8fb;color:#2785b3;text-decoration:none!important}.aas-count-link:hover{background:#dff1fa;color:#176b94}
 .aas-filter-box{overflow:visible}.aas-sort{display:inline-flex;align-items:center;gap:6px;color:inherit}.aas-sort.active{color:#1677ad}.aas-sort:hover{text-decoration:none;color:#1677ad}
 </style>
+<link rel="stylesheet" href="{{ asset('css/assistant-applovin-list-template.css') }}?v=20261124-2">
 @endpush
 @section('content')
 <section class="content-header"><h1>运营账号统计 <small>统计运营人员当前已有的 AppLovin 账号</small></h1></section>
-<section class="content">
+<section class="content applovin-list-template">
 <div class="box aas-box aas-filter-box"><div class="box-body"><form class="aas-filter" method="get">
 <input type="hidden" name="sort_by" value="{{ $filters['sort_by'] }}">
 <input type="hidden" name="sort_direction" value="{{ $filters['sort_direction'] }}">
@@ -20,7 +21,7 @@
 </form></div></div>
 @php($bandQuery=['department_ids'=>$filters['department_ids']?:null,'operator'=>$filters['operator']?:null])
 <div class="aas-kpis"><div class="aas-kpi"><span>运营人数</span><strong>{{$operators->total()}}</strong></div><div class="aas-kpi"><span>当前页账号数</span><strong>{{$operators->getCollection()->sum('account_count')}} 户</strong></div><div class="aas-kpi"><span>当前页累计消耗</span><strong>${{number_format($operators->getCollection()->sum('total_spend'),2)}}</strong></div><a class="aas-kpi aas-kpi-link band-low" href="{{route($statisticsRoutes['spend_band'],[...$bandQuery,'spend_band'=>'under_5000'])}}"><span>历史总消耗小于 $5,000</span><strong>{{$spendBands['under_5000']}} 户 <i class="fa fa-angle-right pull-right"></i></strong></a><a class="aas-kpi aas-kpi-link band-middle" href="{{route($statisticsRoutes['spend_band'],[...$bandQuery,'spend_band'=>'between_5000_10000'])}}"><span>历史总消耗 $5,000–$10,000</span><strong>{{$spendBands['between_5000_10000']}} 户 <i class="fa fa-angle-right pull-right"></i></strong></a><a class="aas-kpi aas-kpi-link band-high" href="{{route($statisticsRoutes['spend_band'],[...$bandQuery,'spend_band'=>'over_10000'])}}"><span>历史总消耗大于 $10,000</span><strong>{{$spendBands['over_10000']}} 户 <i class="fa fa-angle-right pull-right"></i></strong></a></div>
-<div class="box aas-box"><div class="table-responsive"><table class="table table-hover table-bordered aas-table"><thead><tr>
+<div class="box aas-box"><div class="table-responsive"><table class="table table-hover table-bordered aas-table applovin-data-table"><thead><tr>
 @foreach (__('assistant.applovin_account_statistics.columns') as $column => $label)
     @if ($column === 'actions')
         <th>{{ $label }}</th>
@@ -33,11 +34,9 @@
 @endforeach
 </tr></thead><tbody>
 @forelse($operators as $row)<tr><td>{{$row['department']}}</td><td><b>{{$row['operator_name']}}</b></td><td>{{ $row['hire_days'] === null ? __('assistant.applovin_account_statistics.empty') : __('assistant.applovin_account_statistics.days', ['count' => $row['hire_days']]) }}</td><td><a class="aas-count" href="{{route($statisticsRoutes['show'],$row['operator_user_id'])}}">{{$row['account_count']}} 户</a></td><td><a class="aas-count-link text-green" href="{{route($statisticsRoutes['show'],['operator'=>$row['operator_user_id'],'spend_band'=>'under_5000'])}}"><b>{{$row['under_5000_count']}}</b> 户</a></td><td><a class="aas-count-link text-yellow" href="{{route($statisticsRoutes['show'],['operator'=>$row['operator_user_id'],'spend_band'=>'between_5000_10000'])}}"><b>{{$row['between_5000_10000_count']}}</b> 户</a></td><td><a class="aas-count-link text-red" href="{{route($statisticsRoutes['show'],['operator'=>$row['operator_user_id'],'spend_band'=>'over_10000'])}}"><b>{{$row['over_10000_count']}}</b> 户</a></td><td class="aas-spend">{{number_format($row['total_spend'],2)}}</td><td><a class="btn btn-info btn-xs" href="{{route($statisticsRoutes['show'],$row['operator_user_id'])}}"><i class="fa fa-eye"></i> 查看详情</a></td></tr>
-@empty<tr><td colspan="9" class="text-center text-muted" style="padding:36px">暂无 AppLovin 账号数据</td></tr>@endforelse
+@empty<tr><td colspan="9" class="text-center text-muted applovin-empty">暂无 AppLovin 账号数据</td></tr>@endforelse
 </tbody></table></div>
-@if($operators->total()>0)@php($pageStart=max(1,$operators->currentPage()-2))@php($pageEnd=min($operators->lastPage(),$operators->currentPage()+2))
-<div class="aas-pagination"><div class="aas-page-summary">显示 <strong>{{$operators->firstItem()}}-{{$operators->lastItem()}}</strong> 条，共 <strong>{{$operators->total()}}</strong> 名运营</div><div class="aas-page-tools"><label class="aas-page-size">每页 <select id="aas-per-page">@foreach([20,50,100] as $size)<option value="{{$size}}" @selected($operators->perPage()===$size)>{{$size}}</option>@endforeach</select> 条</label>@if($operators->lastPage()>1)<nav class="aas-pages"><a class="aas-page {{$operators->onFirstPage()?'disabled':''}}" href="{{$operators->previousPageUrl()?:'#'}}"><i class="fa fa-angle-left"></i></a>@if($pageStart>1)<a class="aas-page" href="{{$operators->url(1)}}">1</a>@if($pageStart>2)<span class="aas-gap">…</span>@endif @endif @for($page=$pageStart;$page<=$pageEnd;$page++)<a class="aas-page {{$page===$operators->currentPage()?'active':''}}" href="{{$operators->url($page)}}">{{$page}}</a>@endfor @if($pageEnd<$operators->lastPage())@if($pageEnd<$operators->lastPage()-1)<span class="aas-gap">…</span>@endif<a class="aas-page" href="{{$operators->url($operators->lastPage())}}">{{$operators->lastPage()}}</a>@endif<a class="aas-page {{$operators->hasMorePages()?'':'disabled'}}" href="{{$operators->nextPageUrl()?:'#'}}"><i class="fa fa-angle-right"></i></a></nav>@endif</div></div>
-@endif</div>
+@include('portals.assistant.partials.advertising-template-pagination', ['paginator' => $operators, 'unit' => '名运营'])
+</div>
 </section>
 @endsection
-@push('scripts')<script>(function(){var pageSize=document.getElementById('aas-per-page');if(pageSize)pageSize.addEventListener('change',function(){var url=new URL(window.location.href);url.searchParams.set('per_page',pageSize.value);url.searchParams.set('page','1');window.location.href=url.toString();});})();</script>@endpush

@@ -33,6 +33,7 @@ class AccountOpeningReviewController extends Controller
             'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
         $query = DailyAccountOpening::query();
@@ -58,7 +59,7 @@ class AccountOpeningReviewController extends Controller
             'departments' => $departments,
             'agencyOptions' => (clone $optionQuery)->whereNotNull('agency_name')->where('agency_name', '!=', '')->distinct()->orderBy('agency_name')->pluck('agency_name'),
             'mediaOptions' => $optionQuery->distinct()->orderBy('media')->pluck('media'),
-            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
+            'submissions' => $query->orderByRaw("CASE WHEN status IN ('pending', 'processing') THEN 0 ELSE 1 END")->latest('id')->paginate((int) ($filters['per_page'] ?? 20))->withQueryString(),
         ]);
     }
 

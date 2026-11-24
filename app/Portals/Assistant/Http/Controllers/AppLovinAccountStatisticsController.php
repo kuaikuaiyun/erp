@@ -126,6 +126,7 @@ class AppLovinAccountStatisticsController extends Controller
 
         $filters = $request->validate([
             'spend_band' => ['nullable', Rule::in(['under_5000', 'between_5000_10000', 'over_10000'])],
+            'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $project = $this->project($request);
         $routes = $this->routeNames($project);
@@ -141,7 +142,8 @@ class AppLovinAccountStatisticsController extends Controller
         };
         $accounts = $accounts->sortByDesc('total_spend')->values();
         $page = max(1, (int) $request->query('page', 1));
-        $paginator = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, [
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $paginator = new LengthAwarePaginator($accounts->forPage($page, $perPage)->values(), $accounts->count(), $perPage, $page, [
             'path' => $request->url(), 'query' => $request->query(),
         ]);
 
@@ -177,6 +179,7 @@ class AppLovinAccountStatisticsController extends Controller
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($availableDepartmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
+            'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $departmentIds = collect($filters['department_ids'] ?? [])
             ->map(fn ($id): int => (int) $id)->unique()->values()->all();
@@ -192,7 +195,8 @@ class AppLovinAccountStatisticsController extends Controller
         };
         $accounts = $accounts->sortByDesc('total_spend')->values();
         $page = max(1, (int) $request->query('page', 1));
-        $paginator = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, [
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $paginator = new LengthAwarePaginator($accounts->forPage($page, $perPage)->values(), $accounts->count(), $perPage, $page, [
             'path' => $request->url(), 'query' => $request->query(),
         ]);
         $backQuery = array_filter([

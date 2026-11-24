@@ -6,7 +6,7 @@
 <style>
 .analysis-filter,.analysis-panel{border:0;border-radius:12px;box-shadow:0 4px 16px rgba(28,62,91,.09);overflow:hidden}.analysis-filter .box-body{padding:16px 18px}.analysis-toolbar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}.analysis-toolbar .form-group{margin:0}.analysis-toolbar label{display:block;margin-bottom:6px;color:#657d90;font-size:12px}.analysis-toolbar .form-control{height:38px;min-width:165px;border:1px solid #d7e3ec;border-radius:6px}.analysis-range{height:38px;display:flex;align-items:center;padding:0 13px;border-radius:6px;background:#edf5fa;color:#52738a}.analysis-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin:16px 0}.analysis-kpi{padding:15px 17px;background:linear-gradient(135deg,#fff,#f5f9fc);border-left:4px solid #2f89ba;border-radius:10px;box-shadow:0 3px 13px rgba(30,65,95,.08)}.analysis-kpi span{display:block;color:#748899;font-size:12px}.analysis-kpi strong{display:block;margin-top:5px;color:#153e5f;font-size:22px}.analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}.analysis-panel .box-header{padding:14px 17px}.analysis-panel .box-title{font-weight:700;color:#173f60}.rank-list{padding:10px 17px 16px}.rank-row{display:grid;grid-template-columns:minmax(100px,160px) minmax(100px,1fr) 100px 65px;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed #e3ebf0}.rank-row:last-child{border-bottom:0}.rank-name{font-weight:600;color:#315e7b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rank-track{height:12px;background:#e8f0f5;border-radius:7px;overflow:hidden}.rank-fill{height:100%;min-width:3px;border-radius:7px;background:linear-gradient(90deg,#73b9dc,#1b78aa)}.rank-money{text-align:right;font-weight:700;color:#195d87}.rank-share{text-align:right;color:#758a9a}.analysis-empty{padding:48px;text-align:center;color:#8294a2}.analysis-table{margin:0}.analysis-table th{background:#d8e9f4!important;color:#214e6d;text-align:center;white-space:nowrap;padding:11px 9px!important}.analysis-table td{padding:10px 9px!important;border-color:#e1eaf0!important}.analysis-table tbody tr:nth-child(odd)>td{background:#f4f9fc}.analysis-table tbody tr:nth-child(even)>td{background:#fff8ef}.analysis-table .money{text-align:right;font-variant-numeric:tabular-nums}.analysis-table .actual{font-weight:700;color:#176c99}.analysis-table tfoot td{background:#dceaf3!important;font-weight:700}@media(max-width:900px){.analysis-grid{grid-template-columns:1fr}.analysis-kpis{grid-template-columns:repeat(2,1fr)}}
 </style>
-<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261123-4">
+<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261124-2">
 @endpush
 
 @section('content')
@@ -48,5 +48,5 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261123-3"></script>
+<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-1"></script>
 @endpush

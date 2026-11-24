@@ -58,7 +58,7 @@ class OperationAiProductLibraryController extends Controller
         return view('portals.operation.ai-product-library.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
-            'products' => $this->productQuery($filters)->paginate(15)->withQueryString(),
+            'products' => $this->productQuery($filters)->paginate($filters['per_page'])->withQueryString(),
             'filters' => $filters,
             'categories' => $this->categoryOptions(),
             'canPushProducts' => $this->listingPush->canPushFromLibrary($context['user']),
@@ -96,17 +96,28 @@ class OperationAiProductLibraryController extends Controller
         $context = $this->portalContext($request);
         if ($context instanceof Response) return $context;
 
-        $filters = ['keyword' => trim((string) $request->query('keyword', ''))];
-        $products = $this->productQuery([
-            'keyword' => $filters['keyword'], 'category' => '', 'source' => '', 'type' => '',
-        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')->latest('updated_at')])
-            ->paginate(15)->withQueryString();
+        $perPage = (int) $request->query('per_page', 15);
+        if (! in_array($perPage, [15, 30, 50, 100], true)) $perPage = 15;
+        $filters = [
+            'keyword' => trim((string) $request->query('keyword', '')),
+            'category' => trim((string) $request->query('category', '')),
+            'source' => in_array($request->query('source'), ['shopify', 'shopline'], true) ? (string) $request->query('source') : '',
+            'type' => in_array($request->query('type'), ['general', 'xiaohei'], true) ? (string) $request->query('type') : '',
+            'evaluation_status' => in_array($request->query('evaluation_status'), ['evaluated', 'unevaluated'], true) ? (string) $request->query('evaluation_status') : '',
+            'per_page' => $perPage,
+        ];
+        $products = $this->productQuery($filters)
+            ->when($filters['evaluation_status'] === 'evaluated', fn (Builder $query) => $query->has('placementEvaluations'))
+            ->when($filters['evaluation_status'] === 'unevaluated', fn (Builder $query) => $query->doesntHave('placementEvaluations'))
+            ->with(['placementEvaluations' => fn ($query) => $query->with('records')->latest('updated_at')])
+            ->paginate($perPage)->withQueryString();
 
         return view('portals.aikaipin.placement-evaluation.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'products' => $products,
             'filters' => $filters,
+            'categories' => $this->categoryOptions(),
             'canReviewAllPlacementEvaluations' => false,
             'placementRouteNames' => $this->operationPlacementRouteNames(),
         ]);
@@ -1184,18 +1195,22 @@ class OperationAiProductLibraryController extends Controller
         return $context;
     }
 
-    /** @return array{keyword:string,category:string,source:string,type:string} */
+    /** @return array{keyword:string,category:string,source:string,type:string,per_page:int} */
     private function filters(Request $request): array
     {
+        $perPage = (int) $request->query('per_page', 15);
+        if (! in_array($perPage, [15, 30, 50, 100], true)) $perPage = 15;
+
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
             'category' => trim((string) $request->query('category', '')),
             'source' => in_array($request->query('source'), ['shopify', 'shopline'], true) ? (string) $request->query('source') : '',
             'type' => in_array($request->query('type'), ['general', 'xiaohei'], true) ? (string) $request->query('type') : '',
+            'per_page' => $perPage,
         ];
     }
 
-    /** @param array{keyword:string,category:string,source:string,type:string} $filters */
+    /** @param array{keyword:string,category:string,source:string,type:string,per_page?:int} $filters */
     private function productQuery(array $filters): Builder
     {
         $query = AikaipinProduct::query()

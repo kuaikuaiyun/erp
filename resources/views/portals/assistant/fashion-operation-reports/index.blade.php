@@ -16,8 +16,8 @@
 .report-card-button{width:100%;border-top:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer}.report-card-button:hover{background:#fff7f7;box-shadow:0 5px 16px rgba(180,45,45,.12)}.report-card-button small{display:block;margin-top:5px;color:#a84a4a}
 .dashboard-mode-switch{display:flex;gap:10px;align-items:stretch;margin:0 0 16px}.dashboard-mode-switch button{flex:1;min-height:66px;border:2px solid #b9d7e8;border-radius:10px;background:#f7fbfe;color:#37617a;font-size:18px;font-weight:700;transition:.16s}.dashboard-mode-switch button i{margin-right:8px}.dashboard-mode-switch button small{display:block;margin-top:4px;font-size:12px;font-weight:400;color:inherit;opacity:.82}.dashboard-mode-switch button:hover{border-color:#4198c8;background:#eef8fd}.dashboard-mode-switch button.active{border-color:#1989c5;background:linear-gradient(135deg,#278fc4,#176da5);color:#fff;box-shadow:0 5px 15px rgba(26,125,177,.25)}@media(max-width:640px){.dashboard-mode-switch{flex-direction:column}}
 </style>
-<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261123-5">
-<link rel="stylesheet" href="{{ asset('css/assistant-operation-report-template.css') }}?v=20261123-1">
+<link rel="stylesheet" href="{{ asset('css/assistant-advertising-review-list.css') }}?v=20261124-2">
+<link rel="stylesheet" href="{{ asset('css/assistant-operation-report-template.css') }}?v=20261124-2">
 @endpush
 @section('content')
 <section class="content-header"><h1>{{ $reportProjectLabel }}运营报表 <small>对应项目店铺业绩与广告花费统计</small></h1></section>
@@ -58,7 +58,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261123-4"></script>
+<script src="{{ asset('js/assistant-filter-multiselect.js') }}?v=20261124-1"></script>
 <script>
 $(function(){
     var mode=$('#fashion-display-mode');

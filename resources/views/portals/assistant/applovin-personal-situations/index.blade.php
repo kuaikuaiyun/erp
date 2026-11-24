@@ -12,13 +12,14 @@
 .aps-operator-cell{min-width:125px;background:#f8fbfd;font-weight:400;vertical-align:middle!important}.aps-operator-cell b{display:block;margin-top:3px;color:#173f5e}
 .aps-table tbody tr.aps-group-blue>td{background:#eef7fc}.aps-table tbody tr.aps-group-white>td{background:#fff}.aps-table tbody tr.aps-group-blue:hover>td{background:#e4f3fb}.aps-table tbody tr.aps-group-white:hover>td{background:#f8fbfd}
 </style>
+<link rel="stylesheet" href="{{ asset('css/assistant-applovin-list-template.css') }}?v=20261124-2">
 @endpush
 
 @section('content')
 <section class="content-header">
     <h1>订阅AppLovin个人情况 <small>按订阅项目个人广告账户统计启用与分阶段 ROI</small></h1>
 </section>
-<section class="content">
+<section class="content applovin-list-template">
     <div class="box aps-card aps-filter-box">
         <div class="box-body">
             <form method="get" class="aps-filter" id="aps-filter-form">
@@ -40,7 +41,7 @@
 
     <div class="box aps-card">
         <div class="table-responsive">
-            <table class="table table-hover table-bordered aps-table">
+            <table class="table table-hover table-bordered aps-table applovin-data-table">
                 <thead><tr>
                     <th>运营部门 / 人员</th><th>AppLovin账户编号</th><th>绑定店铺域名</th><th>店铺业绩($)</th><th>累计广告费($)</th><th>总 ROI</th><th>启用日期（首次提报）</th><th>达到 $2,500 时间</th><th>达到 $2,500 业绩($)</th><th>达到 $2,500 ROI</th><th>达到 $5,000 时间</th><th>达到 $5,000 业绩($)</th><th>达到 $5,000 ROI</th><th>超过 $5,000 时间</th><th>超过 $5,000 业绩($)</th><th>超过 $5,000 ROI</th>
                 </tr></thead>
@@ -71,58 +72,13 @@
                         </tr>
                         @php($previousOperator = $row['operator_user_id'])
                     @empty
-                        <tr><td colspan="16" class="text-center text-muted" style="padding:38px">暂无可查看的 AppLovin 账户数据</td></tr>
+                        <tr><td colspan="16" class="text-center text-muted applovin-empty">暂无可查看的 AppLovin 账户数据</td></tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
         <p class="aps-note"><i class="fa fa-info-circle"></i> 启用日期取首次填写 AppLovin 广告账户的提报日期；达到 $2,500 的用时也以该日期起算。ROI 按已审核广告记录中的 AppLovin 营业额与实际广告费计算。跨越 $2,500 / $5,000 的当天，营业额按当日广告费比例拆分到对应阶段。</p>
-        @if ($rows->total() > 0)
-            @php($pageStart = max(1, $rows->currentPage() - 2))
-            @php($pageEnd = min($rows->lastPage(), $rows->currentPage() + 2))
-            <div class="aps-pagination">
-                <div class="aps-page-summary">显示 <strong>{{ $rows->firstItem() }}-{{ $rows->lastItem() }}</strong> 条，共 <strong>{{ $rows->total() }}</strong> 个账户</div>
-                <div class="aps-page-tools">
-                    <label class="aps-page-size">每页 <select id="aps-per-page">
-                        @foreach ([20, 50, 100] as $size)
-                            <option value="{{ $size }}" @selected($rows->perPage() === $size)>{{ $size }}</option>
-                        @endforeach
-                    </select> 条</label>
-                    @if ($rows->lastPage() > 1)
-                        <nav class="aps-pages">
-                            <a class="aps-page {{ $rows->onFirstPage() ? 'disabled' : '' }}" href="{{ $rows->previousPageUrl() ?: '#' }}"><i class="fa fa-angle-left"></i></a>
-                            @if ($pageStart > 1)
-                                <a class="aps-page" href="{{ $rows->url(1) }}">1</a>
-                                @if ($pageStart > 2)<span class="aps-gap">…</span>@endif
-                            @endif
-                            @for ($page = $pageStart; $page <= $pageEnd; $page++)
-                                <a class="aps-page {{ $page === $rows->currentPage() ? 'active' : '' }}" href="{{ $rows->url($page) }}">{{ $page }}</a>
-                            @endfor
-                            @if ($pageEnd < $rows->lastPage())
-                                @if ($pageEnd < $rows->lastPage() - 1)<span class="aps-gap">…</span>@endif
-                                <a class="aps-page" href="{{ $rows->url($rows->lastPage()) }}">{{ $rows->lastPage() }}</a>
-                            @endif
-                            <a class="aps-page {{ $rows->hasMorePages() ? '' : 'disabled' }}" href="{{ $rows->nextPageUrl() ?: '#' }}"><i class="fa fa-angle-right"></i></a>
-                        </nav>
-                    @endif
-                </div>
-            </div>
-        @endif
+        @include('portals.assistant.partials.advertising-template-pagination', ['paginator' => $rows, 'unit' => '个账户'])
     </div>
 </section>
 @endsection
-
-@push('scripts')
-<script>
-(function () {
-    var pageSize = document.getElementById('aps-per-page');
-    if (!pageSize) return;
-    pageSize.addEventListener('change', function () {
-        var url = new URL(window.location.href);
-        url.searchParams.set('per_page', pageSize.value);
-        url.searchParams.set('page', '1');
-        window.location.href = url.toString();
-    });
-})();
-</script>
-@endpush

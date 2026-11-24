@@ -31,6 +31,11 @@ class InternalMessageRecipient extends Model
         return $this->belongsTo(AdminUser::class, 'recipient_user_id');
     }
 
+    public function processedByUser(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'processed_by');
+    }
+
     public function managerListingTask(): HasOne
     {
         return $this->hasOne(AiProductListingTask::class, 'manager_recipient_id');

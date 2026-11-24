@@ -1,0 +1,369 @@
+.applovin-list-template {
+    --ap-list-ink: #31576f;
+    --ap-list-muted: #718796;
+    --ap-list-line: #dce7ef;
+    --ap-list-head: #edf5fa;
+    --ap-list-stripe: #f4f9fd;
+    --ap-list-hover: #e8f5fc;
+    --ap-list-blue: #2188be;
+    color: var(--ap-list-ink);
+}
+.applovin-list-template > .box,
+.applovin-list-template .ap-list-box {
+    overflow: hidden;
+    border: 1px solid var(--ap-list-line) !important;
+    border-radius: 10px !important;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(22, 63, 99, .06) !important;
+}
+.applovin-list-template .review-filter-box,
+.applovin-list-template .aas-filter-box,
+.applovin-list-template .aps-filter-box,
+.applovin-list-template .ap-filter-card,
+.applovin-list-template .fap-filter-card {
+    overflow: visible !important;
+}
+.applovin-list-template .review-filter-box > .box-body,
+.applovin-list-template .aas-filter-box > .box-body,
+.applovin-list-template .aps-filter-box > .box-body,
+.applovin-list-template .ap-filter-card > .box-body,
+.applovin-list-template .fap-filter-card > .box-body {
+    padding: 18px 20px;
+}
+.applovin-list-template .form-group label {
+    display: block;
+    margin-bottom: 7px;
+    color: #3c5d72;
+    font-size: 12px;
+    font-weight: 500;
+}
+.applovin-list-template .form-control {
+    min-height: 36px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    background: #fff;
+    color: #294d63;
+    box-shadow: none;
+}
+.applovin-list-template .form-control:focus {
+    border-color: #339dd3;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1);
+}
+.applovin-list-template .applovin-domain-filter {
+    position: relative;
+    z-index: 35;
+    min-width: 230px;
+}
+.applovin-list-template .applovin-domain-filter select[data-filter-multiselect][hidden] {
+    display: none !important;
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect {
+    position: relative;
+    width: 100%;
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect summary {
+    position: relative;
+    display: block;
+    min-width: 230px;
+    min-height: 36px;
+    padding: 8px 34px 8px 11px;
+    overflow: hidden;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    background: #fff;
+    color: #294d63;
+    cursor: pointer;
+    list-style: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect summary::-webkit-details-marker {
+    display: none;
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect summary::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 13px;
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid #7b95a6;
+    border-bottom: 1px solid #7b95a6;
+    transform: translateY(-65%) rotate(45deg);
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect[open] summary {
+    border-color: #339dd3;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1);
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect[open] summary::after {
+    transform: translateY(-30%) rotate(225deg);
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect.has-selection summary {
+    color: #1779b1;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-panel {
+    position: absolute;
+    z-index: 2100;
+    top: calc(100% + 6px);
+    right: 0;
+    left: 0;
+    min-width: 280px;
+    padding: 10px;
+    border: 1px solid #d5e3ed;
+    border-radius: 7px;
+    background: #fff;
+    box-shadow: 0 8px 30px rgba(40, 77, 104, .16);
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect-search {
+    width: 100%;
+    height: 34px;
+    padding: 7px 10px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    outline: 0;
+}
+.applovin-list-template .applovin-domain-filter .assistant-filter-multiselect-search:focus {
+    border-color: #339dd3;
+    box-shadow: 0 0 0 3px rgba(36, 153, 209, .1);
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options {
+    max-height: 250px;
+    margin-top: 6px;
+    overflow: auto;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    padding: 9px;
+    border-radius: 4px;
+    color: #36576c;
+    font-weight: 400;
+    cursor: pointer;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options label:hover {
+    background: #eff7fc;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options label:has(input:checked) {
+    background: #eaf5fd;
+    color: #1779b1;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options input {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: #1884bf;
+    flex: 0 0 auto;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-options p {
+    margin: 0;
+    padding: 12px;
+    color: #7c90a0;
+    text-align: center;
+}
+.applovin-list-template .applovin-domain-filter .flt-picker-actions {
+    display: none;
+}
+.applovin-list-template .btn {
+    border-radius: 5px;
+    box-shadow: none;
+}
+.applovin-list-template .btn-primary,
+.applovin-list-template .btn-info {
+    border-color: var(--ap-list-blue);
+    background: var(--ap-list-blue);
+}
+.applovin-list-template .table-responsive {
+    position: relative;
+    width: 100%;
+    background: #fff;
+}
+.applovin-list-template .applovin-data-table {
+    width: 100%;
+    margin: 0 !important;
+    border-collapse: collapse !important;
+    color: #36576c;
+}
+.applovin-list-template .applovin-data-table > thead > tr > th {
+    padding: 11px 9px !important;
+    border-top: 0 !important;
+    border-right: 1px solid #dfeaf1 !important;
+    border-bottom: 1px solid #d5e3ec !important;
+    border-left: 0 !important;
+    background: var(--ap-list-head) !important;
+    color: var(--ap-list-ink) !important;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: center;
+    vertical-align: middle !important;
+}
+.applovin-list-template .applovin-data-table > tbody > tr > td {
+    padding: 10px 9px !important;
+    border-top: 1px solid #edf1f5 !important;
+    border-right: 1px solid #edf1f5 !important;
+    border-bottom: 0 !important;
+    border-left: 0 !important;
+    background: #fff;
+    vertical-align: middle !important;
+}
+.applovin-list-template .applovin-data-table > tbody > tr:nth-child(even) > td {
+    background: var(--ap-list-stripe);
+}
+.applovin-list-template .applovin-data-table > tbody > tr:hover > td {
+    background: var(--ap-list-hover) !important;
+}
+.applovin-list-template .applovin-data-table > tfoot > tr > td,
+.applovin-list-template .applovin-data-table .ap-total-row > td {
+    padding: 11px 9px !important;
+    border-color: #c5d9e6 !important;
+    background: #e3eff6 !important;
+    color: #244f69;
+    font-weight: 700;
+}
+.applovin-list-template .applovin-data-table.ap-columns-customized > thead > tr > th,
+.applovin-list-template .applovin-data-table.fap-columns-customized > thead > tr > th {
+    padding: 8px 4px !important;
+    font-size: 11px;
+}
+.applovin-list-template .applovin-data-table.ap-columns-customized > tbody > tr > td,
+.applovin-list-template .applovin-data-table.fap-columns-customized > tbody > tr > td {
+    padding: 8px 4px !important;
+    font-size: 12px;
+}
+.applovin-list-template .applovin-data-table .aas-sort .fa {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 23px;
+    height: 23px;
+    border-radius: 3px;
+    background: #2d91c5;
+    color: #fff;
+    font-size: 12px;
+}
+.applovin-list-template .applovin-data-table .money,
+.applovin-list-template .applovin-data-table .aas-spend,
+.applovin-list-template .applovin-data-table .aad-spend,
+.applovin-list-template .applovin-data-table .aps-number,
+.applovin-list-template .applovin-data-table .aps-performance {
+    font-variant-numeric: tabular-nums;
+}
+.applovin-list-template .applovin-data-table .label {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 11px;
+    line-height: 1.25;
+}
+.applovin-list-template .applovin-empty {
+    height: 190px;
+    padding: 45px !important;
+    color: #7c90a0;
+    text-align: center;
+}
+.applovin-list-template .pager-wrap,
+.applovin-list-template .aas-pagination,
+.applovin-list-template .aad-pagination,
+.applovin-list-template .aps-pagination,
+.applovin-list-template .ap-list-pagination,
+.applovin-list-template .fap-pagination {
+    min-height: 62px;
+    padding: 13px 17px !important;
+    border-top: 1px solid #e1eaf1;
+    background: #f8fbfd;
+}
+.applovin-list-template .pager-wrap,
+.applovin-list-template .aas-pages,
+.applovin-list-template .aad-pages,
+.applovin-list-template .aps-pages,
+.applovin-list-template .aps-pagination .pagination,
+.applovin-list-template .ap-list-pages,
+.applovin-list-template .fap-pages {
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    margin: 0 !important;
+}
+.applovin-list-template .pager-wrap {
+    justify-content: center !important;
+}
+.applovin-list-template .pager-wrap a,
+.applovin-list-template .pager-wrap span,
+.applovin-list-template .aas-page,
+.applovin-list-template .aad-page,
+.applovin-list-template .aps-page,
+.applovin-list-template .aps-pagination .pagination > li > a,
+.applovin-list-template .aps-pagination .pagination > li > span,
+.applovin-list-template .ap-list-pages a,
+.applovin-list-template .ap-list-pages span,
+.applovin-list-template .fap-pages a,
+.applovin-list-template .fap-pages span {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 34px !important;
+    width: auto !important;
+    height: 34px !important;
+    padding: 0 10px !important;
+    border: 1px solid #d4dfe8 !important;
+    border-radius: 5px !important;
+    background: #fff !important;
+    color: #426176 !important;
+    font-weight: 600 !important;
+    line-height: 32px !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+}
+.applovin-list-template .pager-wrap .active,
+.applovin-list-template .aas-page.active,
+.applovin-list-template .aad-page.active,
+.applovin-list-template .aps-page.active,
+.applovin-list-template .aps-pagination .pagination > .active > a,
+.applovin-list-template .aps-pagination .pagination > .active > span,
+.applovin-list-template .ap-list-pages .active,
+.applovin-list-template .fap-pages .active {
+    border-color: var(--ap-list-blue) !important;
+    background: var(--ap-list-blue) !important;
+    color: #fff !important;
+}
+.applovin-list-template .pager-wrap a:hover,
+.applovin-list-template .aas-page:hover,
+.applovin-list-template .aad-page:hover,
+.applovin-list-template .aps-page:hover,
+.applovin-list-template .aps-pagination .pagination > li > a:hover,
+.applovin-list-template .ap-list-pages a:hover,
+.applovin-list-template .fap-pages a:hover {
+    border-color: #9bc4dc !important;
+    background: #f1f7fb !important;
+    color: #256f98 !important;
+}
+.applovin-list-template .pager-wrap .disabled,
+.applovin-list-template .pager-wrap > span:not(.active),
+.applovin-list-template .aas-page.disabled,
+.applovin-list-template .aad-page.disabled,
+.applovin-list-template .aps-page.disabled,
+.applovin-list-template .aps-pagination .pagination > .disabled > span,
+.applovin-list-template .ap-list-pages .disabled,
+.applovin-list-template .fap-pages .disabled,
+.applovin-list-template .fap-pages > span:not(.active) {
+    pointer-events: none !important;
+    border-color: #e1e8ed !important;
+    background: #f3f6f8 !important;
+    color: #a4b2bc !important;
+}
+.applovin-list-template .aps-table tbody tr.aps-group-blue > td {
+    background: #eef7fc;
+}
+.applovin-list-template .aps-table tbody tr.aps-group-white > td {
+    background: #fff;
+}
+.applovin-list-template .aps-table tbody tr:hover > td {
+    background: var(--ap-list-hover) !important;
+}
+@media (max-width: 767px) {
+    .applovin-list-template .applovin-data-table > thead > tr > th,
+    .applovin-list-template .applovin-data-table > tbody > tr > td {
+        padding: 8px 7px !important;
+    }
+}

@@ -7,6 +7,7 @@ use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreOwnerHistory;
+use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -49,12 +50,16 @@ class AppLovinSpendReviewController extends Controller
         $visibleIds = $isDashboard
             ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $allowedDepartmentIds = $context['user']->isAdministrator()
+            ? Department::business()->pluck('id')->map(fn ($id): int => (int) $id)->all()
+            : $visibleIds;
         $filters = $request->validate([
             'operator' => ['nullable', 'string', 'max:100'],
             'department_ids' => ['nullable', 'array'],
-            'department_ids.*' => ['integer', 'distinct', Rule::in($visibleIds)],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($allowedDepartmentIds)],
             'over_threshold' => ['nullable', 'in:1'],
             'account_number' => ['nullable', 'string', 'max:191'],
+            'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
@@ -229,8 +234,10 @@ class AppLovinSpendReviewController extends Controller
             ))->values();
         }
         $page = max(1, (int) $request->query('page', 1));
-        $accounts = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, ['path' => $request->url(), 'query' => $request->query()]);
-        $departmentOptions = $this->storeOwners->operationDepartments()->whereIn('id', $availableDepartmentIds)->values();
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $accounts = new LengthAwarePaginator($accounts->forPage($page, $perPage)->values(), $accounts->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
+        $departmentOptions = Department::business()->whereIn('id', $availableDepartmentIds)
+            ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],

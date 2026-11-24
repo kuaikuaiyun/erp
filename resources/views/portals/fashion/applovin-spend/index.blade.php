@@ -4,10 +4,11 @@
 <style>
 .spend-box{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.spend-high{color:#d9534f;font-weight:700}.gift-thumb{width:54px;height:40px;object-fit:cover;border:1px solid #d6e2ea;border-radius:6px;margin-right:7px;cursor:zoom-in}.pager-wrap{display:flex;justify-content:center;align-items:center;gap:5px;padding:14px}.pager-wrap a,.pager-wrap span{min-width:34px;height:34px;line-height:34px;text-align:center;border:1px solid #d8e4ec;border-radius:7px;background:#fff;color:#39769d;text-decoration:none}.pager-wrap .active{background:#3498db;border-color:#3498db;color:#fff;font-weight:700}.pager-wrap .disabled{color:#b6c1c9;background:#f6f8f9}.upload-drop{display:block;border:2px dashed #42a5e8;border-radius:10px;background:#eef8ff;padding:36px 20px;text-align:center;color:#7891a6;cursor:pointer}.upload-drop.drag{background:#dff2ff}.upload-drop>i{display:block;font-size:34px;color:#689bc0;margin-bottom:12px}.upload-drop input{display:none!important}.upload-paste-btn{border:0;border-radius:4px;background:#348dc1;color:#fff;padding:7px 14px;margin-top:10px}.upload-file-name{margin-top:10px;color:#337ab7}.upload-help{margin-top:10px;color:#778899}.gift-example-modal .modal-dialog{width:min(1100px,94vw)}.gift-example-image{display:block;width:100%;height:auto;border:1px solid #d8e4ec;border-radius:6px}
 </style>
+<link rel="stylesheet" href="{{ asset('css/assistant-applovin-list-template.css') }}?v=20261124-2">
 @endpush
 @section('content')
 <section class="content-header"><h1>AppLovin账号消耗 <small>汇总单包服装运营系统已提交的 AppLovin 广告费用</small></h1></section>
-<section class="content">
+<section class="content applovin-list-template">
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
 <div class="box spend-box"><div class="box-body"><form method="get" class="form-inline">
@@ -19,7 +20,7 @@
     <button class="btn btn-primary"><i class="fa fa-search"></i> 筛选</button>
     <a class="btn btn-default" href="{{ route('fashion.applovin-spends.index') }}">重置</a>
 </form></div></div>
-<div class="box spend-box"><div class="table-responsive"><table class="table table-bordered table-hover"><thead><tr><th>运营部门/人员</th><th>代理账号</th><th>广告社媒</th><th>广告账户</th><th>账户编号</th><th>绑定店铺域名</th><th>累计实际消耗</th><th>是否有礼金</th></tr></thead><tbody>
+<div class="box spend-box"><div class="table-responsive"><table class="table table-bordered table-hover applovin-data-table"><thead><tr><th>运营部门/人员</th><th>代理账号</th><th>广告社媒</th><th>广告账户</th><th>账户编号</th><th>绑定店铺域名</th><th>累计实际消耗</th><th>是否有礼金</th></tr></thead><tbody>
 @forelse($accounts as $account)@php($canUpload = $user->isAdministrator() || strcasecmp((string)$user->username,'kky_boss')===0 || (int)$account['operator_user_id']===(int)$user->getKey())<tr>
     <td>{{ $account['department'] ?: '—' }}<br><small>{{ $account['operator_name'] }}</small></td><td><b>{{ $account['agency'] }}</b></td><td>{{ $account['media'] ?: '—' }}</td><td>{{ $account['account_name'] }}</td><td>{{ $account['account_number'] }}</td><td>{{ $account['store_domain'] ?: '未绑定' }}</td><td class="{{ $account['total'] >= $threshold ? 'spend-high' : '' }}">${{ number_format($account['total'],2) }}</td>
     <td>@if($account['total'] >= $threshold)
@@ -28,7 +29,7 @@
         <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#gift-example-modal"><i class="fa fa-question-circle"></i> 上传图片示例</button>@elseif(!$account['uploaded_screenshot'])<span class="text-muted">待本人上传</span>@endif
         @if($account['uploaded_screenshot']) <span class="label label-success">已上传</span>@endif
     @else<span class="text-muted">—</span>@endif</td>
-</tr>@empty<tr><td colspan="8" class="text-center text-muted" style="padding:30px">暂无服装 AppLovin 广告费用数据</td></tr>@endforelse
+</tr>@empty<tr><td colspan="8" class="text-center text-muted applovin-empty">暂无服装 AppLovin 广告费用数据</td></tr>@endforelse
 </tbody></table></div>
 @if($accounts->hasPages())<div class="pager-wrap">@if($accounts->onFirstPage())<span class="disabled">‹</span>@else<a href="{{ $accounts->previousPageUrl() }}">‹</a>@endif @for($p=max(1,$accounts->currentPage()-2);$p<=min($accounts->lastPage(),$accounts->currentPage()+2);$p++) @if($p===$accounts->currentPage())<span class="active">{{ $p }}</span>@else<a href="{{ $accounts->url($p) }}">{{ $p }}</a>@endif @endfor @if($accounts->hasMorePages())<a href="{{ $accounts->nextPageUrl() }}">›</a>@else<span class="disabled">›</span>@endif</div>@endif
 </div>

@@ -457,6 +457,7 @@ class OperationReportController extends Controller
             'operator_user_id' => ['nullable', 'integer'],
             'edit_report' => ['nullable', 'integer'],
             'reuse_report' => ['nullable', 'integer'],
+            'history_per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
         ]);
         $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
         if ($editingReport) {
@@ -509,7 +510,7 @@ class OperationReportController extends Controller
             ->when(! $isBoss, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
-            ->paginate(20, ['*'], 'history_page')
+            ->paginate((int) ($validated['history_per_page'] ?? 20), ['*'], 'history_page')
             ->withQueryString();
 
         return view('portals.operation.reports.index', [

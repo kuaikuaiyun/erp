@@ -1,4 +1,5 @@
 @extends('portal.layout')
+@include('portals.assistant.daily-submissions.partials.template-assets')
 @section('page_title', '开户需求处理')
 
 @push('styles')
@@ -9,7 +10,7 @@
 
 @section('content')
 <section class="content-header"><h1>开户需求处理 <small>处理运营提交的广告平台开户需求</small></h1></section>
-<section class="content">
+<section class="content daily-submission-template-page">
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
 <div class="box opening-review"><div class="box-body"><form class="opening-filters" method="get">
@@ -25,7 +26,7 @@
     <td>{{ $item->created_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td><td>{{ $item->operation_department_name ?: '—' }}<br><small>{{ $item->operator_name }}</small></td><td>{{ $item->agency_name ?: '—' }}</td><td><strong>{{ $item->media }}</strong></td><td>{{ $item->quantity }}</td><td>{{ $item->email ?: '—' }}</td><td>{{ $item->profile_link ?: '—' }}</td><td>{{ $item->bcid ?: '—' }}</td><td><span class="status-pill {{ $item->status }}">{{ $item->statusLabel() }}</span></td><td style="white-space:pre-wrap;min-width:220px">{{ $item->response_text ?: '—' }}</td><td>{{ $item->processed_by_name ?: '—' }}@if($item->processed_at)<br><small>{{ $item->processed_at->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</small>@endif</td>
     <td style="min-width:270px">@if($item->status === 'pending')<form class="mark-processing-form" method="post" action="{{ route('assistant.daily-submissions.account-openings.processing', $item) }}">@csrf @method('PATCH')<button type="submit" class="btn btn-xs btn-info" onclick="return confirm('确认将这条开户需求标记为处理中？')"><i class="fa fa-hourglass-half"></i> 处理中</button></form>@endif @if(in_array($item->status, ['pending', 'processing'], true))<form method="post" action="{{ route('assistant.daily-submissions.account-openings.process', $item) }}" class="daily-response-form" data-loading="off">@csrf @method('PATCH')<input type="hidden" name="decision" value=""><input type="hidden" name="response_text" value=""><div class="decision-actions"><button type="button" class="btn btn-xs btn-success daily-response-trigger" data-decision="processed"><i class="fa fa-check"></i> 回复并标记已处理</button><button type="button" class="btn btn-xs btn-danger daily-response-trigger" data-decision="rejected"><i class="fa fa-times"></i> 驳回</button></div></form>@else — @endif</td>
 </tr>@empty<tr><td colspan="12" class="text-center text-muted">暂无开户需求</td></tr>@endforelse
-</tbody></table></div>@if($submissions->hasPages())<div class="box-footer text-center">{{ $submissions->links() }}</div>@endif</div>
+</tbody></table></div>@include('portals.assistant.partials.advertising-template-pagination', ['paginator' => $submissions, 'unit' => '条记录'])</div>
 </section>
 @endsection
 @include('portals.assistant.daily-submissions.partials.response-modal')
