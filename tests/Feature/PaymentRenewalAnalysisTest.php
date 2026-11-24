@@ -151,6 +151,48 @@ class PaymentRenewalAnalysisTest extends TestCase
         ], $overrides);
     }
 
+    public function test_matching_modules_share_root_discovery_and_numeric_origins_use_string_bindings(): void
+    {
+        $queries=[];
+        DB::listen(static function ($event) use (&$queries): void {
+            $queries[]=$event;
+        });
+        $service=app(PaymentRenewalAnalysisService::class);
+        $data=$service->dashboard($this->filters());
+        self::assertNotEmpty($data['stages']);
+        $rootQueries=array_values(array_filter($queries,static fn ($event): bool =>
+            str_contains($event->sql,'or "shopify_order_number" in (')));
+        self::assertCount(1,$rootQueries,'Equal module scopes must discover matching roots once.');
+        $historyQueries=array_values(array_filter($queries,static fn ($event): bool =>
+            str_contains($event->sql,'where "subscription_origin_order_id" in (')));
+        self::assertNotEmpty($historyQueries);
+        foreach ($historyQueries as $query) {
+            // The shared projection has three scope bindings, followed by references and the cutoff.
+            $references=array_slice($query->bindings,3,-1);
+            self::assertNotEmpty($references);
+            foreach ($references as $reference) self::assertIsString($reference);
+        }
+
+        $queries=[];
+        $service->dashboard($this->filters());
+        self::assertFalse(collect($queries)->contains(static fn ($event): bool =>
+            str_contains($event->sql,'shop_order_list')),'Warm summaries must use their cached totals.');
+    }
+
+    public function test_reference_batches_preserve_values_and_limit_parameters_and_unicode_bytes(): void
+    {
+        $method=new \ReflectionMethod(PaymentRenewalAnalysisService::class,'referenceBatches');
+        $service=app(PaymentRenewalAnalysisService::class);
+        foreach ([range(1,4500),array_map(static fn ($i): string => str_repeat('汉',3000).$i,range(1,100))] as $values) {
+            $batches=iterator_to_array($method->invoke($service,$values),false);
+            self::assertSame($values,array_merge(...$batches));
+            foreach ($batches as $batch) {
+                self::assertLessThanOrEqual(2000,count($batch));
+                self::assertLessThanOrEqual(250000,array_sum(array_map(static fn ($value): int => strlen((string)$value),$batch)));
+            }
+        }
+    }
+
     public function test_payment_methods_override_gateway_and_account_and_reconcile_all_groups(): void
     {
         foreach (['ap', 'gp', 'pp', 'cc', '', 'other'] as $index => $method) {

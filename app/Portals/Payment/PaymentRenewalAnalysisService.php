@@ -88,7 +88,7 @@ class PaymentRenewalAnalysisService
         $module=$this->moduleFilters($filters,'initial');
         $cacheFilters=$detail;
         unset($cacheFilters['detail_page'],$cacheFilters['detail_per_page']);
-        $key='payment:renewal-detail-summary:shared-v1:'.sha1(json_encode([$module,$cacheFilters]));
+        $key='payment:renewal-detail-summary:shared-v2:'.sha1(json_encode([$module,$cacheFilters]));
         $stats=Cache::remember($key,now()->addMinutes(5),function () use ($module,$detail): array {
             $scope=$summary=$this->emptyRiskTotal();
             $stores=[];
@@ -181,8 +181,9 @@ class PaymentRenewalAnalysisService
 
     private function combinedData(array $filters): array
     {
-        $initial=$this->dataset($this->moduleFilters($filters,'initial'));
-        $renewal=$this->dataset($this->moduleFilters($filters,'renewal'));
+        $rootIndexes=[];
+        $initial=$this->dataset($this->moduleFilters($filters,'initial'),$rootIndexes);
+        $renewal=$this->dataset($this->moduleFilters($filters,'renewal'),$rootIndexes);
         $stageFilter=($filters['stage'] ?? '')==='initial' ? '' : ($filters['stage'] ?? '');
         $stages=array_values(array_filter($renewal['stages'],static fn ($stage)=>$stage['number']>0 && ($stageFilter==='' || $stage['key']===$stageFilter)));
         $summary=$this->emptyRiskTotal();
@@ -204,12 +205,18 @@ class PaymentRenewalAnalysisService
             'risk_by_channel'=>$channels,'upsell'=>$renewal['upsell']];
     }
 
-    private function dataset(array $filters): array
+    private function dataset(array $filters,array &$rootIndexes): array
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
-        return Cache::remember('payment:renewal-summary:shared-v1:'.sha1(json_encode($cache)),now()->addMinutes(5),
-            fn ()=>$this->buildSummary($cache));
+        return Cache::remember('payment:renewal-summary:shared-v2:'.sha1(json_encode($cache)),now()->addMinutes(5),
+            function () use ($cache,&$rootIndexes): array {
+                $window=$this->window($cache);
+                $key=serialize([$window['from']->format('Y-m-d H:i:s'),$window['to']->format('Y-m-d H:i:s'),$cache['store']]);
+                $rootIndexes[$key] ??= $this->rootIndex([...$cache,'first_only'=>false],$window);
+
+                return $this->buildSummary($cache,$rootIndexes[$key]);
+            });
     }
 
     private function window(array $filters): array
@@ -295,7 +302,7 @@ class PaymentRenewalAnalysisService
         $keys=array_keys($refs);
         unset($refs);
         $ids=$map=[];
-        foreach (array_chunk($keys,300) as $chunk) {
+        foreach ($this->referenceBatches($keys) as $chunk) {
             $numeric=array_values(array_filter($chunk,static fn ($v)=>ctype_digit((string)$v)));
             $query=SharedLogisticsOrder::query()->select($filters['first_only'] ? ['id', 'store_name'] : self::ORDER_FIELDS)
                 ->where('subscription_type','订阅首次购买')
@@ -307,7 +314,7 @@ class PaymentRenewalAnalysisService
                     if ($numeric) $q->orWhereIn('id',$numeric);
                 });
             if ($filters['store']!=='') $query->where('store_name',$filters['store']);
-            foreach ($query->lazyById(500) as $root) {
+            foreach ($query->lazyById(2000) as $root) {
                 if ($root->store_name) $stores[$root->store_name]=true;
                 if ($filters['first_only']) continue;
                 $id=(int)$root->id;
@@ -321,18 +328,54 @@ class PaymentRenewalAnalysisService
         return ['ids'=>$rootIds,'map'=>$map,'stores'=>collect(array_keys($stores))->map(static fn ($name)=>(string)$name)->sort()->values()->all()];
     }
 
+    /** Keep reference queries within packet and parameter limits, including Unicode references. */
+    private function referenceBatches(array $references): \Generator
+    {
+        $batch=[];
+        $bytes=0;
+        foreach ($references as $reference) {
+            $size=strlen((string)$reference);
+            if ($batch!==[] && (count($batch)>=2000 || $bytes+$size>250000)) {
+                yield $batch;
+                $batch=[];
+                $bytes=0;
+            }
+            $batch[]=$reference;
+            $bytes+=$size;
+        }
+        if ($batch!==[]) yield $batch;
+    }
+
     private function lifecycleBatches(array $filters,array $index,array $w): \Generator
     {
+        if ($index['ids']===[]) return;
+
+        // Preserve historical whitespace variants while binding VARCHAR references as strings.
+        // Integer bindings otherwise force MySQL to compare this indexed column numerically.
+        $database=(new SharedLogisticsOrder())->getConnection();
+        $referenceValues=in_array($database->getDriverName(),['mysql','mariadb'],true)
+            ? $database->table('shop_order_list')
+                ->where('source_platform','shopify')->where('source_system','logistics')
+                ->whereNotNull('subscription_origin_order_id')->distinct()->pluck('subscription_origin_order_id')
+            : [];
+        $referencesByRoot=[];
+        foreach ($referenceValues as $reference) {
+            $rootId=$index['map'][trim((string)$reference)] ?? null;
+            if ($rootId!==null) $referencesByRoot[$rootId][(string)$reference]=true;
+        }
+        unset($referenceValues);
+
         foreach (array_chunk($index['ids'],100) as $rootIds) {
             $roots=SharedLogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
             $entries=$refs=$seen=[];
             foreach ($roots as $root) {
                 $entries[]=['order'=>$root,'initial'=>$root,'number'=>0];
                 foreach ($this->chainReferences($root) as $ref) if (($index['map'][$ref] ?? null)===(int)$root->id) $refs[$ref]=true;
+                foreach ($referencesByRoot[(int)$root->id] ?? [] as $reference=>$_) $refs[$reference]=true;
             }
             if ($entries) yield $entries;
             if (!$refs) continue;
-            $query=SharedLogisticsOrder::query()->whereIn('subscription_origin_order_id',array_keys($refs))
+            $query=SharedLogisticsOrder::query()->whereIn('subscription_origin_order_id',array_map('strval',array_keys($refs)))
                 ->whereNotNull('paid_at')->where('paid_at','<=',$w['to']);
             foreach ($this->orderedBatches($query) as $orders) {
                 $entries=[];
@@ -388,10 +431,9 @@ class PaymentRenewalAnalysisService
         return $total;
     }
 
-    private function buildSummary(array $filters): array
+    private function buildSummary(array $filters,array $index): array
     {
         $w=$this->window($filters);
-        $index=$this->rootIndex($filters,$w);
         $groups=array_keys(self::breakdownGroups());
         $first=[];
         foreach ($groups as $key) $first[$key]=array_fill_keys(['all','subscription','non_subscription'],$this->emptyRiskTotal());
