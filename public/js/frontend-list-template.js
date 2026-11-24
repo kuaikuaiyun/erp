@@ -141,9 +141,27 @@
                     label.append(input, node('span', '', choice.label)); options.appendChild(label);
                 });
             }
+            function filteredChoices() {
+                var keyword = search ? search.value.trim().toLocaleLowerCase() : '';
+                return choices.filter(function (choice) {
+                    return !keyword || choice.label.toLocaleLowerCase().includes(keyword);
+                });
+            }
             var clear = node('button', 'flt-picker-clear', t('clear_choice')); clear.type = 'button';
             clear.onclick = function () { values.clear(); if (search) search.value = ''; refreshLabel(); drawOptions(); };
-            panel.append(options); if (config.allowClear !== false && !config.showAll) panel.append(clear);
+            panel.append(options);
+            if (config.allowClear !== false && !config.showAll) {
+                var actions = node('div', 'flt-picker-actions');
+                if (multi && host.dataset.selectAll === '1') {
+                    var selectAll = node('button', 'flt-picker-select-all', t('select_all_options')); selectAll.type = 'button';
+                    selectAll.onclick = function () {
+                        filteredChoices().forEach(function (choice) { values.add(choice.value); });
+                        refreshLabel(); drawOptions();
+                    };
+                    actions.append(selectAll);
+                }
+                actions.append(clear); panel.append(actions);
+            }
             details.append(summary, panel); host.replaceChildren(details);
             summary.addEventListener('click', function () { details.classList.remove('is-positioned'); });
             function positionPanel() {

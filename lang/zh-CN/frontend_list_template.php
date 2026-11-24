@@ -22,6 +22,7 @@ return [
     'search_options' => '输入关键词搜索选项',
     'no_options' => '没有匹配的选项',
     'clear_choice' => '清空选择',
+    'select_all_options' => '全选',
     'selected_options' => ':names（:count项）',
     'query' => '查询',
     'reset' => '重置',

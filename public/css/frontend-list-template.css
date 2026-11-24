@@ -198,13 +198,25 @@
     color: var(--flt-muted);
     margin: 0
 }
-.flt-picker-clear {
+.flt-picker-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-top: 1px solid #e4edf3;
+    margin-top: 5px;
+    padding-top: 4px
+}
+.flt-picker-clear,.flt-picker-select-all {
     border: 0;
     background: none;
     color: #2188be;
     font-size: 12px;
     padding: 8px;
     cursor: pointer
+}
+.flt-picker-clear:hover,.flt-picker-select-all:hover {
+    background: #eff7fc;
+    border-radius: 4px
 }
 .flt-toolbar {
     display: flex;
