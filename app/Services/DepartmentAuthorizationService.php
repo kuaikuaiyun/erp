@@ -194,30 +194,47 @@ class DepartmentAuthorizationService
             return collect();
         }
 
-        $grantedRootIds = $portal->departmentGrants()
+        $grants = $portal->departmentGrants()
+            ->get(['department_id', 'includes_descendants']);
+        if ($grants->isEmpty()) {
+            return collect();
+        }
+
+        $directGrantIds = $grants
             ->pluck('department_id')
             ->map(fn ($id): int => (int) $id)
             ->unique();
-        if ($grantedRootIds->isEmpty()) {
-            return collect();
-        }
+        $inheritedGrantIds = $grants
+            ->where('includes_descendants', true)
+            ->pluck('department_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique();
 
         $departments = Department::business()
             ->get(['id', 'parent_id'])
             ->keyBy(fn (Department $department): int => (int) $department->getKey());
 
         return $directDepartmentIds
-            ->filter(function ($departmentId) use ($departments, $grantedRootIds): bool {
-                $department = $departments->get((int) $departmentId);
+            ->filter(function ($departmentId) use ($departments, $directGrantIds, $inheritedGrantIds): bool {
+                $departmentId = (int) $departmentId;
+                if ($directGrantIds->contains($departmentId)) {
+                    return true;
+                }
+
+                $department = $departments->get($departmentId);
                 $visited = [];
 
                 while ($department && $department->parent_id && !in_array((int) $department->parent_id, $visited, true)) {
-                    $visited[] = (int) $department->parent_id;
-                    $department = $departments->get((int) $department->parent_id);
+                    $parentId = (int) $department->parent_id;
+                    if ($inheritedGrantIds->contains($parentId)) {
+                        return true;
+                    }
+
+                    $visited[] = $parentId;
+                    $department = $departments->get($parentId);
                 }
 
-                return $department
-                    && $grantedRootIds->contains((int) $department->getKey());
+                return false;
             })
             ->map(fn ($id): int => (int) $id)
             ->values();

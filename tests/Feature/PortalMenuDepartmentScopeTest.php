@@ -173,4 +173,49 @@ class PortalMenuDepartmentScopeTest extends TestCase
         self::assertNotContains('foreign', $visibleCodes);
         self::assertNotContains('foreign_group', $visibleCodes);
     }
+
+    public function test_explicit_child_department_grant_keeps_that_departments_menu_permissions(): void
+    {
+        $root = Department::create(['name' => 'Root', 'slug' => 'root']);
+        $team = Department::create(['name' => 'Xiamen headquarters', 'slug' => 'xiamen', 'parent_id' => $root->id]);
+
+        DB::table('admin_users')->insert(['id' => 20, 'username' => 'assistant', 'name' => 'Assistant']);
+        DB::table('admin_role_users')->insert(['role_id' => $team->id, 'user_id' => 20]);
+
+        $permissionId = DB::table('admin_permissions')->insertGetId([
+            'name' => 'Shopify stores', 'slug' => 'portal.wuliu.logistics_shopify_stores',
+        ]);
+        DB::table('admin_role_permissions')->insert([
+            'role_id' => $team->id,
+            'permission_id' => $permissionId,
+        ]);
+
+        $portal = Portal::create(['name' => 'Shopify data', 'code' => 'wuliu', 'status' => Portal::STATUS_ENABLED]);
+        DB::table('portal_departments')->insert([
+            'portal_id' => $portal->id,
+            'department_id' => $team->id,
+            'includes_descendants' => false,
+        ]);
+        $portal->menus()->createMany([
+            ['code' => 'home', 'path' => '/', 'sort' => 0, 'permission_slug' => null],
+            ['code' => 'stores', 'path' => '/stores', 'sort' => 1, 'permission_slug' => 'portal.wuliu.logistics_shopify_stores'],
+        ]);
+
+        $user = AdminUser::query()->findOrFail(20);
+
+        self::assertSame(
+            [$team->id],
+            app(DepartmentAuthorizationService::class)->directDepartmentIdsForPortal($user, $portal)->all(),
+        );
+        self::assertSame(
+            ['portal.wuliu.logistics_shopify_stores'],
+            app(DepartmentAuthorizationService::class)->permissionsForPortal($user, $portal)->pluck('slug')->values()->all(),
+        );
+
+        $portal->load('menus');
+        self::assertSame(
+            ['home', 'stores'],
+            app(PortalMenuAuthorizationService::class)->visibleMenus($portal, $user)->pluck('code')->values()->all(),
+        );
+    }
 }
