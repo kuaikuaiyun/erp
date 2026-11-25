@@ -21,7 +21,7 @@ class CreditCardAnalysisService
     public function filters(Request $request): array
     {
         $rules = [];
-        foreach (['collection_account','keyword','customer_email','reason','subscription_type','logistics_status','tracking_number','tongtu_order_number','item_keyword','note'] as $key) {
+        foreach (['collection_account','keyword','customer_email','reason','logistics_status','tracking_number','tongtu_order_number','item_keyword','note'] as $key) {
             $rules[$key] = ['nullable','string','max:1000'];
         }
         $rules['store_id'] = ['nullable','integer','min:1'];
@@ -36,9 +36,20 @@ class CreditCardAnalysisService
             $label = match ($label) { 'handled' => str_starts_with($key,'handled_') ? 'handled_date' : 'handled', 'order'=>'order_date', default=>$label };
             $attributes[$key] = __('credit_card_analysis.fields.'.$label);
         }
-        $data = $request->validate($rules, [], $attributes);
+        $request->merge(['subscription_type' => (array) $request->input('subscription_type', [])]);
+        $data = $request->validate($rules + [
+            'subscription_type' => ['array'],
+            'subscription_type.*' => ['nullable', 'string', 'max:1000'],
+        ], [], $attributes + [
+            'subscription_type' => __('credit_card_analysis.fields.subscription_type'),
+            'subscription_type.*' => __('credit_card_analysis.fields.subscription_type'),
+        ]);
         $filters = [];
         foreach ($rules as $key => $_) $filters[$key] = trim((string) ($data[$key] ?? ''));
+        $filters['subscription_type'] = array_values(array_unique(array_filter(
+            array_map(static fn (?string $type): string => trim($type ?? ''), $data['subscription_type'] ?? []),
+            static fn (string $type): bool => $type !== '',
+        )));
         $filters['per_page'] = (int) ($data['per_page'] ?? 20);
         foreach ([['date_from','date_to'],['order_from','order_to'],['handled_from','handled_to']] as [$from,$to]) {
             if ($filters[$from] !== '' && $filters[$to] !== '' && $filters[$from] > $filters[$to]) {
@@ -94,13 +105,14 @@ class CreditCardAnalysisService
             });
         }
         $orderKeys = ['store_id','collection_account','customer_email','subscription_type','post_upsell','repurchase','shipped','logistics_status','tracking_number','tongtu_order_number','item_keyword','order_from','order_to','order_amount_min','order_amount_max'];
-        if (array_filter(array_intersect_key($f, array_flip($orderKeys)), fn ($value) => $value !== '') !== []) {
+        if (array_filter(array_intersect_key($f, array_flip($orderKeys)), fn ($value) => $value !== '' && $value !== []) !== []) {
             $q->whereHas('order', function (Builder $order) use ($f): void {
                 if ($f['store_id'] !== '') $order->where('assistant_domain_store_id',$f['store_id']);
                 foreach (['collection_account'=>'collection_account','customer_email'=>'buyer_email','tracking_number'=>'tracking_number','tongtu_order_number'=>'tongtu_order_number'] as $key=>$column) {
                     if ($f[$key] !== '') $order->whereRaw($column." LIKE ? ESCAPE '!'",[$this->like($f[$key])]);
                 }
-                foreach (['subscription_type','logistics_status'] as $key) if ($f[$key] !== '') $order->where($key,$f[$key]);
+                if ($f['subscription_type'] !== []) $order->whereIn('subscription_type', $f['subscription_type']);
+                if ($f['logistics_status'] !== '') $order->where('logistics_status', $f['logistics_status']);
                 if ($f['post_upsell'] === 'yes') $order->where('is_add_on','已加购');
                 if ($f['post_upsell'] === 'no') $order->where(fn ($x) => $x->whereNull('is_add_on')->orWhere('is_add_on','!=','已加购'));
                 if ($f['repurchase'] === 'yes') $order->whereNotNull('subscription_origin_order_id')->where('subscription_origin_order_id','!=','');

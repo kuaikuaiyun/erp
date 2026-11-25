@@ -31,8 +31,18 @@
 
     function syncDepartmentOption(input) {
         $(input).closest('.portal-department-option').toggleClass('is-selected', Boolean(input.checked));
+        $(input).closest('.portal-department-option').toggleClass('is-partial', Boolean(input.indeterminate));
     }
 
+    function syncDepartmentTree(tree) {
+        var parent = tree.querySelector('[data-portal-department-root]');
+        var children = Array.from(tree.querySelectorAll('[data-portal-department-child]'));
+        if (children.length) {
+            var count = children.filter(function (input) { return input.checked; }).length;
+            parent.indeterminate = count > 0 && count < children.length;
+        }
+        tree.querySelectorAll('[data-portal-department-input]').forEach(syncDepartmentOption);
+    }
     function bindDepartmentOptions() {
         $('[data-portal-form]').each(function () {
             var form = this;
@@ -41,9 +51,24 @@
                 syncDepartmentOption(this);
             });
 
+            form.querySelectorAll('[data-portal-department-tree]').forEach(syncDepartmentTree);
+            $(form).off('click.portalDepartmentTree', '[data-portal-department-toggle]').on('click.portalDepartmentTree', '[data-portal-department-toggle]', function () {
+                var children = this.closest('[data-portal-department-tree]').querySelector('.portal-department-children');
+                children.hidden = !children.hidden; this.setAttribute('aria-expanded', String(!children.hidden));
+            });
             $(form).off('change.portalDepartment', '[data-portal-department-input]')
                 .on('change.portalDepartment', '[data-portal-department-input]', function () {
-                    syncDepartmentOption(this);
+                    var tree = this.closest('[data-portal-department-tree]');
+                    if (tree) {
+                        if (this.hasAttribute('data-portal-department-root')) {
+                            var checked = this.checked;
+                            tree.querySelectorAll('[data-portal-department-child]').forEach(function (input) { input.checked = checked; });
+                        } else {
+                            var children = Array.from(tree.querySelectorAll('[data-portal-department-child]'));
+                            tree.querySelector('[data-portal-department-root]').checked = children.every(function (input) { return input.checked; });
+                        }
+                        syncDepartmentTree(tree);
+                    } else syncDepartmentOption(this);
                 });
         });
     }

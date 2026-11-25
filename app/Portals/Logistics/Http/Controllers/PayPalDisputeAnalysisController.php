@@ -142,7 +142,7 @@ class PayPalDisputeAnalysisController extends Controller
             'subscription_type' => $filters['subscription_type'], 'post_upsell' => $filters['post_upsell'], 'repurchase' => $filters['repurchase'],
             'shipped' => $filters['shipped'], 'logistics_status' => $filters['logistics_status'], 'tracking_number' => $filters['tracking_number'], 'tongtu_order_number' => $filters['tongtu_order_number'],
             'item_keyword' => $filters['item_keyword'],
-        ], static fn ($value): bool => $value !== '');
+        ], static fn ($value): bool => $value !== '' && $value !== []);
         if ($orderFilters === []) return;
 
         $query->whereHas('order', function (Builder $order) use ($filters): void {
@@ -150,7 +150,7 @@ class PayPalDisputeAnalysisController extends Controller
             if ($filters['order_from'] !== '') $order->where('order_created_at', '>=', $filters['order_from'].' 00:00:00');
             if ($filters['order_to'] !== '') $order->where('order_created_at', '<=', $filters['order_to'].' 23:59:59');
             $this->amountRange($order, 'paid_amount_usd', $filters['order_amount_min'], $filters['order_amount_max']);
-            if ($filters['subscription_type'] !== '') $order->where('subscription_type', $filters['subscription_type']);
+            if ($filters['subscription_type'] !== []) $order->whereIn('subscription_type', $filters['subscription_type']);
             if ($filters['post_upsell'] === 'yes') $order->where('is_add_on', '已加购');
             if ($filters['post_upsell'] === 'no') $order->where(fn (Builder $item) => $item->whereNull('is_add_on')->orWhere('is_add_on', '!=', '已加购'));
             if ($filters['repurchase'] === 'yes') $order->whereNotNull('subscription_origin_order_id')->where('subscription_origin_order_id', '!=', '');
@@ -179,6 +179,10 @@ class PayPalDisputeAnalysisController extends Controller
     {
         $text = static fn (string $key): string => trim((string) $request->input($key));
         $choice = static fn (string $key, array $allowed): string => in_array($request->input($key), $allowed, true) ? (string) $request->input($key) : '';
+        $subscriptionTypes = array_values(array_unique(array_filter(
+            array_map(static fn ($value): string => is_string($value) ? trim($value) : '', (array) $request->input('subscription_type', [])),
+            static fn (string $value): bool => $value !== '',
+        )));
 
         return [
             'account_id' => $text('account_id'), 'keyword' => $text('keyword'), 'customer_email' => $text('customer_email'), 'note' => $text('note'),
@@ -186,7 +190,7 @@ class PayPalDisputeAnalysisController extends Controller
             'date_from' => $text('date_from'), 'date_to' => $text('date_to'), 'handled_from' => $text('handled_from'), 'handled_to' => $text('handled_to'),
             'order_from' => $text('order_from'), 'order_to' => $text('order_to'), 'dispute_amount_min' => $text('dispute_amount_min'), 'dispute_amount_max' => $text('dispute_amount_max'), 'refund_amount_min' => $text('refund_amount_min'), 'refund_amount_max' => $text('refund_amount_max'),
             'order_amount_min' => $text('order_amount_min'), 'order_amount_max' => $text('order_amount_max'), 'currency' => $text('currency'),
-            'subscription_type' => $text('subscription_type'), 'post_upsell' => $choice('post_upsell', ['yes', 'no']), 'repurchase' => $choice('repurchase', ['yes', 'no']),
+            'subscription_type' => $subscriptionTypes, 'post_upsell' => $choice('post_upsell', ['yes', 'no']), 'repurchase' => $choice('repurchase', ['yes', 'no']),
             'subscription_cancelled' => $choice('subscription_cancelled', ['yes', 'no']), 'add_on_cancelled' => $choice('add_on_cancelled', ['yes', 'no']),
             'type' => $choice('type', ['INTERNAL', 'EXTERNAL', 'ALERT', 'INQUIRY']), 'reason' => $text('reason'), 'outcome' => $text('outcome'),
             'shipped' => $choice('shipped', ['yes', 'no']), 'logistics_status' => $text('logistics_status'), 'tracking_number' => $text('tracking_number'), 'tongtu_order_number' => $text('tongtu_order_number'), 'item_keyword' => $text('item_keyword'),

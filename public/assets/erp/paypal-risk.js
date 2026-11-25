@@ -149,11 +149,27 @@
                 '<label><span>' + escapeHtml(labels.detailFilterOutcome || '') + '</span><select class="form-control" name="outcome"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.dispute_outcome, filters.outcome) + '</select></label>';
         }
         container.hidden = false;
-        container.innerHTML = '<form class="paypal-risk-detail-filter-form" data-paypal-detail-filter-form data-paypal-tab="' + escapeHtml(tab) + '">' +
-            '<label class="paypal-risk-detail-filter-keyword"><span>' + escapeHtml(labels.detailFilterKeyword || '') + '</span><input class="form-control" name="keyword" value="' + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></label>' +
-            selects +
-            '<div class="paypal-risk-detail-filter-actions"><button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> ' + escapeHtml(labels.detailFilterSearch || '') + '</button><button class="btn btn-default btn-sm" type="button" data-paypal-detail-filter-reset>' + escapeHtml(labels.detailFilterReset || '') + '</button></div>' +
+        container.innerHTML = '<form class="flt-card flt-filters paypal-risk-detail-filter-form" data-loading="off" data-paypal-detail-filter-form data-paypal-tab="' + escapeHtml(tab) + '">' +
+            '<div class="flt-filter-grid"><label class="paypal-risk-detail-filter-keyword"><span>' + escapeHtml(labels.detailFilterKeyword || '') + '</span><input class="form-control" name="keyword" value="' + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></label>' +
+            selects + '</div>' +
+            '<div class="paypal-risk-detail-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> ' + escapeHtml(labels.detailFilterSearch || '') + '</button><button class="flt-btn" type="button" data-paypal-detail-filter-reset>' + escapeHtml(labels.detailFilterReset || '') + '</button></div>' +
             '</form>';
+        var form = container.firstElementChild;
+        var pickerConfig = one('.paypal-risk-detail-scroll').dataset;
+        ['searchOptions', 'noOptions', 'clearChoice'].forEach(function (key) {
+            form.dataset[key] = pickerConfig[key];
+        });
+        form.setAttribute('data-logistics-filters', '');
+        form.querySelectorAll('select').forEach(function (select) {
+            var label = select.parentElement;
+            var field = document.createElement('div');
+            select.id = 'paypal-detail-filter-' + select.name;
+            label.htmlFor = select.id;
+            if (select.options.length > 5) select.setAttribute('data-filter-searchable', '');
+            label.before(field);
+            field.append(label, select);
+        });
+        form.dispatchEvent(new Event('logistics:initialize-filters', { bubbles: true }));
     }
 
     function updateExportButton() {
@@ -165,12 +181,15 @@
         if (exportable) button.innerHTML = '<i class="fa fa-download"></i> ' + escapeHtml(labels.exportCurrentTab || '');
     }
 
+    var detailRequest = 0;
+
     function setDetailLoading(loading, message) {
         var loadingBox = one('#paypal-detail-loading');
-        var content = one('#paypal-detail-content');
+        var panel = one('#paypal-detail-panel');
         var error = one('#paypal-detail-error');
         loadingBox.hidden = !loading;
-        content.hidden = loading || Boolean(message);
+        panel.hidden = loading || Boolean(message);
+        if (panel.hidden) one('#paypal-detail-filters').hidden = true;
         error.hidden = !message;
         error.textContent = message || '';
     }
@@ -329,7 +348,7 @@
             }).join('') + '</tr>';
         }).join('');
         if (!tbody) tbody = '<tr><td colspan="' + columns.length + '">当前时间范围内暂无记录。</td></tr>';
-        one('#paypal-detail-body').innerHTML = '<div class="table-responsive"><table class="paypal-risk-data-table"><thead><tr>' + thead + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
+        one('#paypal-detail-body').innerHTML = '<div class="flt-table-scroll paypal-risk-detail-table-scroll" tabindex="0"><table class="paypal-risk-data-table"><thead><tr>' + thead + '</tr></thead><tbody>' + tbody + '</tbody></table></div>';
         renderPager(result.meta || {});
     }
 
@@ -337,20 +356,22 @@
         var container = one('#paypal-detail-pagination');
         if (!container) return;
         if (!meta.total) { container.innerHTML = ''; return; }
-        var html = '<span>显示 ' + meta.from + '-' + meta.to + ' 条，共 ' + meta.total + ' 条</span>';
-        html += '<button class="btn btn-default btn-sm" type="button" data-paypal-detail-page="' + Math.max(1, meta.current_page - 1) + '" ' + (meta.current_page <= 1 ? 'disabled' : '') + '><i class="fa fa-angle-left"></i></button>';
-        for (var page = 1; page <= meta.last_page; page++) {
-            if (page === 1 || page === meta.last_page || Math.abs(page - meta.current_page) <= 1) {
-                html += '<button class="btn btn-sm ' + (page === meta.current_page ? 'btn-primary' : 'btn-default') + '" type="button" data-paypal-detail-page="' + page + '">' + page + '</button>';
-            }
+        var pagination = one('#paypal-detail-pagination').dataset;
+        var summary = pagination.summary.replace('__first__', meta.from).replace('__last__', meta.to).replace('__total__', meta.total);
+        function pageButton(page, label, disabled) {
+            return '<button class="flt-btn" type="button" data-paypal-detail-page="' + page + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</button>';
         }
-        html += '<button class="btn btn-default btn-sm" type="button" data-paypal-detail-page="' + Math.min(meta.last_page, meta.current_page + 1) + '" ' + (meta.current_page >= meta.last_page ? 'disabled' : '') + '><i class="fa fa-angle-right"></i></button>';
-        container.innerHTML = html;
+        container.innerHTML = '<span>' + escapeHtml(summary) + '</span><div class="paypal-risk-page-links">'
+            + pageButton(meta.current_page - 1, pagination.previous, meta.current_page <= 1)
+            + '<span>' + meta.current_page + ' / ' + meta.last_page + '</span>'
+            + pageButton(meta.current_page + 1, pagination.next, meta.current_page >= meta.last_page) + '</div>';
     }
 
     function loadDetail(tab, page) {
         state.tab = tab || state.tab;
         state.page = page || 1;
+        var request = ++detailRequest;
+        one('.paypal-risk-detail-scroll').scrollTop = 0;
         setDetailLoading(true, '');
         fetch(detailUrl(state.tab, state.page), { credentials: 'same-origin', headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (response) {
@@ -358,6 +379,7 @@
                 return response.json();
             })
             .then(function (payload) {
+                if (request !== detailRequest) return;
                 state.lastPayload = payload;
                 renderDetailSummary(payload.summary || {});
                 renderDetailFilters(state.tab);
@@ -365,12 +387,52 @@
                 updateExportButton();
                 setDetailLoading(false, '');
             })
-            .catch(function (error) { setDetailLoading(false, error.message || '风险明细加载失败。'); });
+            .catch(function (error) {
+                if (request === detailRequest) setDetailLoading(false, error.message || one('#paypal-detail-pagination').dataset.loadError);
+            });
+    }
+
+    function initDetailScrollbars() {
+        var content = one('.paypal-risk-detail-scroll');
+        if (!content) return;
+        var selector = '.paypal-risk-detail-scroll, .paypal-risk-detail-table-scroll';
+        var timers = new WeakMap();
+        var hovered = null;
+
+        content.addEventListener('scroll', function (event) {
+            var area = event.target;
+            if (!area.matches(selector)) return;
+            window.clearTimeout(timers.get(area));
+            area.classList.add('is-scrolling');
+            timers.set(area, window.setTimeout(function () {
+                area.classList.remove('is-scrolling');
+            }, 700));
+        }, true);
+
+        function setHovered(area) {
+            if (hovered === area) return;
+            if (hovered) hovered.classList.remove('is-scrollbar-hovered');
+            hovered = area;
+            if (hovered) hovered.classList.add('is-scrollbar-hovered');
+        }
+
+        content.addEventListener('pointermove', function (event) {
+            if (event.pointerType === 'touch') return;
+            var area = event.target.closest(selector);
+            if (!area) return;
+            var bounds = area.getBoundingClientRect();
+            var verticalEdge = area.scrollHeight > area.clientHeight && event.clientX >= bounds.right - 18;
+            var horizontalEdge = area.scrollWidth > area.clientWidth && event.clientY >= bounds.bottom - 18;
+            setHovered(verticalEdge || horizontalEdge ? area : null);
+        });
+        content.addEventListener('pointerleave', function () { setHovered(null); });
     }
 
     function initDetailModal() {
         all('[data-paypal-detail]').forEach(function (button) {
             button.addEventListener('click', function () {
+                one('#paypal-detail-summary').replaceChildren();
+                one('#paypal-detail-subtitle').textContent = one('#paypal-detail-subtitle').dataset.loadingLabel;
                 state.accountId = button.dataset.paypalDetail;
                 state.tab = 'overview';
                 state.page = 1;
@@ -483,6 +545,7 @@
 
     initAccountModal();
     initDetailModal();
+    initDetailScrollbars();
     initDateModeControls();
     initCardScopeSwitches();
 })();

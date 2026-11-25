@@ -21,13 +21,14 @@
     $filterKeys = ['store_id','keyword','collection_account','category','reason','matched','customer_email','refund_amount','order_amount',
         'subscription_type','post_upsell','repurchase','subscription_cancelled','add_on_cancelled','handled',
         'shipped','logistics_status','tracking_number','tongtu_order_number','item_keyword','note'];
-    $hasFilters = collect($filters)->except('per_page')->contains(fn ($value) => $value !== '');
+    $hasFilters = collect($filters)->except('per_page')->contains(fn ($value) => $value !== '' && $value !== []);
     $columns = ['basic','order','amount','subscription','refund','logistics','product','handling','actions'];
 @endphp
 
 @push('styles')
+<link rel="stylesheet" href="{{ $origin }}/css/frontend-list-template.css?v=20261123-19">
 <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-<link rel="stylesheet" href="{{ $origin }}/assets/erp/credit-card-analysis.css?v=20261124-1">
+<link rel="stylesheet" href="{{ $origin }}/assets/erp/credit-card-analysis.css?v=20261124-7">
 @endpush
 
 @section('content')
@@ -35,18 +36,19 @@
 <section class="content credit-card-analysis-page" data-selected-template="{{ $t('selected_count',['count'=>':count']) }}" data-copied="{{ $t('copied') }}" data-copy-failed="{{ $t('copy_failed') }}" data-invalid-range="{{ $t('invalid_range') }}" data-select-required="{{ $t('validation.select_required') }}" data-handle-id="{{ old('handling_id') }}" data-export-error="{{ $errors->has('scope') || $errors->has('selected_ids') || $errors->has('selected_ids.*') ? '1' : '0' }}">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if($errors->any())<div class="alert alert-danger" role="alert"><ul>@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
-    <div class="box box-solid logistics-filter-box">
+    <div class="flt ca-list-ui">
+<div class="flt-card flt-filter-card logistics-filter-box">
         <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters') }}</h3></div>
         <div class="box-body">
-            <form method="get" action="{{ route('logistics.credit-card-analysis.index') }}" class="logistics-filter-form ca-filter-form">
+            <form method="get" action="{{ route('logistics.credit-card-analysis.index') }}" data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}" data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}" data-selected-options="{{ __('frontend_list_template.selected_options', ['names' => '__names__', 'count' => '__count__']) }}" data-loading="region" data-loading-target="#ca-records" class="logistics-filter-form ca-filter-form">
                 <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                 <div class="ca-filter-sections">
-                    <div class="ca-filter-section"><div class="logistics-filter-grid">
+                    <div class="ca-filter-section"><div class="logistics-filter-grid flt-filter-grid">
                     @foreach($filterKeys as $key)
                         <div class="logistics-filter-field {{ in_array($key,['refund_amount','order_amount'],true) ? 'ca-amount-range' : '' }}">
                             <label for="ca-filter-{{ $key }}">{{ $t('fields.'.$key) }}</label>
                             @if(isset($selects[$key]))
-                                <select id="ca-filter-{{ $key }}" class="form-control" name="{{ $key }}"><option value="">{{ $t('all') }}</option>@foreach($selects[$key] as $value=>$label)<option value="{{ $value }}" @selected((string)$filters[$key] === (string)$value)>{{ $label }}</option>@endforeach</select>
+                                <select id="ca-filter-{{ $key }}" class="form-control" name="{{ $key }}{{ $key === 'subscription_type' ? '[]' : '' }}" @if($key === 'subscription_type') multiple @endif @if(in_array($key, ['store_id', 'collection_account', 'reason', 'subscription_type'], true)) data-filter-searchable @endif><option value="" @disabled($key === 'subscription_type')>{{ $t('all') }}</option>@foreach($selects[$key] as $value=>$label)<option value="{{ $value }}" @selected($key === 'subscription_type' ? in_array((string) $value, $filters[$key], true) : (string) $filters[$key] === (string) $value)>{{ $label }}</option>@endforeach</select>
                             @elseif(in_array($key,['refund_amount','order_amount'],true))
                                 <div data-ca-range><input id="ca-filter-{{ $key }}" class="form-control" type="number" min="0" step="0.01" max="99999999999999" name="{{ $key }}_min" value="{{ $filters[$key.'_min'] }}" placeholder="{{ $t('minimum') }}" aria-label="{{ $t('fields.'.$key).' '.$t('minimum') }}"><span>{{ $t('to') }}</span><input class="form-control" type="number" min="0" step="0.01" max="99999999999999" name="{{ $key }}_max" value="{{ $filters[$key.'_max'] }}" placeholder="{{ $t('maximum') }}" aria-label="{{ $t('fields.'.$key).' '.$t('maximum') }}"></div>
                             @elseif($key === 'keyword')
@@ -64,14 +66,17 @@
                     </div>
                 </div>
                 <div class="ca-timezone text-muted">{{ $t('timezone') }}</div>
-                <div class="logistics-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('query') }}</button>@if($hasFilters)<a class="btn btn-default" href="{{ route('logistics.credit-card-analysis.index',['per_page'=>$filters['per_page']]) }}">{{ $t('reset') }}</a>@endif</div>
+                <div class="flt-filter-actions"><button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ $t('query') }}</button>@if($hasFilters)<a class="flt-btn" href="{{ route('logistics.credit-card-analysis.index',['per_page'=>$filters['per_page']]) }}">{{ $t('reset') }}</a>@endif</div>
             </form>
         </div>
     </div>
 
-    <div class="box box-solid">
-        <div class="box-header with-border logistics-list-toolbar"><button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#ca-export-modal"><i class="fa fa-download"></i> {{ $t('export') }}</button><span class="credit-card-analysis-count">{{ $t('record_count',['count'=>$records->total()]) }}</span>@include('portals.logistics.partials.pagination',['paginator'=>$records,'filters'=>$filters,'routeName'=>'logistics.credit-card-analysis.index','loadingTarget'=>'.credit-card-analysis-scroll'])</div>
-        <div class="box-body table-responsive no-padding credit-card-analysis-scroll">
+    <div class="flt-card flt-records" id="ca-records">
+        <div class="flt-toolbar">
+            <div class="flt-selection">{{ __('frontend_list_template.records', ['count' => $records->total()]) }}</div>
+            <div class="flt-toolbar-actions"><button class="flt-btn flt-primary" type="button" data-toggle="modal" data-target="#ca-export-modal"><i class="fa fa-download" aria-hidden="true"></i> {{ __('logistics.common.export') }}</button></div>
+        </div>
+        <div class="box-body table-responsive no-padding flt-table-scroll credit-card-analysis-scroll" data-logistics-list-scrollbars tabindex="0">
             <table class="table table-hover logistics-table credit-card-analysis-table">
                 <thead><tr><th class="ca-dispute-select-cell"><input id="ca-check-all" type="checkbox" aria-label="{{ $t('select_all') }}"></th>@foreach($columns as $column)<th>{{ $t('columns.'.$column) }}</th>@endforeach</tr></thead>
                 <tbody>@forelse($records as $record)
@@ -98,11 +103,59 @@
                 @empty<tr><td colspan="10" class="text-center ca-empty">{{ $t('empty') }}</td></tr>@endforelse</tbody>
             </table>
         </div>
+            <div class="flt-pagination ca-pagination">
+                <span class="ca-pagination-summary">{{ __('logistics.orders.list.page_summary', ['first' => $records->firstItem() ?? 0, 'last' => $records->lastItem() ?? 0, 'total' => $records->total()]) }}</span>
+                <div class="ca-pagination-actions">
+                    <form method="get" action="{{ route('logistics.credit-card-analysis.index') }}" data-loading="region" data-loading-target="#ca-records">
+                        @foreach ($filters as $filterName => $filterValue)
+                            @if ($filterName !== 'per_page')
+                                @foreach ((array) $filterValue as $value)
+                                    <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                                @endforeach
+                            @endif
+                        @endforeach
+                        <label>{{ __('logistics.orders.list.per_page') }}
+                            <select name="per_page" onchange="this.form.submit()">
+                                @foreach ([20, 50, 100] as $option)
+                                    <option value="{{ $option }}" @selected($filters['per_page'] === $option)>{{ $option }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                    </form>
+                    <nav class="ca-page-links" aria-label="{{ __('logistics.orders.list.pagination') }}">
+                        @if ($records->previousPageUrl())
+                            <a class="flt-btn" href="{{ $records->previousPageUrl() }}" data-loading="region" data-loading-target="#ca-records">{{ __('logistics.orders.list.previous') }}</a>
+                        @else
+                            <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.previous') }}</button>
+                        @endif
+                        <span>{{ $records->currentPage() }} / {{ $records->lastPage() }}</span>
+                        @if ($records->nextPageUrl())
+                            <a class="flt-btn" href="{{ $records->nextPageUrl() }}" data-loading="region" data-loading-target="#ca-records">{{ __('logistics.orders.list.next') }}</a>
+                        @else
+                            <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.next') }}</button>
+                        @endif
+                    </nav>
+                    <form method="get" action="{{ route('logistics.credit-card-analysis.index') }}" data-loading="region" data-loading-target="#ca-records">
+                        @foreach ($filters as $filterName => $filterValue)
+                            @foreach ((array) $filterValue as $value)
+                                <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                            @endforeach
+                        @endforeach
+                        <label><span class="flt-sr-only">{{ __('logistics.orders.list.page') }}</span><input type="number" name="page" min="1" max="{{ $records->lastPage() }}" required placeholder="{{ __('logistics.orders.list.page') }}"></label>
+                        <button type="submit" class="flt-btn flt-primary">{{ __('logistics.orders.list.jump') }}</button>
+                    </form>
+                </div>
+            </div>
+    </div>
     </div>
 
     <div class="modal fade" id="ca-export-modal" tabindex="-1" role="dialog" aria-labelledby="ca-export-title">
         <div class="modal-dialog" role="document"><form id="ca-export-form" class="modal-content" method="post" action="{{ route('logistics.credit-card-analysis.export') }}" data-loading="download">@csrf
-            @foreach($filters as $key=>$value)<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endforeach
+            @foreach ($filters as $key => $filterValue)
+                @foreach ((array) $filterValue as $value)
+                    <input type="hidden" name="{{ $key }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
+                @endforeach
+            @endforeach
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ca-export-title"><i class="fa fa-download"></i> {{ $t('export_title') }}</h4></div>
             <div class="modal-body"><p class="text-muted">{{ $t('export_notice') }}</p><h5 class="logistics-modal-section-title">{{ $t('export_scope') }}</h5>
                 <label class="logistics-export-scope"><input type="radio" name="scope" value="selected"> <strong>{{ $t('export_selected') }}</strong><small id="ca-selected-count">{{ $t('selected_count',['count'=>0]) }}</small></label>
@@ -136,5 +189,7 @@
 @endsection
 
 @push('scripts')
+    <script src="{{ $origin }}/assets/erp/logistics-list-scrollbars.js?v=4" defer></script>
+<script src="{{ $origin }}/assets/erp/shopify-orders-filters.js?v=7" defer></script>
 <script src="{{ $origin }}/assets/erp/credit-card-analysis.js?v=20261123-1"></script>
 @endpush

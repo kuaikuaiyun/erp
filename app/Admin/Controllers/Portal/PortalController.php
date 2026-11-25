@@ -167,19 +167,10 @@ class PortalController extends Controller
                 .' <i class="fa fa-external-link"></i></a>';
         });
         $grid->column('departments', __('portal.management.authorized_departments'))->display(function (): string {
-            $names = $this->departmentGrants
-                ->map(fn ($grant) => $grant->department?->name)
-                ->filter()
-                ->values();
-
-            if ($names->isEmpty()) {
-                return '<span class="text-muted">'.e(__('portal.management.no_authorized_departments')).'</span>';
-            }
-
-            return $names
-                ->map(fn (string $name): string => '<span class="label label-default portal-department-label">'
-                    .e($name.' '.__('portal.management.includes_descendants')).'</span>')
-                ->implode(' ');
+            if ($this->departmentGrants->isEmpty()) return '<span class="text-muted">'.e(__('portal.management.no_authorized_departments')).'</span>';
+            return $this->departmentGrants->filter(fn ($grant)=>$grant->department)->map(function ($grant): string {
+                return '<span class="label label-default portal-department-label">'.e($grant->department->name.($grant->includes_descendants ? ' '.__('portal.management.includes_descendants') : '')).'</span>';
+            })->implode(' ');
         });
         $grid->column('status', __('portal.common.status'))->display(function () use ($controller): string {
             return $controller->statusSwitcher($this);
@@ -222,7 +213,11 @@ class PortalController extends Controller
     private function formView(?Portal $portal = null): string
     {
         $grantedDepartmentIds = $portal
-            ? $portal->departmentGrants()->pluck('department_id')->map(fn ($id) => (int) $id)->all()
+            ? $portal->departmentGrants()->get()->flatMap(function ($grant) {
+                $ids = [(int) $grant->department_id];
+                if ($grant->includes_descendants) $ids = array_merge($ids, \App\Models\Department::business()->where('parent_id', $grant->department_id)->pluck('id')->map(fn ($id)=>(int)$id)->all());
+                return $ids;
+            })->unique()->values()->all()
             : [];
 
         return view('admin.portal.form', [

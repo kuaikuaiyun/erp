@@ -27,6 +27,7 @@ class PortalAccessService
         }
 
         $rootDepartmentIds = $this->authorizedRootDepartmentIds($user);
+        $directDepartmentIds = $user->departments()->pluck((new Department())->getTable().'.id');
 
         if ($rootDepartmentIds->isEmpty()) {
             return new EloquentCollection();
@@ -34,8 +35,13 @@ class PortalAccessService
 
         return $query
             ->whereIn('status', [Portal::STATUS_ENABLED, Portal::STATUS_MAINTENANCE])
-            ->whereHas('departmentGrants', function ($grantQuery) use ($rootDepartmentIds): void {
-                $grantQuery->whereIn('department_id', $rootDepartmentIds->all());
+            ->whereHas('departmentGrants', function ($grantQuery) use ($rootDepartmentIds, $directDepartmentIds): void {
+                $grantQuery->where(function ($query) use ($rootDepartmentIds, $directDepartmentIds): void {
+                    $query->whereIn('department_id', $directDepartmentIds->all())
+                        ->orWhere(function ($legacy) use ($rootDepartmentIds): void {
+                            $legacy->where('includes_descendants', true)->whereIn('department_id', $rootDepartmentIds->all());
+                        });
+                });
             })
             ->get();
     }
@@ -59,11 +65,16 @@ class PortalAccessService
         }
 
         $rootDepartmentIds = $this->authorizedRootDepartmentIds($user);
+        $directDepartmentIds = $user->departments()->pluck((new Department())->getTable().'.id');
 
         return $rootDepartmentIds->isNotEmpty()
             && $portal->departmentGrants()
-                ->whereIn('department_id', $rootDepartmentIds->all())
-                ->exists();
+                ->where(function ($query) use ($rootDepartmentIds, $directDepartmentIds): void {
+                    $query->whereIn('department_id', $directDepartmentIds->all())
+                        ->orWhere(function ($legacy) use ($rootDepartmentIds): void {
+                            $legacy->where('includes_descendants', true)->whereIn('department_id', $rootDepartmentIds->all());
+                        });
+                })->exists();
     }
 
     public function isActiveAccount(AdminUser $user): bool

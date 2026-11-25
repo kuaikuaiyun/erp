@@ -99,15 +99,14 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261123-19">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-7">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
 @section('content')
     <section class="content-header paypal-risk-page-header">
-        <div>
-            <h1>{{ __('logistics.paypal_risk.title') }} <small>{{ __('logistics.paypal_risk.subtitle') }}</small></h1>
-        </div>
+        <h1>{{ __('logistics.paypal_risk.title') }} <small>{{ __('logistics.paypal_risk.subtitle') }}</small></h1>
         <div class="paypal-risk-header-actions">
             <button class="btn btn-default" type="button" data-paypal-account-create><i class="fa fa-plus"></i> 新增PayPal账号</button>
         </div>
@@ -126,7 +125,6 @@
         @if($errors->any())
             <div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>
         @endif
-        <div class="alert alert-info paypal-risk-passive-note"><i class="fa fa-shield"></i> {{ __('logistics.paypal_risk.ui.passive_note') }}</div>
 
         <div class="paypal-risk-kpis" aria-label="当前筛选概览">
             <article class="paypal-risk-kpi">
@@ -309,11 +307,9 @@
 
     <div class="modal fade" id="paypal-detail-modal" tabindex="-1" role="dialog" aria-labelledby="paypal-detail-modal-title">
         <div class="modal-dialog modal-lg paypal-risk-detail-dialog" role="document"><div class="modal-content">
-            <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><div class="paypal-risk-detail-title"><span class="paypal-risk-brand-mark"><i class="fa fa-paypal"></i></span><div><h4 class="modal-title" id="paypal-detail-modal-title">账号经营与风险明细</h4><p id="paypal-detail-subtitle">正在加载账号数据…</p></div></div></div>
+            <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><div class="paypal-risk-detail-title"><span class="paypal-risk-brand-mark"><i class="fa fa-paypal"></i></span><div><h4 class="modal-title" id="paypal-detail-modal-title">账号经营与风险明细</h4><p id="paypal-detail-subtitle" data-loading-label="{{ __('logistics.paypal_risk.ui.detail_account_loading') }}">{{ __('logistics.paypal_risk.ui.detail_account_loading') }}</p></div></div></div>
             <div class="modal-body">
-                <div id="paypal-detail-loading" class="paypal-risk-detail-loading"><i class="fa fa-spinner fa-spin"></i><span>正在加载风险数据</span></div>
-                <div id="paypal-detail-error" class="alert alert-danger" hidden></div>
-                <div id="paypal-detail-content" hidden>
+                <div id="paypal-detail-content" class="flt">
                     <div id="paypal-detail-summary" class="paypal-risk-detail-summary"></div>
                     <ul class="nav nav-tabs paypal-risk-tabs" role="tablist">
                         <li class="active"><a href="#paypal-detail-panel" data-toggle="tab" data-paypal-tab="overview">风险概览</a></li>
@@ -322,8 +318,12 @@
                         <li><a href="#paypal-detail-panel" data-toggle="tab" data-paypal-tab="refunds">退款记录</a></li>
                         <li><a href="#paypal-detail-panel" data-toggle="tab" data-paypal-tab="disputes">纠纷记录</a></li>
                     </ul>
+                    <div class="paypal-risk-detail-scroll" data-search-options="{{ __('frontend_list_template.search_options') }}" data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}" tabindex="0" role="region" aria-labelledby="paypal-detail-modal-title">
+                        <div id="paypal-detail-loading" class="paypal-risk-detail-loading" role="status"><i class="fa fa-spinner fa-spin"></i><span>{{ __('logistics.paypal_risk.ui.detail_loading') }}</span></div>
+                        <div id="paypal-detail-error" class="alert alert-danger" hidden></div>
                     <div id="paypal-detail-filters" class="paypal-risk-detail-filters" hidden></div>
-                    <div class="tab-content"><div class="tab-pane active" id="paypal-detail-panel"><div id="paypal-detail-body"></div><div id="paypal-detail-pagination" class="paypal-risk-detail-pagination"></div></div></div>
+                    <div class="tab-content"><div class="tab-pane active" id="paypal-detail-panel"><div id="paypal-detail-body"></div><div id="paypal-detail-pagination" class="flt-pagination paypal-risk-detail-pagination" data-load-error="{{ __('logistics.paypal_risk.ui.detail_load_error') }}" data-summary="{{ __('logistics.orders.list.page_summary', ['first' => '__first__', 'last' => '__last__', 'total' => '__total__']) }}" data-previous="{{ __('logistics.orders.list.previous') }}" data-next="{{ __('logistics.orders.list.next') }}"></div></div></div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer"><span class="pull-left paypal-risk-modal-note"><i class="fa fa-calculator"></i> {{ __('logistics.paypal_risk.ui.shipping_note') }}</span><button id="paypal-detail-export" type="button" class="btn btn-success" hidden><i class="fa fa-download"></i> {{ __('logistics.paypal_risk.export.button') }}</button><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
@@ -333,9 +333,10 @@
 @endsection
 
 @push('scripts')
+    <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=7" defer></script>
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261106-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261106-4"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

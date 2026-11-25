@@ -1,6 +1,6 @@
 @php
     $isEditing = $portal !== null;
-    $selectedDepartmentIds = collect(old('department_ids', $grantedDepartmentIds))
+    $selectedDepartmentIds = collect(session()->hasOldInput() ? (array) old('department_ids', []) : $grantedDepartmentIds)
         ->filter(fn ($id) => is_numeric($id))
         ->map(fn ($id) => (int) $id)
         ->all();
@@ -127,14 +127,25 @@
                                 @php
                                     $isDepartmentGranted = in_array((int) $department->getKey(), $selectedDepartmentIds, true);
                                 @endphp
-                                <label class="portal-department-option {{ $isDepartmentGranted ? 'is-selected' : '' }}">
-                                    <span class="portal-department-option-main">
-                                        <input type="checkbox" name="department_ids[]" value="{{ $department->getKey() }}" data-portal-department-input
-                                               {{ $isDepartmentGranted ? 'checked' : '' }}>
-                                        <span class="portal-department-option-name">{{ $department->name }}</span>
-                                    </span>
-                                    <small>{{ $department->slug }}</small>
-                                </label>
+                                <div class="portal-department-tree" data-portal-department-tree>
+                                    <div class="portal-department-root-row">
+                                        @if ($department->children->isNotEmpty())
+                                            <button type="button" class="portal-department-toggle" data-portal-department-toggle aria-expanded="false" aria-controls="portal-department-children-{{ $department->getKey() }}" aria-label="{{ __('portal.management.toggle_departments') }}"><i class="fa fa-angle-right" aria-hidden="true"></i></button>
+                                        @else
+                                            <span class="portal-department-toggle-spacer" aria-hidden="true"></span>
+                                        @endif
+                                        <label class="portal-department-option">
+                                            <span class="portal-department-option-main"><input type="checkbox" name="department_ids[]" value="{{ $department->getKey() }}" data-portal-department-input data-portal-department-root {{ $isDepartmentGranted ? 'checked' : '' }}><span class="portal-department-option-name">{{ $department->name }}</span></span><small>{{ $department->slug }}</small>
+                                        </label>
+                                    </div>
+                                    <div class="portal-department-children" id="portal-department-children-{{ $department->getKey() }}" hidden>
+                                        @foreach ($department->children as $child)
+                                            <label class="portal-department-option">
+                                                <span class="portal-department-option-main"><input type="checkbox" name="department_ids[]" value="{{ $child->getKey() }}" data-portal-department-input data-portal-department-child {{ in_array((int)$child->getKey(), $selectedDepartmentIds, true) ? 'checked' : '' }}><span class="portal-department-option-name">{{ $child->name }}</span></span><small>{{ $child->slug }}</small>
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                </div>
                             @endforeach
                         </div>
                     @endif

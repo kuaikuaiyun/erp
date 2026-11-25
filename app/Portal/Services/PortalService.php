@@ -19,6 +19,7 @@ class PortalService
     {
         return Department::business()
             ->whereNull('parent_id')
+            ->with(['children' => fn ($query) => $query->where('slug', '!=', Department::SYSTEM_SLUG)])
             ->orderBy('sort')
             ->orderBy('name')
             ->get(['id', 'name', 'slug']);
@@ -207,7 +208,7 @@ class PortalService
             ->map(fn ($id) => (int) $id)
             ->unique()
             ->values();
-        $departments = $this->rootDepartmentsForIds($departmentIds);
+        $departments = $this->grantDepartmentsForIds($departmentIds);
         $existingGrants = PortalDepartment::query()
             ->where('portal_id', $portal->getKey())
             ->lockForUpdate()
@@ -222,25 +223,30 @@ class PortalService
 
             $department = Department::business()->find((int) $departmentId);
             $this->record($portal, $actor, PortalChangeLog::EVENT_DEPARTMENT_REVOKED, [
-                'scope' => 'descendants',
+                'scope' => $grant->includes_descendants ? 'descendants' : 'department',
             ], $department);
             $grant->delete();
         }
 
         foreach ($departments as $department) {
             if ($existingGrants->has((int) $department->getKey())) {
+                $grant = $existingGrants->get((int) $department->getKey());
+                if (!$grant->includes_descendants) continue;
+                $this->record($portal, $actor, PortalChangeLog::EVENT_DEPARTMENT_REVOKED, ['scope'=>'descendants'], $department);
+                $grant->update(['includes_descendants'=>false, 'granted_by'=>$actor->getKey(), 'granted_at'=>now()]);
+                $this->record($portal, $actor, PortalChangeLog::EVENT_DEPARTMENT_GRANTED, ['scope'=>'department'], $department);
                 continue;
             }
 
             PortalDepartment::create([
                 'portal_id' => $portal->getKey(),
                 'department_id' => $department->getKey(),
-                'includes_descendants' => true,
+                'includes_descendants' => false,
                 'granted_by' => $actor->getKey(),
                 'granted_at' => now(),
             ]);
             $this->record($portal, $actor, PortalChangeLog::EVENT_DEPARTMENT_GRANTED, [
-                'scope' => 'descendants',
+                'scope' => 'department',
             ], $department);
         }
     }
@@ -249,7 +255,7 @@ class PortalService
      * @param Collection<int, int> $departmentIds
      * @return EloquentCollection<int, Department>
      */
-    private function rootDepartmentsForIds(Collection $departmentIds): EloquentCollection
+    private function grantDepartmentsForIds(Collection $departmentIds): EloquentCollection
     {
         if ($departmentIds->isEmpty()) {
             return new EloquentCollection();
@@ -257,7 +263,9 @@ class PortalService
 
         $departments = Department::business()
             ->whereIn('id', $departmentIds->all())
-            ->whereNull('parent_id')
+            ->where(function ($query): void {
+                $query->whereNull('parent_id')->orWhereIn('parent_id', Department::business()->whereNull('parent_id')->select('id'));
+            })
             ->lockForUpdate()
             ->get();
 

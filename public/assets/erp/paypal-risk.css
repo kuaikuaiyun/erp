@@ -6,8 +6,6 @@
     padding-bottom: 12px;
 }
 
-.paypal-risk-page-header h1 { margin: 0; color: #102f50; font-weight: 600; }
-.paypal-risk-page-header h1 small { margin-left: 8px; color: #7390ac; font-size: 14px; font-weight: 400; }
 .paypal-risk-header-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .paypal-risk-page { color: #274866; }
 .paypal-risk-page .alert { border-radius: 6px; }
@@ -243,3 +241,53 @@
     .paypal-risk-detail-filter-form label { width: 100%; }
     .paypal-risk-detail-filter-actions { justify-content: flex-start; }
 }
+
+#paypal-detail-modal .paypal-risk-detail-dialog { margin: 12px auto; }
+#paypal-detail-modal .modal-content { display: flex; flex-direction: column; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+#paypal-detail-modal .modal-header, #paypal-detail-modal .modal-footer, #paypal-detail-summary, #paypal-detail-modal .paypal-risk-tabs { flex-shrink: 0; }
+#paypal-detail-modal .modal-body, #paypal-detail-content { display: flex; flex-direction: column; min-height: 0; }
+#paypal-detail-content { padding-bottom: 0; }
+#paypal-detail-summary:empty { display: none; }
+#paypal-detail-modal .paypal-risk-detail-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+#paypal-detail-modal .paypal-risk-tabs { display: flex; flex-wrap: wrap; margin-bottom: 8px; background: #f5f8fb; border: 1px solid #dce7ef; border-radius: 5px; }
+#paypal-detail-modal .paypal-risk-detail-filters { margin: 0 0 12px; padding: 0; border: 0; background: transparent; }
+#paypal-detail-modal .paypal-risk-detail-filter-form { display: block; margin-bottom: 0; padding: 14px; }
+#paypal-detail-modal .paypal-risk-detail-filter-form .flt-filter-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 12px; }
+#paypal-detail-modal .paypal-risk-detail-filter-form label { min-width: 0; width: auto; font-size: 13px; }
+#paypal-detail-modal .paypal-risk-detail-filter-form label > span { margin-bottom: 8px; }
+#paypal-detail-modal .paypal-risk-detail-filter-keyword > input { margin-top: 0; }
+#paypal-detail-modal .flt-picker-options label > span { margin: 0; }
+#paypal-detail-modal .paypal-risk-detail-filter-form .form-control { height: 36px; }
+#paypal-detail-modal .paypal-risk-detail-filter-actions { justify-content: flex-end; margin-top: 12px; }
+#paypal-detail-modal .paypal-risk-data-table { min-width: 760px; table-layout: auto; border-collapse: separate; }
+#paypal-detail-modal .paypal-risk-data-table th, #paypal-detail-modal .paypal-risk-data-table td { font-size: 13px; }
+#paypal-detail-modal .paypal-risk-data-table th { min-width: 110px; }
+#paypal-detail-modal .paypal-risk-detail-table-scroll {
+    max-height: min(46vh, 460px);
+    overflow: auto;
+}
+
+#paypal-detail-modal :is(.paypal-risk-detail-scroll, .paypal-risk-detail-table-scroll) {
+    scrollbar-color: transparent transparent;
+    scrollbar-gutter: stable;
+    transition: scrollbar-color .22s ease;
+}
+
+#paypal-detail-modal :is(.paypal-risk-detail-scroll, .paypal-risk-detail-table-scroll):is(.is-scrolling, .is-scrollbar-hovered, :focus-visible) {
+    scrollbar-color: #869caf #edf2f6;
+    transition-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #paypal-detail-modal :is(.paypal-risk-detail-scroll, .paypal-risk-detail-table-scroll) {
+        transition: none;
+    }
+}
+
+@media (forced-colors: active) {
+    #paypal-detail-modal :is(.paypal-risk-detail-scroll, .paypal-risk-detail-table-scroll) {
+        scrollbar-color: auto;
+    }
+}
+#paypal-detail-modal .paypal-risk-detail-pagination { justify-content: space-between; flex-wrap: wrap; }
+#paypal-detail-modal .paypal-risk-page-links { display: flex; align-items: center; gap: 8px; }
