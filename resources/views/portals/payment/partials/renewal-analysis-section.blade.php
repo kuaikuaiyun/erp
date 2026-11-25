@@ -37,7 +37,6 @@
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription" data-renewal-section="initial" data-renewal-applied="{{ $appliedFilters }}">
         <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
         <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
-        @include('portals.payment.partials.renewal-section-status')
         @php $moduleReset = array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone'])); @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="payment-renewal-filter" data-renewal-module="initial">
             @foreach($filters as $name=>$value)
@@ -49,6 +48,10 @@
             @foreach(['initial_date_from','initial_date_to','initial_timezone'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
             @endforeach
         </form>
+        @include('portals.payment.partials.renewal-section-status')
+        <div class="payment-renewal-initial-results">
+        @include('portals.payment.partials.renewal-table-skeleton')
+        <div class="payment-renewal-initial-data">
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['initial_date_from'],'to'=>$filters['initial_date_to'],'timezone'=>$firstCalc['timezone'],'generated'=>$firstCalc['generated_at']]) }}</p>
 
         <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
@@ -121,6 +124,8 @@
             @endforeach
             {{ $notes([$audit('refund_rule'),$riskTime,$audit('rounding')]) }}
         </details>
+        </div>
+        </div>
     </article>
 @else
     @php

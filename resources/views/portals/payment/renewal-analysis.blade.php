@@ -10,7 +10,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-3">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-4">
 @endpush
 
 @section('content')
@@ -32,11 +32,7 @@
                 <h2><span class="payment-section-number">02</span>{{ $text('renewal_title') }}</h2>
                 <p class="payment-section-hint">{{ $text('renewal_hint') }}</p>
                 @include('portals.payment.partials.renewal-section-status')
-                <div class="payment-renewal-skeleton" aria-hidden="true">
-                    @for ($row = 0; $row < 3; $row++)
-                        <div><span></span><span></span><span></span><span></span></div>
-                    @endfor
-                </div>
+                @include('portals.payment.partials.renewal-table-skeleton')
                 <a class="btn btn-default" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_renewal'=>1]) }}#renewal-analysis-renewal">{{ __('payment-renewal.load_section') }}</a>
             </article>
         @endif
