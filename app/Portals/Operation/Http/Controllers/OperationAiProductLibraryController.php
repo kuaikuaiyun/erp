@@ -820,15 +820,19 @@ class OperationAiProductLibraryController extends Controller
         $user = $context['user'];
 
         $data = $request->validate([
-            'store_id' => ['required', 'integer'],
+            'store_ids' => ['required', 'array', 'min:1', 'max:6'],
+            'store_ids.*' => ['required', 'integer', 'distinct'],
             'product_page_id' => ['nullable', 'integer', 'min:1'],
             'title' => ['required', 'string', 'max:255'],
             'sku' => ['required', 'string', 'max:191'],
             'price' => ['required', 'numeric', 'min:0', 'max:99999999'],
             'status' => ['required', 'in:DRAFT,ACTIVE'],
         ]);
-        $store = $this->publishableStores($user)->firstWhere('id', (int) $data['store_id']);
-        abort_unless($store instanceof AssistantDomainStore, 422, '该店铺不属于当前可上架范围。');
+        $requestedStoreIds = collect($data['store_ids'])->map(fn ($id): int => (int) $id)->unique()->values();
+        $stores = $this->publishableStores($user)
+            ->whereIn('id', $requestedStoreIds->all())
+            ->keyBy(fn (AssistantDomainStore $store): int => (int) $store->getKey());
+        abort_unless($stores->count() === $requestedStoreIds->count(), 422, '部分店铺不属于当前可上架范围，请刷新后重新选择。');
         $productPage = filled($data['product_page_id'] ?? null)
             ? $product->productPages()->whereKey((int) $data['product_page_id'])->first()
             : $product->defaultProductPage();
@@ -838,55 +842,90 @@ class OperationAiProductLibraryController extends Controller
             : $product->skuValues();
         abort_unless(in_array($data['sku'], $pageSkus, true), 422, '请选择当前产品页中已有的 SKU。');
 
-        $publication = AiProductShopifyPublication::query()->create([
-            'aikaipin_product_id' => $product->getKey(),
-            'aikaipin_product_page_id' => $productPage?->getKey(),
-            'assistant_domain_store_id' => $store->getKey(),
-            'published_by' => $user->getKey(),
-            'published_by_name' => $user->name ?: $user->username,
-            'status' => 'processing',
-            'sku' => $data['sku'],
-            'price' => $data['price'],
-            'request_payload' => $data,
-        ]);
-
-        try {
-            $result = $this->shopifyPublisher->publish(
-                $product,
-                $store,
-                $user,
-                $data['title'],
-                $data['sku'],
-                (float) $data['price'],
-                $data['status'],
-                $productPage,
-            );
-            $productGid = (string) data_get($result, 'product.id');
-            $variantGid = (string) data_get($result, 'variant.id');
-            $numericProductId = Str::afterLast($productGid, '/');
-            $shopDomain = (string) ($store->shopifyConnection()->value('shop_domain') ?: $store->domain);
-            $publication->update([
-                'status' => 'success',
-                'shopify_product_id' => $productGid,
-                'shopify_variant_id' => $variantGid,
-                'shopify_admin_url' => $shopDomain !== '' && $numericProductId !== ''
-                    ? 'https://'.$shopDomain.'/admin/products/'.$numericProductId
-                    : null,
-                'response_payload' => $result['responses'],
-                'published_at' => now(),
-            ]);
-            $this->listingPush->completeForPublication($product, $user, $publication);
-
-            return back()->with('success', '商品已成功上架到 '.$store->shop_name.'。');
-        } catch (Throwable $exception) {
-            report($exception);
-            $publication->update([
-                'status' => 'failed',
-                'error_message' => Str::limit($exception->getMessage(), 4000),
+        $successes = [];
+        $failures = [];
+        foreach ($requestedStoreIds as $storeId) {
+            /** @var AssistantDomainStore $store */
+            $store = $stores->get($storeId);
+            $storeRequest = [...$data, 'store_id' => $storeId];
+            unset($storeRequest['store_ids']);
+            $publication = AiProductShopifyPublication::query()->create([
+                'aikaipin_product_id' => $product->getKey(),
+                'aikaipin_product_page_id' => $productPage?->getKey(),
+                'assistant_domain_store_id' => $store->getKey(),
+                'published_by' => $user->getKey(),
+                'published_by_name' => $user->name ?: $user->username,
+                'status' => 'processing',
+                'sku' => $data['sku'],
+                'price' => $data['price'],
+                'request_payload' => $storeRequest,
             ]);
 
-            return back()->withErrors(['publish' => '上架失败：'.$exception->getMessage()]);
+            try {
+                $result = $this->shopifyPublisher->publish(
+                    $product,
+                    $store,
+                    $user,
+                    $data['title'],
+                    $data['sku'],
+                    (float) $data['price'],
+                    $data['status'],
+                    $productPage,
+                );
+                $productGid = (string) data_get($result, 'product.id');
+                $variantGid = (string) data_get($result, 'variant.id');
+                $numericProductId = Str::afterLast($productGid, '/');
+                $shopDomain = (string) ($store->shopifyConnection()->value('shop_domain') ?: $store->domain);
+                $publication->update([
+                    'status' => 'success',
+                    'shopify_product_id' => $productGid,
+                    'shopify_variant_id' => $variantGid,
+                    'shopify_admin_url' => $shopDomain !== '' && $numericProductId !== ''
+                        ? 'https://'.$shopDomain.'/admin/products/'.$numericProductId
+                        : null,
+                    'response_payload' => $result['responses'],
+                    'published_at' => now(),
+                ]);
+                $this->listingPush->completeForPublication($product, $user, $publication);
+                $successes[] = (string) ($store->shop_name ?: $store->domain);
+            } catch (Throwable $exception) {
+                report($exception);
+                $publication->update([
+                    'status' => 'failed',
+                    'error_message' => Str::limit($exception->getMessage(), 4000),
+                ]);
+                $failures[] = (string) ($store->shop_name ?: $store->domain).'：'.Str::limit($exception->getMessage(), 300);
+            }
         }
+
+        if ($successes === []) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '上架失败：'.implode('；', $failures),
+                    'successes' => [],
+                    'failures' => $failures,
+                ], 422);
+            }
+
+            return back()->withErrors(['publish' => '批量上架失败：'.implode('；', $failures)]);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => '已成功上架到 '.count($successes).' 个店铺。',
+                'successes' => $successes,
+                'failures' => $failures,
+            ]);
+        }
+
+        $response = back()->with('success', '已成功上架到 '.count($successes).' 个店铺：'.implode('、', $successes).'。');
+        if ($failures !== []) {
+            $response->with('warning', '另有 '.count($failures).' 个店铺上架失败：'.implode('；', $failures));
+        }
+
+        return $response;
     }
 
     public function shopifyImage(Request $request, AikaipinProduct $product, int $imageIndex): Response
