@@ -11,10 +11,19 @@
                 </div>
             @endif
         </div>
+        @if($stores->isNotEmpty())
+        <div class="operation-ai-store-selection-tools">
+            <span>已选择 <strong data-publish-store-selected-count>1</strong> / 6 个店铺</span>
+            <div>
+                <button type="button" data-publish-store-select-visible>全选当前结果</button>
+                <button type="button" data-publish-store-clear>清空选择</button>
+            </div>
+        </div>
+        @endif
         <div class="operation-ai-store-options" data-publish-store-options>
         @forelse($stores as $store)
             <label class="operation-ai-store-card" data-publish-store-card data-search-text="{{ mb_strtolower(implode(' ', array_filter([$store->shop_name, $store->domain, $store->ownerUser?->name, $store->ownerUser?->username, $store->user_name]))) }}">
-                <input type="radio" name="store_id" value="{{ $store->id }}" @checked($loop->first) required>
+                <input type="checkbox" name="store_ids[]" value="{{ $store->id }}" @checked($loop->first) data-publish-store-checkbox>
                 <span>
                     <strong>{{ $store->shop_name }}</strong>
                     <small>域名：{{ $store->domain ?: '未填写' }}</small>
@@ -116,8 +125,18 @@
     <p class="help-block">当前产品没有导入 Shopify 完整数据，将按基础单规格方式上架。</p>
     @endif
     </div>
+    <div class="operation-ai-publish-progress" data-publish-progress hidden>
+        <div class="operation-ai-publish-progress-heading">
+            <strong data-publish-progress-title>准备开始上架</strong>
+            <span data-publish-progress-count>0 / 0</span>
+        </div>
+        <div class="progress">
+            <div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width:0%" data-publish-progress-bar>0%</div>
+        </div>
+        <p data-publish-progress-message>正在准备店铺信息...</p>
+    </div>
     <div class="operation-ai-publish-actions">
-        <span><i class="fa fa-info-circle"></i> 请选择店铺并确认商品信息</span>
+        <span><i class="fa fa-info-circle"></i> 一次最多选择 6 家店铺，系统将逐个上架并汇总处理结果</span>
         <div>
         <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
         <button type="submit" class="btn btn-success" @disabled($stores->isEmpty() || $skus === [])>

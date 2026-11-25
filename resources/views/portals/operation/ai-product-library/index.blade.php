@@ -124,6 +124,17 @@
         .operation-ai-store-card span { grid-template-columns:minmax(115px,.8fr) minmax(145px,1.2fr); gap:3px 12px; }
         .operation-ai-store-card strong,.operation-ai-store-card small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .operation-ai-store-empty { padding:22px; border:1px dashed #cfdce6; border-radius:7px; color:#8799a8; text-align:center; }
+        .operation-ai-store-selection-tools { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 2px 9px; color:#657b8d; font-size:12px; }
+        .operation-ai-store-selection-tools strong { color:#2385bd; font-size:14px; }
+        .operation-ai-store-selection-tools div { display:flex; gap:12px; }
+        .operation-ai-store-selection-tools button { padding:0; border:0; color:#2385bd; background:transparent; font-size:12px; }
+        .operation-ai-store-selection-tools button:hover,.operation-ai-store-selection-tools button:focus { color:#176b9a; text-decoration:underline; outline:none; }
+        .operation-ai-publish-progress { flex:0 0 auto; margin:0; padding:12px 20px 10px; border-top:1px solid #dfe8ef; background:#f7fbfd; }
+        .operation-ai-publish-progress-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:7px; color:#315b73; }
+        .operation-ai-publish-progress-heading span { color:#2385bd; font-weight:600; }
+        .operation-ai-publish-progress .progress { height:18px; margin:0 0 6px; border-radius:9px; background:#dfeaf1; }
+        .operation-ai-publish-progress .progress-bar { min-width:0; line-height:18px; transition:width .25s ease; }
+        .operation-ai-publish-progress p { margin:0; color:#657b8d; font-size:12px; }
         .operation-ai-product-page-picker { margin-bottom:14px; padding:13px 15px; border:1px solid #cfe1ed; border-radius:8px; background:#f5fafd; }
         .operation-ai-product-page-picker > label { display:block; margin-bottom:7px; color:#285d7d; }
         .operation-ai-product-page-picker .help-block { margin:6px 0 0; }
@@ -362,6 +373,7 @@
 <script>
 (function () {
     var successMessage = @json(session('success'));
+    var warningMessage = @json(session('warning'));
     var errorMessage = @json($errors->first());
     function notify(type, message) {
         if (!message) return;
@@ -374,6 +386,7 @@
         }
     }
     notify('success', successMessage);
+    notify('warning', warningMessage);
     notify('error', errorMessage);
 })();
 (function () {
@@ -746,6 +759,169 @@
                         }
                     });
                 }
+                var storeCheckboxes = Array.prototype.slice.call(content.querySelectorAll('[data-publish-store-checkbox]'));
+                var selectedStoreCount = content.querySelector('[data-publish-store-selected-count]');
+                var selectVisibleStores = content.querySelector('[data-publish-store-select-visible]');
+                var clearSelectedStores = content.querySelector('[data-publish-store-clear]');
+                var publishForm = content.querySelector('.operation-ai-publish-form');
+                var publishSubmit = publishForm ? publishForm.querySelector('button[type="submit"]') : null;
+                var publishSubmitUnavailable = publishSubmit ? publishSubmit.disabled : false;
+                var maxSelectedStores = 6;
+                var showStoreSelectionWarning = function () {
+                    var message = '一次最多只能选择 ' + maxSelectedStores + ' 家店铺。';
+                    if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
+                        window.ErpAdminNotifier.notify({type:'warning', message:message});
+                        return;
+                    }
+                    window.alert(message);
+                };
+                var refreshSelectedStoreCount = function () {
+                    var selected = storeCheckboxes.filter(function (checkbox) { return checkbox.checked; }).length;
+                    if (selectedStoreCount) selectedStoreCount.textContent = selected;
+                    if (publishSubmit) publishSubmit.disabled = publishSubmitUnavailable || selected === 0;
+                };
+                storeCheckboxes.forEach(function (checkbox) {
+                    checkbox.addEventListener('change', function () {
+                        var selected = storeCheckboxes.filter(function (storeCheckbox) { return storeCheckbox.checked; }).length;
+                        if (selected > maxSelectedStores) {
+                            checkbox.checked = false;
+                            showStoreSelectionWarning();
+                        }
+                        refreshSelectedStoreCount();
+                    });
+                });
+                if (selectVisibleStores) {
+                    selectVisibleStores.addEventListener('click', function () {
+                        storeCheckboxes.forEach(function (checkbox) {
+                            var card = checkbox.closest('[data-publish-store-card]');
+                            var selected = storeCheckboxes.filter(function (storeCheckbox) { return storeCheckbox.checked; }).length;
+                            if (card && !card.hidden && selected < maxSelectedStores) checkbox.checked = true;
+                        });
+                        refreshSelectedStoreCount();
+                        var visibleUnchecked = storeCheckboxes.some(function (checkbox) {
+                            var card = checkbox.closest('[data-publish-store-card]');
+                            return card && !card.hidden && !checkbox.checked;
+                        });
+                        if (visibleUnchecked) showStoreSelectionWarning();
+                    });
+                }
+                if (clearSelectedStores) {
+                    clearSelectedStores.addEventListener('click', function () {
+                        storeCheckboxes.forEach(function (checkbox) { checkbox.checked = false; });
+                        refreshSelectedStoreCount();
+                    });
+                }
+                if (publishForm) {
+                    publishForm.addEventListener('submit', function (event) {
+                        var selectedStores = storeCheckboxes.filter(function (checkbox) { return checkbox.checked; });
+                        if (selectedStores.length === 0) {
+                            event.preventDefault();
+                            if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
+                                window.ErpAdminNotifier.notify({type:'warning', message:'请至少选择一个需要上架的 Shopify 店铺。'});
+                                return;
+                            }
+                            window.alert('请至少选择一个需要上架的 Shopify 店铺。');
+                            return;
+                        }
+                        if (publishForm.getAttribute('data-publishing') === '1') {
+                            event.preventDefault();
+                            return;
+                        }
+                        if (!window.fetch || !window.FormData) return;
+
+                        event.preventDefault();
+                        publishForm.setAttribute('data-publishing', '1');
+                        var progress = content.querySelector('[data-publish-progress]');
+                        var progressTitle = content.querySelector('[data-publish-progress-title]');
+                        var progressCount = content.querySelector('[data-publish-progress-count]');
+                        var progressBar = content.querySelector('[data-publish-progress-bar]');
+                        var progressMessage = content.querySelector('[data-publish-progress-message]');
+                        var cancelButton = publishForm.querySelector('[data-dismiss="modal"]');
+                        var successNames = [];
+                        var failureMessages = [];
+                        var completed = 0;
+                        var total = selectedStores.length;
+                        var updateProgress = function (title, message) {
+                            var percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                            if (progress) progress.hidden = false;
+                            if (progressTitle) progressTitle.textContent = title;
+                            if (progressCount) progressCount.textContent = completed + ' / ' + total;
+                            if (progressBar) {
+                                progressBar.style.width = percent + '%';
+                                progressBar.setAttribute('aria-valuenow', String(percent));
+                                progressBar.textContent = percent + '%';
+                            }
+                            if (progressMessage) progressMessage.textContent = message;
+                        };
+                        var responseMessage = function (payload, fallback) {
+                            if (payload && payload.message) return payload.message;
+                            if (payload && payload.errors) {
+                                var firstKey = Object.keys(payload.errors)[0];
+                                if (firstKey && payload.errors[firstKey] && payload.errors[firstKey][0]) return payload.errors[firstKey][0];
+                            }
+                            return fallback;
+                        };
+                        var publishStore = function (checkbox, index) {
+                            var card = checkbox.closest('[data-publish-store-card]');
+                            var storeNameNode = card ? card.querySelector('strong') : null;
+                            var storeName = storeNameNode ? storeNameNode.textContent.trim() : ('店铺 ' + (index + 1));
+                            updateProgress('正在上架第 ' + (index + 1) + ' 家店铺', '正在处理：' + storeName + '，请勿关闭页面...');
+                            var formData = new FormData(publishForm);
+                            formData.delete('store_ids[]');
+                            formData.append('store_ids[]', checkbox.value);
+
+                            return fetch(publishForm.action, {
+                                method: 'POST',
+                                body: formData,
+                                headers: {'Accept':'application/json', 'X-Requested-With':'XMLHttpRequest'}
+                            }).then(function (response) {
+                                return response.json().catch(function () { return {}; }).then(function (payload) {
+                                    if (!response.ok || !payload.success) throw new Error(responseMessage(payload, storeName + ' 上架失败'));
+                                    successNames.push(storeName);
+                                });
+                            }).catch(function (error) {
+                                failureMessages.push(storeName + '：' + error.message);
+                            }).then(function () {
+                                completed++;
+                                updateProgress('已完成 ' + completed + ' / ' + total, storeName + ' 处理完成，正在继续...');
+                            });
+                        };
+                        var sequence = Promise.resolve();
+                        selectedStores.forEach(function (checkbox, index) {
+                            sequence = sequence.then(function () { return publishStore(checkbox, index); });
+                        });
+
+                        if (publishSubmit) {
+                            publishSubmit.disabled = true;
+                            publishSubmit.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 上架处理中';
+                        }
+                        if (cancelButton) cancelButton.disabled = true;
+                        storeCheckboxes.forEach(function (checkbox) { checkbox.disabled = true; });
+                        if (selectVisibleStores) selectVisibleStores.disabled = true;
+                        if (clearSelectedStores) clearSelectedStores.disabled = true;
+                        updateProgress('开始批量上架', '共 ' + total + ' 家店铺，正在开始处理...');
+
+                        sequence.then(function () {
+                            var summary = '成功 ' + successNames.length + ' 家，失败 ' + failureMessages.length + ' 家。';
+                            updateProgress(failureMessages.length ? '批量上架已完成（部分失败）' : '批量上架已完成', summary);
+                            if (progressBar) {
+                                progressBar.classList.remove('active');
+                                progressBar.classList.toggle('progress-bar-success', failureMessages.length === 0);
+                                progressBar.classList.toggle('progress-bar-warning', failureMessages.length > 0);
+                            }
+                            if (publishSubmit) publishSubmit.innerHTML = '<i class="fa fa-check"></i> 处理完成';
+                            var notifyType = failureMessages.length ? 'warning' : 'success';
+                            var notifyMessage = summary + (failureMessages.length ? ' ' + failureMessages.join('；') : '');
+                            if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
+                                window.ErpAdminNotifier.notify({type:notifyType, message:notifyMessage});
+                            } else if (window.toastr && typeof window.toastr[notifyType] === 'function') {
+                                window.toastr[notifyType](notifyMessage);
+                            }
+                            window.setTimeout(function () { window.location.reload(); }, 1800);
+                        });
+                    });
+                }
+                refreshSelectedStoreCount();
                 var productPageSelect = content.querySelector('[data-product-page-select]');
                 if (productPageSelect) {
                     var switchProductPage = function () {
