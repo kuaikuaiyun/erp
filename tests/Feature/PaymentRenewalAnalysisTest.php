@@ -228,6 +228,60 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame([3], array_column($rows, 'stage_number'));
     }
 
+    public function test_linked_mode_follows_only_selected_first_orders_and_reuses_the_summary(): void
+    {
+        $this->order(460, '2026-10-10 12:00:00', '订阅首次购买', 'credit_card', '', 'Linked', ['bill_number' => '000460']);
+        $this->order(461, '2026-10-12 12:00:00', '订阅首次购买', 'credit_card', '', 'Linked');
+        $this->order(462, '2026-10-09 12:00:00', '订阅复购', 'credit_card', '460', 'Linked');
+        $this->order(463, '2026-10-20 12:00:00', '订阅复购', 'credit_card', '000460', 'Linked');
+        $this->order(464, '2026-11-20 12:00:00', '订阅复购', 'credit_card', 'TX-460', 'Linked');
+        $this->order(465, '2026-09-20 12:00:00', '订阅首次购买', 'credit_card', '', 'Linked');
+        $this->order(466, '2026-10-20 12:00:00', '订阅复购', 'credit_card', '465', 'Linked');
+        DB::table('logistics_credit_card_refunds')->insert([
+            'logistics_order_id' => 464, 'refund_amount_usd' => 5, 'occurred_at' => '2026-11-22 12:00:00',
+        ]);
+        $filters = $this->filters(['renewal_date_from' => '2026-10-01', 'renewal_date_to' => '2026-10-31',
+            'renewal_store' => 'Linked', 'renewal_mode' => 'linked']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $normal = $service->dashboard([...$filters, 'renewal_mode' => 'normal'], 'renewal');
+
+        DB::enableQueryLog();
+        $data = $service->dashboard($filters, 'renewal');
+        $queries = implode("\n", array_column(DB::getQueryLog(), 'query'));
+        self::assertStringNotContainsString('"transaction_id" in (', $queries);
+        self::assertStringContainsString('"subscription_origin_order_id" in (', $queries);
+        DB::flushQueryLog();
+        $filtered = $service->dashboard([...$filters, 'stage' => 'renewal_2'], 'renewal');
+        self::assertSame([], DB::getQueryLog());
+        DB::disableQueryLog();
+
+        self::assertNotSame($normal['stages'], $data['stages']);
+        self::assertSame(['renewal_1', 'renewal_2'], array_column($data['stages'], 'key'));
+        self::assertSame([2, 1], array_column($data['stages'], 'previous_orders'));
+        self::assertSame([1, 1], array_column($data['stages'], 'orders'));
+        self::assertEquals([50, 100], array_column($data['stages'], 'rate'));
+        self::assertEquals(5, $filtered['stages'][0]['refund_amount']);
+        $rows = $service->exportData($filters)['rows']->all();
+        self::assertSame([463, 464], array_column($rows, 'erp_order_id'));
+        self::assertSame([1, 2], array_column($rows, 'stage_number'));
+
+        $export = app(PaymentRenewalAnalysisExportService::class)->download($filters);
+        ob_start();
+        $export->sendContent();
+        $bytes = ob_get_clean();
+        $path = tempnam(sys_get_temp_dir(), 'renewal-linked-');
+        try {
+            file_put_contents($path, $bytes);
+            $book = IOFactory::load($path);
+            $sheet = $book->getSheet(2);
+            self::assertSame('还原关联模式', $this->exportedValue($sheet, 'B3'));
+            self::assertSame('同批上一阶段订单数', $this->exportedValue($sheet, 'C6'));
+            $book->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
+    }
+
     public function test_card_refunds_include_every_positive_record_once_regardless_of_reason(): void
     {
         $this->order(600,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');

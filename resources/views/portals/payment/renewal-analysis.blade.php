@@ -9,8 +9,9 @@
 
 @section('page_title', __($t.'.page_title'))
 @push('styles')
+<link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-7">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-11">
 @endpush
 
 @section('content')
@@ -30,7 +31,7 @@
                 <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
                 @include('portals.payment.partials.renewal-section-status')
                 @include('portals.payment.partials.renewal-table-skeleton')
-                <a class="btn btn-default" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_initial'=>1]) }}">{{ __('payment-renewal.load_initial_section') }}</a>
+                <a class="flt-btn" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_initial'=>1]) }}">{{ __('payment-renewal.load_initial_section') }}</a>
             </article>
         @endif
     </div>
@@ -43,7 +44,7 @@
                 <p class="payment-section-hint">{{ $text('renewal_hint') }}</p>
                 @include('portals.payment.partials.renewal-section-status')
                 @include('portals.payment.partials.renewal-table-skeleton')
-                <a class="btn btn-default" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_renewal'=>1]) }}#renewal-analysis-renewal">{{ __('payment-renewal.load_section') }}</a>
+                <a class="flt-btn" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_renewal'=>1]) }}#renewal-analysis-renewal">{{ __('payment-renewal.load_section') }}</a>
             </article>
         @endif
     </div>
@@ -62,6 +63,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-5"></script>
+<script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=20261125-renewal"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-8"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 @endpush

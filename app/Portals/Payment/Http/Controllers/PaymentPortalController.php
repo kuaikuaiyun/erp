@@ -733,6 +733,7 @@ class PaymentPortalController extends Controller
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'timezone' => ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))],
+            'renewal_mode' => ['nullable', Rule::in(['normal', 'linked'])],
             'stage' => ['nullable', 'regex:/^(initial|renewal_[1-9]\d*)?$/'],
             'stage_page' => ['nullable', 'integer', 'min:1'],
         ];
@@ -750,6 +751,7 @@ class PaymentPortalController extends Controller
         }
         $validated = $request->validate($rules, [], $attributes);
         $filters = ['risk_date_mode' => 'payment',
+            'renewal_mode' => $validated['renewal_mode'] ?? 'normal',
             'stage' => (string) ($validated['stage'] ?? ''),
             'stage_page' => max(1, (int) ($validated['stage_page'] ?? 1))];
         foreach (['initial', 'renewal'] as $module) {

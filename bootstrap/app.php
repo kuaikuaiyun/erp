@@ -11,6 +11,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
         health: '/up',
         then: function (): void {
             require __DIR__.'/../routes/dingtalk.php';
+            require __DIR__.'/../routes/finance_sync.php';
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
@@ -21,6 +22,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(\App\Http\Controllers\FinanceSyncController::renderException(...));
         $exceptions->dontFlash(['relay_hmac_secret', 'authCode', 'code', 'state', 'encrypt', 'app_secret', 'callback_token', 'callback_aes_key']);
     })->create();
 

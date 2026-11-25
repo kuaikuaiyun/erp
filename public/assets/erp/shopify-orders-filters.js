@@ -40,7 +40,8 @@
         form.querySelectorAll('.flt-filter-grid select').forEach(function (select) {
             const fieldLabel = select.labels[0];
             const emptyOption = Array.from(select.options).find(option => option.value === '');
-            if (!fieldLabel || !emptyOption) return;
+            const fixedChoice = select.hasAttribute('data-filter-fixed-choice');
+            if (!fieldLabel || (!emptyOption && !fixedChoice)) return;
 
             const picker = document.createElement('details');
             picker.className = 'flt-picker';
@@ -75,13 +76,14 @@
                 picker.open = false;
                 summary.focus();
             });
-            panel.append(options, clear);
+            panel.append(options);
+            if (!fixedChoice) panel.append(clear);
 
             function updateSummary() {
                 const names = Array.from(select.selectedOptions, option => option.label);
                 const caption = select.multiple && names.length > 1
                     ? form.dataset.selectedOptions.replace('__count__', names.length).replace('__names__', names.join('、'))
-                    : (names[0] || emptyOption.label);
+                    : (names[0] || emptyOption?.label || '');
                 summary.textContent = caption;
                 summary.title = caption;
             }
@@ -93,7 +95,7 @@
             function drawOptions() {
                 const query = search ? search.value.trim().toLocaleLowerCase() : '';
                 const visible = Array.from(select.options).filter(function (option) {
-                    return option.value !== '' && option.label.toLocaleLowerCase().includes(query);
+                    return (fixedChoice || option.value !== '') && option.label.toLocaleLowerCase().includes(query);
                 });
 
                 options.replaceChildren();

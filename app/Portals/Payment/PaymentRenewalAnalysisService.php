@@ -180,7 +180,8 @@ class PaymentRenewalAnalysisService
             'date_to'=>$filters[$module.'_date_to'] ?? $filters['date_to'] ?? $today->toDateString(),
             'timezone'=>$timezone,'store'=>$filters[$module.'_store'] ?? $filters['store'] ?? '',
             'channel'=>'','risk_date_mode'=>'payment','stage'=>$module==='renewal' && ($filters['stage'] ?? '')!=='initial' ? ($filters['stage'] ?? '') : '',
-            'first_only'=>$module==='initial'];
+            'first_only'=>$module==='initial',
+            ...($module==='renewal' && ($filters['renewal_mode'] ?? '')==='linked' ? ['linked'=>true] : [])];
     }
 
     private function combinedData(array $filters): array
@@ -262,13 +263,13 @@ class PaymentRenewalAnalysisService
     }
 
     /** Keyset pagination keeps (paid_at,id) ordering stable even across batch boundaries. */
-    private function orderedBatches(Builder $query,bool $descending=false,int $size=500): \Generator
+    private function orderedBatches(Builder $query,bool $descending=false,int $size=500,array $fields=self::ORDER_FIELDS): \Generator
     {
         $lastDate=$lastId=null;
         $direction=$descending ? 'desc' : 'asc';
         $operator=$descending ? '<' : '>';
         do {
-            $batch=(clone $query)->select(self::ORDER_FIELDS);
+            $batch=(clone $query)->select($fields);
             if ($lastId!==null) $batch->where(function ($q) use ($lastDate,$lastId,$operator): void {
                 $q->where('paid_at',$operator,$lastDate)->orWhere(function ($q) use ($lastDate,$lastId,$operator): void {
                     $q->where('paid_at',$lastDate)->where('id',$operator,$lastId);
@@ -298,6 +299,24 @@ class PaymentRenewalAnalysisService
     /** Only scalar reference => root IDs survive the discovery pass, never all Eloquent models. */
     private function rootIndex(array $filters,array $w): array
     {
+        if ($filters['linked'] ?? false) {
+            $roots=LogisticsOrder::query()->whereBetween('paid_at',[$w['from'],$w['to']])->where('subscription_type','订阅首次购买')
+                ->where(function ($q): void {$q->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id','');})
+                ->where(function ($q): void {$q->whereNull('operator_name')->orWhere('operator_name','not like','%刷单%');});
+            if ($filters['store']!=='') $roots->where('store_name',$filters['store']);
+            $ids=$map=[];
+            foreach ($this->orderedBatches($roots,fields:['id','paid_at', ...self::SUBSCRIPTION_REFERENCE_FIELDS]) as $batch) {
+                foreach ($batch as $root) {
+                    $id=(int)$root->id;
+                    $ids[]=$id;
+                    foreach ($this->chainReferences($root) as $ref) {
+                        if (!isset($map[$ref]) || $map[$ref]<$id) $map[$ref]=$id;
+                    }
+                }
+            }
+            return ['ids'=>$ids,'map'=>$map];
+        }
+
         $refs=[];
         $candidates=LogisticsOrder::query()->where(function ($q) use ($w): void {
             $q->whereBetween('paid_at',[$w['from'],$w['to']])->orWhereBetween('paid_at',[$w['previous_from'],$w['previous_to']]);
@@ -334,7 +353,9 @@ class PaymentRenewalAnalysisService
 
     private function lifecycleBatches(array $filters,array $index,array $w): \Generator
     {
-        foreach (array_chunk($index['ids'],100) as $rootIds) {
+        $linked=$filters['linked'] ?? false;
+        // Linked mode already narrows roots to the selected period. Group more roots per lookup.
+        foreach (array_chunk($index['ids'],$linked ? 250 : 100) as $rootIds) {
             $roots=LogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
             $entries=$refs=$seen=[];
             foreach ($roots as $root) {
@@ -345,12 +366,18 @@ class PaymentRenewalAnalysisService
             if (!$refs) continue;
             // Numeric PHP array keys become integers, but the indexed column is a string.
             $query=LogisticsOrder::query()->whereIn('subscription_origin_order_id',array_map('strval',array_keys($refs)))
-                ->whereNotNull('paid_at')->where('paid_at','<=',$w['to']);
+                ->whereNotNull('paid_at');
+            if ($linked) {
+                $query->where('paid_at','>=',$w['from']);
+            } else {
+                $query->where('paid_at','<=',$w['to']);
+            }
             foreach ($this->orderedBatches($query) as $orders) {
                 $entries=[];
                 foreach ($orders as $order) {
                     $rootId=$index['map'][trim((string)$order->subscription_origin_order_id)] ?? null;
                     if ($rootId===null || !$roots->has($rootId)) continue;
+                    if ($linked && $order->paid_at->lt($roots->get($rootId)->paid_at)) continue;
                     $seen[$rootId]=($seen[$rootId] ?? 0)+1;
                     $entries[]=['order'=>$order,'initial'=>$roots->get($rootId),'number'=>$seen[$rootId]];
                 }
@@ -363,9 +390,10 @@ class PaymentRenewalAnalysisService
     {
         $w=$this->window($filters);
         $index=$this->rootIndex($filters,$w);
+        $linked=$filters['linked'] ?? false;
         foreach ($this->lifecycleBatches($filters,$index,$w) as $entries) {
             $current=array_values(array_filter($entries,static fn ($entry)=>$entry['number']>0
-                && $entry['order']->paid_at->betweenIncluded($w['from'],$w['to'])
+                && ($linked || $entry['order']->paid_at->betweenIncluded($w['from'],$w['to']))
                 && ($filters['stage']==='' || 'renewal_'.$entry['number']===$filters['stage'])));
             if (!$current) continue;
             $ids=array_map(static fn ($e)=>(int)$e['order']->id,$current);
@@ -403,6 +431,7 @@ class PaymentRenewalAnalysisService
     private function buildSummary(array $filters): array
     {
         $w=$this->window($filters);
+        $linked=$filters['linked'] ?? false;
         $groups=array_keys(self::breakdownGroups());
         $first=[];
         foreach ($groups as $key) $first[$key]=array_fill_keys(['all','subscription','non_subscription'],$this->emptyRiskTotal());
@@ -425,11 +454,11 @@ class PaymentRenewalAnalysisService
             foreach ($entries as $entry) {
                 $order=$entry['order'];
                 $number=$entry['number'];
-                if ($order->paid_at->betweenIncluded($w['previous_from'],$w['previous_to'])) {
+                if (($linked && $number===0) || (!$linked && $order->paid_at->betweenIncluded($w['previous_from'],$w['previous_to']))) {
                     $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
                     foreach ($groups as $key) if ($this->matchesGroup($stub,$key)) $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
                 }
-                if ($order->paid_at->betweenIncluded($w['from'],$w['to'])) $now[]=$entry;
+                if ($linked ? $number>0 : $order->paid_at->betweenIncluded($w['from'],$w['to'])) $now[]=$entry;
             }
             if (!$now) continue;
             $ids=array_map(static fn ($e)=>(int)$e['order']->id,$now);
@@ -456,11 +485,14 @@ class PaymentRenewalAnalysisService
         ksort($numbers,SORT_NUMERIC);
         $stages=[];
         foreach (array_keys($numbers) as $number) {
-            $base=$number>0 ? ($previous[$number-1]['total'] ?? 0) : null;
+            $baseCounts=$linked && $number>1
+                ? array_map(static fn ($part)=>$part['orders'],$current[$number-1]['totals'] ?? [])
+                : ($previous[$number-1] ?? []);
+            $base=$number>0 ? ($baseCounts['total'] ?? 0) : null;
             $totals=$current[$number]['totals'] ?? array_fill_keys($groups,$this->emptyRiskTotal());
             $by=[];
             foreach ($groups as $key) {
-                $partBase=$number>0 ? ($previous[$number-1][$key] ?? 0) : null;
+                $partBase=$number>0 ? ($baseCounts[$key] ?? 0) : null;
                 $by[$key]=[...$this->finishTotal($totals[$key]),'previous_orders'=>$partBase,
                     'rate'=>$partBase>0 ? $this->rate($totals[$key]['orders'],$partBase) : null];
             }

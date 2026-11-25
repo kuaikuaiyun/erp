@@ -1101,7 +1101,6 @@
 .payment-renewal-two-sections .payment-renewal-compact-context { margin: 0 0 12px; color: #607c91; font-size: 12px; }
 .payment-renewal-two-sections .payment-renewal-kpis { padding: 14px 14px 0; }
 .payment-renewal-two-sections .payment-renewal-scope-note { padding: 10px 14px; margin: 0; color: #607c91; font-size: 12px; line-height: 1.6; }
-.payment-renewal-two-sections .payment-subscription-refunds { min-width: 850px; margin-bottom: 0; }
 .payment-renewal-two-sections caption { padding: 8px 14px; color: #285979; font-weight: 600; }
 .payment-renewal-two-sections .payment-renewal-funnel table { min-width: 1150px; table-layout: auto; }
 .payment-renewal-two-sections .payment-renewal-funnel td { vertical-align: middle; white-space: nowrap; }
@@ -1136,18 +1135,15 @@
 .payment-renewal-two-sections .payment-data-table { font-variant-numeric: tabular-nums; }
 .payment-renewal-two-sections .payment-data-table thead th { padding: 12px; color: #35536d; background: #edf3f9; border-bottom: 1px solid #cfdeeb; }
 .payment-renewal-two-sections .payment-data-table tbody td { padding: 12px; vertical-align: middle; color: #294962; border-bottom: 1px solid #e7eef4; }
-.payment-renewal-two-sections .payment-level-total > td { background: #eaf3fb; font-weight: 700; }
+.payment-renewal-two-sections .payment-data-table .payment-level-total > td { background: #eaf3fb; font-weight: 700; }
 .payment-renewal-two-sections .payment-level-channel.payment-group-start > td, .payment-renewal-two-sections .payment-renewal-funnel .payment-level-channel > td { background: #f2f6fa; font-weight: 600; }
 .payment-renewal-two-sections .payment-group-start > td { border-top: 2px solid #d3e1ed; }
-.payment-renewal-two-sections .payment-type-detail > td { font-weight: 400; background: #fff; }
-.payment-renewal-two-sections .payment-type-detail > td:nth-child(2) { padding-left: 25px; color: #586e80; }
+.payment-renewal-two-sections .payment-type-detail > td:nth-child(2) { color: #586e80; }
 .payment-renewal-two-sections .payment-level-method > td:first-child { padding-left: 24px; }
 .payment-renewal-two-sections .payment-stage-start > td { border-top: 5px solid #fff; padding-top: 18px; padding-bottom: 18px; font-size: 14px; }
 .payment-renewal-two-sections .payment-renewal-funnel table { min-width: 1550px; }
-.payment-renewal-two-sections .payment-subscription-refunds { min-width: 1150px; }
 .payment-renewal-two-sections .payment-column-groups > th { text-align: center; background: #e0ebf5 !important; border-right: 2px solid #fff; font-size: 12px; }
 .payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(6),
-.payment-renewal-two-sections .payment-subscription-refunds tr > :nth-child(5) { border-left: 2px solid #d8e3ed; }
 .payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(7) { border-left: 2px solid #d8e3ed; }
 .payment-renewal-two-sections .payment-rate-cell > strong { color: #066952; font-size: 16px; }
 .payment-renewal-two-sections .payment-refund-rate { font-weight: 600; }
@@ -1177,9 +1173,31 @@
 .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0, 1fr); }
 .payment-renewal-two-sections .payment-renewal-kpi { max-width: 520px; }
 
-/* First-purchase refund subtotal rows. */
-.payment-renewal-two-sections .payment-data-table.payment-subscription-refunds tbody tr.payment-refund-row.payment-group-start > td { background-color: #fff3e2; font-weight: 700; border-top-color: #efd8b5; }
-.payment-renewal-two-sections .payment-data-table.payment-subscription-refunds tbody tr.payment-refund-row.payment-group-start:hover > td { background-color: #ffe8c7; }
+/* First-purchase refund table. */
+.payment-renewal-two-sections .payment-subscription-refund-table {
+    margin: 8px 18px 16px; padding-bottom: 0; overflow: hidden; font-variant-numeric: tabular-nums;
+}
+.payment-subscription-refund-table > h3 { padding: 12px 14px; color: #294f69; border-bottom: 1px solid #dfe9f1; }
+.payment-subscription-refund-table .payment-subscription-refunds { min-width: 1600px; }
+.payment-subscription-refund-table .payment-subscription-refunds th { width: auto; padding: 10px; white-space: normal; }
+.payment-subscription-refund-table .payment-subscription-refunds th:first-child { width: 112px; }
+.payment-subscription-refund-table .payment-subscription-refunds th:nth-child(9) { width: 180px; }
+.payment-subscription-refund-table .payment-subscription-refunds th:last-child { width: 206px; }
+.payment-subscription-refund-table .payment-subscription-refunds td { padding: 9px 10px; }
+.payment-subscription-refund-table .payment-subscription-refunds td:first-child { padding-inline: 10px; }
+.payment-subscription-refunds .payment-renewal-detail-actions { min-width: 0; }
+.payment-subscription-refunds :is(th, td):nth-child(5),
+.payment-subscription-refunds :is(th, td):nth-child(9) { border-left: 1px solid #d6e2ec; }
+.payment-subscription-refunds tbody tr.payment-group-start { --flt-row-bg: #edf5fb; background: var(--flt-row-bg); font-weight: 600; }
+.payment-subscription-refunds tbody tr.payment-group-start:hover { --flt-row-bg: #e5f2fa; }
+.payment-subscription-refunds .payment-inline-formula { margin-inline: auto; }
+.payment-subscription-refunds .payment-delivery-distribution { text-align: left; }
+@container (max-width: 520px) {
+    .payment-renewal-two-sections .payment-subscription-refund-table { margin-inline: 10px; }
+    .payment-subscription-refund-table .payment-subscription-refunds th:first-child { width: 92px; }
+    .payment-subscription-refund-table .payment-subscription-refunds th:last-child { width: 120px; }
+    .payment-subscription-refund-table .payment-renewal-detail-button { display: flex; margin: 3px auto; }
+}
 
 /* First-purchase reconciliation dialog: keep styles local to this dialog. */
 .payment-renewal-detail-actions { min-width: 185px; white-space: nowrap; }
@@ -1237,14 +1255,46 @@
 }
 
 /* Local presentation only: compact filters and one card per renewal stage. */
-.payment-renewal-two-sections .payment-renewal-filter { display: grid; grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) auto; gap: 12px; align-items: end; }
-.payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) minmax(145px,1fr) auto; }
-.payment-renewal-two-sections .payment-renewal-filter > label,
-.payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-cohort,
-.payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { grid-column: auto; min-width: 0; margin: 0; }
-.payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { display: flex; flex-wrap: nowrap; gap: 8px; padding: 0; align-items: center; justify-content: flex-end; }
-.payment-renewal-two-sections .payment-renewal-filter-actions .btn { white-space: nowrap; }
-.payment-renewal-two-sections .payment-renewal-filter > .text-danger { grid-column: 1 / -1; }
+.payment-renewal-two-sections .payment-renewal-filter { display: block; }
+.payment-renewal-filter .payment-renewal-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 16px;
+}
+.payment-renewal-filter[data-renewal-module="renewal"] .payment-renewal-fields {
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+}
+.payment-renewal-filter .flt-field-label { margin-bottom: 6px; }
+.payment-renewal-filter .flt-picker-options input[type="radio"] { flex: 0 0 15px; width: 15px; }
+.payment-renewal-filter .flt-filter-actions { padding-top: 10px; border-top: 1px solid #e1eaf1; }
+.payment-renewal-months { display: flex; flex: 1 1 470px; align-items: center; flex-wrap: wrap; gap: 5px; }
+.payment-renewal-month-label { margin-inline-end: 3px; font-size: 12px; color: #526d83; }
+.payment-renewal-months .flt-btn { min-height: 28px; padding: 3px 7px; }
+.payment-renewal-months .flt-btn[aria-pressed="true"] { border-color: #97c3dd; background: #eaf4fc; color: #185783; }
+.payment-renewal-action-buttons { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.payment-renewal-two-sections .payment-panel:has(.flt-picker[open]) { position: relative; z-index: 4; overflow: visible; }
+.payment-renewal-two-sections .payment-panel > h2 { border-radius: 11px 11px 0 0; }
+.payment-renewal-pagination { border-top: 1px solid #e1eaf1; padding: 12px 18px; }
+.payment-renewal-page-count { margin-inline-end: auto; }
+.payment-renewal-pagination .flt-btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.payment-renewal-detail-actions .payment-renewal-detail-button { min-height: 29px; padding: 4px 8px; }
+.payment-renewal-mode-picker {
+    position: relative; display: inline-flex; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%;
+    margin: 0 0 14px; padding: 3px; border: 1px solid #dbe6ee; border-radius: 7px; background: #edf3f8;
+}
+.payment-renewal-mode-option { display: flex; align-items: center; border: 1px solid transparent; border-radius: 5px; color: #4c677b; }
+.payment-renewal-mode-option label { margin: 0; cursor: pointer; font-weight: 500; }
+.payment-renewal-mode-option label > span { display: block; padding: 5px 3px 5px 8px; white-space: nowrap; }
+.payment-renewal-mode-option:has(input:checked) { color: #185783; border-color: #c1dbe9; background: #fff; }
+.payment-renewal-mode-option:has(input:checked) label { font-weight: 600; }
+.payment-renewal-mode-option input:focus-visible + span { outline: 2px solid #2674aa; outline-offset: -2px; border-radius: 5px; }
+[data-renewal-mode-info] { display: inline-grid; place-items: center; width: 25px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #67859a; font-size: 12px; cursor: help; }
+[data-renewal-mode-info]:hover, [data-renewal-mode-info]:focus-visible { color: #185783; background: #e1eef7; }
+.payment-renewal-mode-help {
+    position: absolute; z-index: 5; top: calc(100% + 5px); left: 0; width: min(380px, calc(100vw - 70px));
+    display: none; max-width: calc(100cqw - 48px); padding: 9px 12px; border-radius: 7px; background: #24455f; color: #fff;
+    font-size: 12px; font-weight: 400; line-height: 1.65; box-shadow: 0 3px 9px #203f5b24; pointer-events: none;
+}
+[data-renewal-mode-info]:hover + .payment-renewal-mode-help,
+[data-renewal-mode-info]:focus + .payment-renewal-mode-help { display: block; }
 .payment-renewal-two-sections .payment-renewal-stage-list { padding: 4px 18px 16px; }
 .payment-renewal-two-sections .payment-renewal-stage-card { margin-bottom: 20px; border: 1px solid #d8e4ef; border-radius: 9px; overflow: hidden; background: #fff; }
 .payment-renewal-two-sections .payment-renewal-stage-card:last-child { margin-bottom: 0; }
@@ -1270,23 +1320,14 @@
 .payment-renewal-two-sections .payment-renewal-stage-table .payment-level-method > td:first-child { padding-left: 12px; }
 .payment-renewal-two-sections .payment-renewal-stage-table .payment-inline-formula { padding: 3px 0; background: transparent; font-size: 11px; line-height: 1.6; }
 .payment-renewal-two-sections .payment-renewal-stage-calculation .payment-calculation-details { border-top: 0; }
-@media (max-width: 1199px) {
-    .payment-renewal-two-sections .payment-renewal-filter,
-    .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: repeat(2,minmax(0,1fr)); }
-    .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-cohort,
-    .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { grid-column: 1 / -1; }
-}
 @media (max-width: 767px) {
-    .payment-renewal-two-sections .payment-renewal-filter,
-    .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(0,1fr); }
-    .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { flex-wrap: wrap; }
     .payment-renewal-two-sections .payment-renewal-stage-list { padding: 4px 10px 12px; }
     .payment-renewal-two-sections .payment-renewal-stage-heading { padding: 12px; }
 }
 
 .payment-renewal-two-sections [data-renewal-region] > .payment-panel { container-type: inline-size; }
-.payment-renewal-two-sections [data-renewal-placeholder] > .btn { margin: 12px 18px; }
-.payment-renewal-two-sections [data-renewal-placeholder][data-renewal-state] > .btn { display: none; }
+.payment-renewal-two-sections [data-renewal-placeholder] > .flt-btn { margin: 12px 18px; }
+.payment-renewal-two-sections [data-renewal-placeholder][data-renewal-state] > .flt-btn { display: none; }
 .payment-renewal-section-status:not([hidden]) {
     display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px;
     margin: 14px 18px 10px; padding: 10px 12px; border: 1px solid #d4e4f2;
@@ -1314,15 +1355,15 @@
 .payment-renewal-skeleton span { width: 66%; height: 8px; background: #e1ebf3; border-radius: 4px; }
 @keyframes payment-renewal-status-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .payment-renewal-status-icon { animation: none; } }
-@container (max-width: 1050px) {
-    .payment-renewal-two-sections .payment-renewal-filter,
-    .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: repeat(2,minmax(0,1fr)); }
-    .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-cohort,
-    .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { grid-column: 1 / -1; }
+@container (max-width: 700px) {
+    .payment-renewal-filter[data-renewal-module="renewal"] .payment-renewal-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .payment-renewal-filter .payment-renewal-cohort { grid-column: 1 / -1; }
 }
-@container (max-width: 560px) {
-    .payment-renewal-two-sections .payment-renewal-filter,
-    .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(0,1fr); }
+@container (max-width: 470px) {
+    .payment-renewal-filter .payment-renewal-fields,
+    .payment-renewal-filter[data-renewal-module="renewal"] .payment-renewal-fields { grid-template-columns: minmax(0,1fr); }
+    .payment-renewal-filter .flt-picker-panel { min-width: 0; }
+    .payment-renewal-page-count { width: 100%; }
 }
 
 .payment-renewal-detail-table { min-width: 1540px; }
@@ -1333,7 +1374,6 @@
 
 .payment-renewal-detail-table { min-width: 2000px; }
 
-.payment-renewal-two-sections .payment-subscription-refunds { min-width: 1850px; }
 .payment-renewal-two-sections .payment-delivery-distribution { min-width: 185px; font-weight: 400; }
 .payment-renewal-two-sections .payment-delivery-distribution > div + div { margin-top: 9px; padding-top: 7px; border-top: 1px dashed #d5e2ed; }
 .payment-renewal-two-sections .payment-delivery-delivered > span { color: #08684c; }

@@ -111,11 +111,19 @@ class PaymentRenewalAnalysisExportService
             }
         };
         $renewalRows = function () use ($data,$text,$groups,$methodLabel,$filters): \Generator {
-            yield $this->row([__('payment.renewal_analysis.export.period'),$data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']], [], [1]);
-            yield $this->row([__('payment.renewal_analysis.export.comparison_period'),$data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']], [], [1]);
+            $linked = ($filters['renewal_mode'] ?? '') === 'linked';
+            $periodLabel = $linked ? __('payment-renewal.linked_date_label') : __('payment.renewal_analysis.export.period');
+            yield $this->row([$periodLabel,$data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']], [], [1]);
+            if ($linked) {
+                yield $this->row([__('payment-renewal.mode_label'), __('payment-renewal.mode_linked')]);
+            } else {
+                yield $this->row([__('payment.renewal_analysis.export.comparison_period'),$data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']], [], [1]);
+            }
             yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['renewal_store'] ?? $filters['store'] ?? __('payment.renewal_analysis.filters.all_stores')]);
-            yield $this->row([]);
-            yield $this->row([$text('renewal_stage'),$text('payment_method'),$text('previous_orders'),$text('current_renewal_orders'),
+            yield $this->row($linked ? [] : [__('payment-renewal.mode_label'), __('payment-renewal.mode_normal')]);
+            yield $this->row([$text('renewal_stage'),$text('payment_method'),
+                $linked ? __('payment-renewal.linked_previous_orders') : $text('previous_orders'),
+                $linked ? __('payment-renewal.linked_current_orders') : $text('current_renewal_orders'),
                 __('payment.renewal_analysis.funnel.renewal_rate'),$text('revenue'),$text('refund_orders'),$text('refund_amount'),$text('refund_count_rate'),$text('refund_amount_rate')], [], [], true);
             foreach ($data['stages'] as $stage) {
                 foreach ($groups as $key=>$group) {

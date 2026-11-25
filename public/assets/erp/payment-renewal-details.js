@@ -327,11 +327,21 @@
                 if (!fragment) throw new Error(sectionMessages.error);
                 var replacement = document.importNode(fragment, true);
                 var restoreFocus = article.contains(document.activeElement);
+                var focusMode = restoreFocus && document.activeElement.name === 'renewal_mode';
+                var focusMonth = restoreFocus && document.activeElement.dataset.renewalMonth;
                 applied = withSection(module, new URLSearchParams(JSON.parse(replacement.dataset.renewalApplied)));
                 article.replaceWith(replacement);
                 syncControls();
+                replacement.querySelectorAll('[data-logistics-filters]').forEach(function (form) {
+                    form.dispatchEvent(new Event('logistics:initialize-filters', { bubbles: true }));
+                });
                 bindPageExport(replacement.querySelector('[data-renewal-export-url]'));
-                if (restoreFocus) replacement.querySelector('.payment-renewal-filter button[type="submit"]').focus({ preventScroll: true });
+                if (restoreFocus) {
+                    var focusSelector = '.payment-renewal-filter button[type="submit"]';
+                    if (focusMode) focusSelector = 'input[type="radio"][name="renewal_mode"]:checked';
+                    if (focusMonth) focusSelector = '[data-renewal-month="' + focusMonth + '"]';
+                    replacement.querySelector(focusSelector).focus({ preventScroll: true });
+                }
                 if (updateUrl) {
                     var nextUrl = new URL(window.location.href);
                     nextUrl.search = applied;
@@ -341,6 +351,10 @@
             } catch (error) {
                 if (request.signal.aborted || pending.get(module) !== request) return;
                 article.dataset.renewalState = 'error';
+                var appliedMode = applied.get('renewal_mode') || 'normal';
+                article.querySelectorAll('input[type="radio"][name="renewal_mode"]').forEach(function (mode) {
+                    mode.checked = mode.value === appliedMode;
+                });
                 message.textContent = error instanceof TypeError ? sectionMessages.error : (error.message || sectionMessages.error);
                 retry.onclick = function () {
                     refresh(region, withSection(module, params), updateUrl);
@@ -364,7 +378,28 @@
             event.preventDefault();
             refresh(form.closest('[data-renewal-region]'), withSection(form.dataset.renewalModule, new FormData(form)), true);
         });
+        page.addEventListener('change', function (event) {
+            if (event.target.matches('input[type="radio"][name="renewal_mode"]')) event.target.form.requestSubmit();
+        });
         page.addEventListener('click', function (event) {
+            var shortcut = event.target.closest('[data-renewal-month]');
+            if (shortcut) {
+                var form = shortcut.form;
+                var offset = form.elements[form.dataset.renewalModule + '_timezone'].value;
+                var offsetMinutes = (+offset.slice(1, 3) * 60 + +offset.slice(4)) * (offset[0] === '-' ? -1 : 1);
+                var year = new Date(Date.now() + offsetMinutes * 60000).getUTCFullYear();
+                var month = Number(shortcut.dataset.renewalMonth);
+                var monthPrefix = year + '-' + String(month).padStart(2, '0');
+                var lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+                var dates = form.querySelectorAll('input[type="date"]');
+                dates[0].value = monthPrefix + '-01';
+                dates[1].value = monthPrefix + '-' + lastDay;
+                dates[1].setCustomValidity('');
+                form.requestSubmit();
+                return;
+            }
+            var info = event.target.closest('[data-renewal-mode-info]');
+            if (info) info.focus({ preventScroll: true });
             var link = event.target.closest('[data-renewal-navigation]');
             if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
