@@ -11,7 +11,7 @@
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-11">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-13">
 @endpush
 
 @section('content')
@@ -27,7 +27,7 @@
             @include('portals.payment.partials.renewal-analysis-section', ['module' => 'initial'])
         @else
             <article class="payment-panel payment-subscription-block payment-renewal-initial-placeholder" data-renewal-placeholder>
-                <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
+                <h2><span class="payment-section-number">01</span>{{ __('payment-renewal.initial_data_title') }}</h2>
                 <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
                 @include('portals.payment.partials.renewal-section-status')
                 @include('portals.payment.partials.renewal-table-skeleton')

@@ -1129,6 +1129,7 @@
 .payment-renewal-two-sections .payment-method-rates { margin: 12px 18px; padding: 14px; border: 1px solid #e4eaf1; border-radius: 8px; }
 .payment-renewal-two-sections .payment-method-rates h3 { font-size: 14px; margin: 0 0 12px; color: #344e65; }
 .payment-renewal-two-sections .payment-method-rate-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
+.payment-renewal-two-sections .payment-order-values .payment-method-rate-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .payment-renewal-two-sections .payment-method-rate { min-width: 0; padding: 10px; background: #f6f9fc; border-radius: 6px; }
 .payment-renewal-two-sections .payment-method-rate > span, .payment-renewal-two-sections .payment-method-rate > small { display: block; color: #4f677c; font-size: 12px; }
 .payment-renewal-two-sections .payment-method-rate > strong { display: block; margin: 7px 0; color: #234c6b; font-size: 21px; }
@@ -1162,7 +1163,8 @@
     .payment-renewal-two-sections .payment-method-rate-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
 @media (max-width: 767px) {
-    .payment-renewal-two-sections .payment-method-rate-grid, .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0,1fr); }
+    .payment-renewal-two-sections .payment-method-rate-grid, .payment-renewal-two-sections .payment-order-values .payment-method-rate-grid,
+    .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0,1fr); }
     .payment-renewal-two-sections .payment-renewal-filter { margin: 10px; padding: 12px; }
     .payment-renewal-two-sections .payment-renewal-compact-context { margin: 0 10px 10px; }
 }
@@ -1312,6 +1314,8 @@
 .payment-renewal-two-sections .payment-renewal-stage-table th:nth-child(8) { width: 11%; }
 .payment-renewal-two-sections .payment-renewal-stage-table th:nth-child(9) { width: 12%; }
 .payment-renewal-two-sections .payment-renewal-stage-table tbody td { padding: 13px 12px; }
+.payment-renewal-two-sections .payment-renewal-stage-table td.payment-renewal-base-count { white-space: normal; }
+.payment-renewal-stage-table .payment-renewal-base-count small { display: inline; font-weight: 400; }
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(6),
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(7) { border-left: 0 !important; }
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(5),

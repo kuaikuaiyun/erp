@@ -35,7 +35,7 @@
         $summary = $dashboard['summary'];
     @endphp
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription" data-renewal-section="initial" data-renewal-applied="{{ $appliedFilters }}">
-        <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
+        <h2><span class="payment-section-number">01</span>{{ __('payment-renewal.initial_data_title') }}</h2>
         <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
         @php $moduleReset = [...array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone'])), 'load_initial'=>1]; @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="flt flt-card flt-filters payment-renewal-filter" data-renewal-module="initial"
@@ -86,6 +86,20 @@
                     <small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small>
                 </div>
             @endforeach
+            </div>
+        </div>
+        <div class="payment-method-rates payment-order-values">
+            <h3>{{ __('payment-renewal.order_values') }}</h3>
+            <div class="payment-method-rate-grid">
+                @foreach ($dashboard['initial_order_values'] as $type => $value)
+                    <div class="payment-method-rate">
+                        <span><b>{{ __('payment-renewal.order_value_'.$type) }}</b></span>
+                        <strong>{{ $value['average'] === null ? '—' : $money($value['average']) }}</strong>
+                        <small class="payment-inline-formula">{{ $value['orders'] === 0
+                            ? __('payment-renewal.order_value_empty')
+                            : __('payment-renewal.order_value_formula', ['amount'=>$money($value['revenue']), 'orders'=>number_format($value['orders'])]) }}</small>
+                    </div>
+                @endforeach
             </div>
         </div>
         <p class="payment-renewal-scope-note">{{ $text('method_rule') }}</p>
@@ -232,9 +246,14 @@
                 @php $part = $key === 'total' ? $stage : $stage['by_channel'][$key]; @endphp
                 <tr class="payment-level-{{ $group['level'] }} {{ $key === 'total' ? 'payment-stage-start' : '' }}" @if($key === 'total') data-payment-renewal-number="{{ $stage['number'] }}" @endif data-payment-method="{{ $group['method'] }}">
                     <td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td>
-                    <td>{{ number_format($part['previous_orders']) }}</td>
-                    <td>{{ number_format($part['orders']) }}</td>
-                    <td class="payment-rate-cell"><strong>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['orders'],$part['previous_orders']) }}</small></td>
+                    <td class="payment-renewal-base-count">
+                        {{ number_format($part['previous_orders']) }}
+                        @if($linked && $part['pending_orders']>0)
+                            <small>{{ $renewalText('linked_pending',['count'=>number_format($part['pending_orders'])]) }}</small>
+                        @endif
+                    </td>
+                    <td>{{ number_format($part['rate_orders'] ?? $part['orders']) }}</td>
+                    <td class="payment-rate-cell"><strong>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['rate_orders'] ?? $part['orders'],$part['previous_orders']) }}</small></td>
                     <td>{{ $money($part['revenue']) }}</td><td>{{ number_format($part['refund_order_count']) }}</td><td>{{ $money($part['refund_amount']) }}</td>
                     <td class="payment-refund-rate">{{ number_format($part['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_order_count'],$part['orders']) }}</small></td>
                     <td class="payment-refund-rate">{{ number_format($part['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_amount'],$part['revenue'],true) }}</small></td>
@@ -244,7 +263,7 @@
             <div class="payment-renewal-stage-calculation">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
                     @if ($linked)
-                        {{ $notes([$renewalText('linked_base',['previous'=>$previousName,'count'=>$stage['previous_orders']]),$renewalText('linked_count',['number'=>$stage['number'],'count'=>$stage['orders']]),$period]) }}
+                        {{ $notes([$renewalText('linked_base',['previous'=>$previousName,'count'=>$stage['previous_orders']]),$renewalText('linked_count',['number'=>$stage['number'],'count'=>$stage['rate_orders']]),$period]) }}
                     @else
                         {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$previousName,'count'=>$stage['previous_orders']]),
                             $audit('completed',['number'=>$stage['number'],'count'=>$stage['orders']]),$period,$comparison]) }}
@@ -252,7 +271,7 @@
                     @if($stage['rate'] === null)
                         {{ $notes([$text('no_base')]) }}
                     @else
-                        {{ $notes($ratio($stage['orders'],$stage['previous_orders'],$stage['rate'])) }}
+                        {{ $notes($ratio($stage['rate_orders'] ?? $stage['orders'],$stage['previous_orders'],$stage['rate'])) }}
                     @endif
                     {{ $notes([$audit('revenue',['amount'=>$money($stage['revenue'])]),
                         $audit('refund',['records'=>$stage['refund_count'],'orders'=>$stage['refund_order_count'],'amount'=>$money($stage['refund_amount'])])]) }}

@@ -194,7 +194,18 @@ class PaymentRenewalAnalysisService
     private function initialData(array $filters): array
     {
         $initial=$this->dataset($this->moduleFilters($filters,'initial'));
+        $totals=$initial['initial_refunds_by_type']['total'];
+        $orderValues=array_map(static function (array $total): array {
+            $orders=(int)$total['orders'];
+            $revenue=(float)$total['revenue'];
+            return ['orders'=>$orders,'revenue'=>$revenue,'average'=>$orders>0 ? $revenue/$orders : null];
+        }, [
+            'non_subscription'=>$totals['non_subscription'],
+            'subscription'=>$totals['subscription'],
+            'renewal'=>$initial['renewal_order_total'],
+        ]);
         return ['summary'=>['subscription_rate'=>$initial['subscription_rate']],
+            'initial_order_values'=>$orderValues,
             'initial_refunds'=>$initial['initial_refunds'],'initial_refunds_by_type'=>$initial['initial_refunds_by_type'],
             'initial_delivery_by_type'=>$initial['initial_delivery_by_type'],
             'initial_calculation'=>$initial['calculation']];
@@ -225,7 +236,9 @@ class PaymentRenewalAnalysisService
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
-        return Cache::remember('payment:renewal-summary:v25:'.sha1(json_encode($cache)),now()->addMinutes(5),
+        if ($cache['linked'] ?? false) $cache['as_of']=now($cache['timezone'])->toDateString();
+        $version=$cache['first_only'] ? 'v26' : 'v25';
+        return Cache::remember('payment:renewal-summary:'.$version.':'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
 
@@ -246,20 +259,34 @@ class PaymentRenewalAnalysisService
                 'expires_at'=>now($zone)->addMinutes(5)->format('Y-m-d H:i:s')]];
     }
 
-    private function firstQuery(array $filters,array $window): Builder
+    private function paidOrdersInWindow(array $filters,array $window): Builder
     {
         $query=LogisticsOrder::query()->whereBetween('paid_at',[$window['from'],$window['to']])
-            ->where(function ($q): void {
-                $q->where(function ($q): void {
-                    $q->where('subscription_type','订阅首次购买')->where(function ($q): void {
-                        $q->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id','');
-                    });
-                })->orWhere(function ($q): void {
-                    $q->where('subscription_type','无订阅')->whereRaw("TRIM(COALESCE(subscription_origin_order_id, '')) = ''");
-                });
-            })->where(function ($q): void {$q->whereNull('operator_name')->orWhere('operator_name','not like','%刷单%');});
+            ->where(function ($q): void {$q->whereNull('operator_name')->orWhere('operator_name','not like','%刷单%');});
         if ($filters['store']!=='') $query->where('store_name',$filters['store']);
         return $query;
+    }
+
+    private function firstQuery(array $filters,array $window): Builder
+    {
+        return $this->paidOrdersInWindow($filters,$window)->where(function ($q): void {
+            $q->where(function ($q): void {
+                $q->where('subscription_type','订阅首次购买')->where(function ($q): void {
+                    $q->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id','');
+                });
+            })->orWhere(function ($q): void {
+                $q->where('subscription_type','无订阅')->whereRaw("TRIM(COALESCE(subscription_origin_order_id, '')) = ''");
+            });
+        });
+    }
+
+    private function renewalOrderTotal(array $filters,array $window): array
+    {
+        $total=$this->paidOrdersInWindow($filters,$window)->toBase()
+            ->where('subscription_type','like','订阅复购%')
+            ->selectRaw('COUNT(*) AS orders, COALESCE(SUM(paid_amount_usd), 0) AS revenue')->first();
+
+        return ['orders'=>(int)$total->orders,'revenue'=>(float)$total->revenue];
     }
 
     /** Keyset pagination keeps (paid_at,id) ordering stable even across batch boundaries. */
@@ -428,10 +455,20 @@ class PaymentRenewalAnalysisService
         return $total;
     }
 
+    private function dueRenewalNumber(Carbon $firstPaidAt, Carbon $asOf): int
+    {
+        $first = $firstPaidAt->copy()->setTimezone($asOf->timezone);
+        $months = ($asOf->year - $first->year) * 12 + $asOf->month - $first->month;
+        $billingDay = $first->day === 31 ? 1 : min($first->day, $asOf->daysInMonth);
+
+        return max(0, $months - (int) ($asOf->day < $billingDay));
+    }
+
     private function buildSummary(array $filters): array
     {
         $w=$this->window($filters);
         $linked=$filters['linked'] ?? false;
+        $asOf=$linked ? Carbon::parse($filters['as_of'],$filters['timezone'])->endOfDay() : null;
         $groups=array_keys(self::breakdownGroups());
         $first=[];
         foreach ($groups as $key) $first[$key]=array_fill_keys(['all','subscription','non_subscription'],$this->emptyRiskTotal());
@@ -448,13 +485,23 @@ class PaymentRenewalAnalysisService
                 }
             }
         }
-        $current=$previous=[];
+        $current=$previous=$pending=$renewedWhenDue=$dueNumbers=[];
         if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w) as $entries) {
             $now=[];
             foreach ($entries as $entry) {
                 $order=$entry['order'];
                 $number=$entry['number'];
-                if (($linked && $number===0) || (!$linked && $order->paid_at->betweenIncluded($w['previous_from'],$w['previous_to']))) {
+                if ($asOf && $order->paid_at->lte($asOf)) {
+                    $root=$entry['initial'];
+                    $dueNumber=$dueNumbers[$root->id] ??= $this->dueRenewalNumber($root->paid_at,$asOf);
+                    $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
+                    foreach ($groups as $key) {
+                        if (!$this->matchesGroup($stub,$key)) continue;
+                        if ($dueNumber>$number) $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
+                        else $pending[$number][$key]=($pending[$number][$key] ?? 0)+1;
+                        if ($number>0 && $dueNumber>=$number) $renewedWhenDue[$number][$key]=($renewedWhenDue[$number][$key] ?? 0)+1;
+                    }
+                } elseif (!$linked && $order->paid_at->betweenIncluded($w['previous_from'],$w['previous_to'])) {
                     $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
                     foreach ($groups as $key) if ($this->matchesGroup($stub,$key)) $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
                 }
@@ -482,22 +529,21 @@ class PaymentRenewalAnalysisService
         $numbers=[0=>true];
         foreach (array_keys($current) as $number) $numbers[$number]=true;
         foreach (array_keys($previous) as $number) $numbers[$number+1]=true;
+        if ($linked && isset($pending[0])) $numbers[1]=true;
         ksort($numbers,SORT_NUMERIC);
         $stages=[];
         foreach (array_keys($numbers) as $number) {
-            $baseCounts=$linked && $number>1
-                ? array_map(static fn ($part)=>$part['orders'],$current[$number-1]['totals'] ?? [])
-                : ($previous[$number-1] ?? []);
-            $base=$number>0 ? ($baseCounts['total'] ?? 0) : null;
+            $baseCounts=$previous[$number-1] ?? [];
             $totals=$current[$number]['totals'] ?? array_fill_keys($groups,$this->emptyRiskTotal());
             $by=[];
             foreach ($groups as $key) {
                 $partBase=$number>0 ? ($baseCounts[$key] ?? 0) : null;
+                $rateOrders=$linked ? ($renewedWhenDue[$number][$key] ?? 0) : $totals[$key]['orders'];
                 $by[$key]=[...$this->finishTotal($totals[$key]),'previous_orders'=>$partBase,
-                    'rate'=>$partBase>0 ? $this->rate($totals[$key]['orders'],$partBase) : null];
+                    'rate'=>$partBase>0 ? $this->rate($rateOrders,$partBase) : null,
+                    ...($linked ? ['pending_orders'=>$pending[$number-1][$key] ?? 0,'rate_orders'=>$rateOrders] : [])];
             }
-            $stages[]=[...$this->finishTotal($totals['total']),'key'=>$number===0 ? 'initial' : 'renewal_'.$number,'number'=>$number,
-                'previous_orders'=>$base,'rate'=>$base>0 ? $this->rate($totals['total']['orders'],$base) : null,
+            $stages[]=[...$by['total'],'key'=>$number===0 ? 'initial' : 'renewal_'.$number,'number'=>$number,
                 'paid_from'=>$current[$number]['from'] ?? null,'paid_to'=>$current[$number]['to'] ?? null,'by_channel'=>$by,
                 '_rounded'=>$current[$number]['rounded'] ?? $this->emptyRiskTotal(),
                 '_channels'=>$current[$number]['channels'] ?? array_fill_keys(['paypal','credit_card','unknown'],$this->emptyRiskTotal())];
@@ -521,6 +567,7 @@ class PaymentRenewalAnalysisService
         }
         unset($types);
         return ['calculation'=>$w['calculation'],'subscription_rate'=>$filters['first_only'] ? $this->subscriptionRate($w['from'],$w['to'],$filters) : [],
+            ...($filters['first_only'] ? ['renewal_order_total'=>$this->renewalOrderTotal($filters,$w)] : []),
             'initial_refunds'=>$initial,'initial_refunds_by_type'=>$first,'initial_delivery_by_type'=>$firstDelivery,'stages'=>$stages];
     }
 

@@ -230,6 +230,7 @@ class PaymentRenewalAnalysisTest extends TestCase
 
     public function test_linked_mode_follows_only_selected_first_orders_and_reuses_the_summary(): void
     {
+        $this->travelTo(\Carbon\Carbon::parse('2026-12-20 12:00:00 UTC'));
         $this->order(460, '2026-10-10 12:00:00', '订阅首次购买', 'credit_card', '', 'Linked', ['bill_number' => '000460']);
         $this->order(461, '2026-10-12 12:00:00', '订阅首次购买', 'credit_card', '', 'Linked');
         $this->order(462, '2026-10-09 12:00:00', '订阅复购', 'credit_card', '460', 'Linked');
@@ -279,6 +280,67 @@ class PaymentRenewalAnalysisTest extends TestCase
             $book->disconnectWorksheets();
         } finally {
             unlink($path);
+        }
+    }
+
+    public function test_linked_maturity_changes_with_the_cohort_stage_and_local_query_date(): void
+    {
+        $this->order(501, '2026-10-25 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
+        $this->order(502, '2026-10-26 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
+        $this->order(503, '2026-10-31 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
+        $this->order(504, '2026-11-24 12:00:00', '订阅复购', 'credit_card', '502', 'Maturity');
+        $this->order(505, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '503', 'Maturity');
+        $this->order(506, '2026-09-25 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
+        $this->order(507, '2026-09-26 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
+        $this->order(508, '2026-10-25 12:00:00', '订阅复购', 'credit_card', '506', 'Maturity');
+        $this->order(509, '2026-10-26 12:00:00', '订阅复购', 'credit_card', '507', 'Maturity');
+        $this->order(510, '2026-11-24 12:00:00', '订阅复购', 'credit_card', '507', 'Maturity');
+        $this->order(511, '2026-09-25 12:00:00', '订阅首次购买', 'credit_card', '', 'DueWithoutRenewal');
+        $this->order(512, '2026-10-25 12:00:00', '订阅复购', 'credit_card', '511', 'DueWithoutRenewal');
+
+        $service = app(PaymentRenewalAnalysisService::class);
+        $october = $this->filters(['renewal_date_from' => '2026-10-01', 'renewal_date_to' => '2026-10-31',
+            'renewal_store' => 'Maturity', 'renewal_mode' => 'linked']);
+        $september = [...$october, 'renewal_date_from' => '2026-09-01', 'renewal_date_to' => '2026-09-30'];
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 15:59:00 UTC'));
+
+        $dashboard = $service->dashboard($october, 'renewal');
+        $first = $dashboard['stages'][0];
+        self::assertSame([2, 1, 1, 2], [$first['previous_orders'], $first['pending_orders'], $first['rate_orders'], $first['orders']]);
+        self::assertEquals(50, $first['rate']);
+        $html = view('portals.payment.partials.renewal-analysis-section', [
+            'module' => 'renewal', 'dashboard' => $dashboard, 'errors' => new \Illuminate\Support\ViewErrorBag(),
+        ])->render();
+        self::assertStringContainsString('（不含 1 单未到期订单）', $html);
+
+        $stages = array_column($service->dashboard($september, 'renewal')['stages'], null, 'number');
+        self::assertSame([2, 0, 2], [$stages[1]['previous_orders'], $stages[1]['pending_orders'], $stages[1]['rate_orders']]);
+        self::assertSame([1, 1, 0], [$stages[2]['previous_orders'], $stages[2]['pending_orders'], $stages[2]['rate_orders']]);
+        $due = $service->dashboard([...$september, 'renewal_store' => 'DueWithoutRenewal', 'stage' => 'renewal_2'], 'renewal')['stages'][0];
+        self::assertSame([1, 0], [$due['previous_orders'], $due['rate_orders']]);
+        self::assertEquals(0, $due['rate']);
+
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 16:00:00 UTC'));
+        $second = array_column($service->dashboard($september, 'renewal')['stages'], null, 'number')[2];
+        self::assertSame([2, 0, 1], [$second['previous_orders'], $second['pending_orders'], $second['rate_orders']]);
+    }
+
+    public function test_linked_maturity_uses_february_end_and_restores_original_billing_day(): void
+    {
+        $service = app(PaymentRenewalAnalysisService::class);
+        $dueNumber = new \ReflectionMethod($service, 'dueRenewalNumber');
+        foreach ([
+            ['2026-01-29', '2026-02-27', 0],
+            ['2026-01-30', '2026-02-28', 1],
+            ['2028-01-30', '2028-02-28', 0],
+            ['2028-01-30', '2028-02-29', 1],
+            ['2026-01-30', '2026-03-29', 1],
+            ['2026-01-30', '2026-03-30', 2],
+            ['2026-01-31', '2026-02-01', 1],
+            ['2026-01-31', '2026-03-01', 2],
+        ] as [$paid, $asOf, $expected]) {
+            self::assertSame($expected, $dueNumber->invoke($service,
+                \Carbon\Carbon::parse($paid, '+08:00'), \Carbon\Carbon::parse($asOf, '+08:00')));
         }
     }
 
@@ -1023,6 +1085,37 @@ PHP;
         self::assertStringContainsString('2 ÷ 2 × 100%', $html);
         self::assertStringNotContainsString('name="initial_store"', $html);
         self::assertStringNotContainsString('name="renewal_store"', $html);
+    }
+
+    public function test_initial_order_values_reuse_first_totals_and_aggregate_all_renewal_stages_once(): void
+    {
+        $this->order(620, '2026-11-01 12:00:00', '无订阅', 'credit_card', '', 'Values', ['paid_amount_usd' => 24]);
+        $this->order(621, '2026-11-01 12:00:00', '无订阅', 'credit_card', '', 'Values', ['paid_amount_usd' => 36]);
+        $this->order(622, '2026-11-01 12:00:00', '订阅首次购买', 'paypal', '', 'Values', ['paid_amount_usd' => 60]);
+        $this->order(623, '2026-11-01 12:00:00', '订阅复购1次', 'paypal', '620', 'Values', ['paid_amount_usd' => 20]);
+        $this->order(624, '2026-11-01 12:00:00', '订阅复购4次', 'credit_card', '', 'Values', ['paid_amount_usd' => 50]);
+        $this->order(625, '2026-11-01 12:00:00', '订阅复购2次', 'credit_card', '620', 'Values', ['operator_name' => '刷单']);
+        $this->order(626, '2026-11-02 12:00:00', '订阅复购5次', 'credit_card', '620', 'Values');
+        $filters = $this->filters(['initial_store' => 'Values', 'renewal_date_from' => '2026-11-02', 'renewal_date_to' => '2026-11-02']);
+        $service = app(PaymentRenewalAnalysisService::class);
+
+        DB::enableQueryLog();
+        $dashboard = $service->dashboard($filters, 'initial');
+        $queries = DB::getQueryLog();
+        $aggregates = array_filter($queries, static fn ($query) => str_contains($query['query'], 'SUM(paid_amount_usd)'));
+        self::assertCount(1, $aggregates);
+        DB::flushQueryLog();
+        self::assertSame($dashboard['initial_order_values'], $service->dashboard($filters, 'initial')['initial_order_values']);
+        self::assertSame([], DB::getQueryLog());
+        DB::disableQueryLog();
+
+        self::assertEquals([
+            'non_subscription' => ['orders' => 2, 'revenue' => 60, 'average' => 30],
+            'subscription' => ['orders' => 1, 'revenue' => 60, 'average' => 60],
+            'renewal' => ['orders' => 2, 'revenue' => 70, 'average' => 35],
+        ], $dashboard['initial_order_values']);
+        $empty = $service->dashboard([...$filters, 'initial_store' => 'Empty'], 'initial');
+        self::assertSame([null, null, null], array_column($empty['initial_order_values'], 'average'));
     }
 
     public function test_first_request_and_fragments_only_query_the_requested_section(): void
