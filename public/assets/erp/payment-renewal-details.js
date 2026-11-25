@@ -245,10 +245,8 @@
         var sectionMessages = JSON.parse(page.dataset.renewalSectionMessages);
         var renewalStageKeys = ['stage', 'stage_page'];
         var pending = new Map();
-        var placeholder = page.querySelector('[data-renewal-placeholder]');
         var refreshIcon = document.querySelector('.main-header .navbar .fa-refresh');
         var refreshLink = refreshIcon && refreshIcon.closest('a');
-        var observer;
 
         function belongsTo(module, name) {
             return name.startsWith(module + '_') || (module === 'renewal' && renewalStageKeys.includes(name));
@@ -270,6 +268,7 @@
                 var module = link.closest('[data-renewal-region]').dataset.renewalRegion;
                 var url = new URL(link.href);
                 var params = withSection(module, url.searchParams);
+                if (url.searchParams.has('load_initial')) params.set('load_initial', '1');
                 if (url.searchParams.has('load_renewal')) params.set('load_renewal', '1');
                 url.search = params;
                 link.href = url.href;
@@ -301,8 +300,6 @@
             var previous = pending.get(module);
             if (previous && article.hasAttribute('data-renewal-placeholder')) return;
             if (previous) previous.abort();
-            if (observer && module === 'renewal') observer.disconnect();
-            if (observer && module === 'initial') observer.unobserve(placeholder);
             var request = new AbortController();
             pending.set(module, request);
             var url = new URL(page.dataset.renewalUrl, window.location.href);
@@ -352,9 +349,6 @@
             } finally {
                 if (pending.get(module) === request) {
                     pending.delete(module);
-                    if (observer && module === 'initial' && placeholder.isConnected && !placeholder.dataset.renewalState) {
-                        observer.observe(placeholder);
-                    }
                 }
             }
         }
@@ -379,14 +373,8 @@
             refresh(region, withSection(region.dataset.renewalRegion, new URL(link.href).searchParams), !link.closest('[data-renewal-placeholder]'));
         });
         window.addEventListener('popstate', function () { window.location.reload(); });
-        if (placeholder && 'IntersectionObserver' in window) {
-            observer = new IntersectionObserver(function (entries) {
-                if (pending.has('initial')) return;
-                if (entries.some(function (entry) { return entry.isIntersecting; })) {
-                    refresh(placeholder.closest('[data-renewal-region]'), applied, false);
-                }
-            }, { rootMargin: '180px' });
-            observer.observe(placeholder);
-        }
+        page.querySelectorAll('[data-renewal-region] > [data-renewal-placeholder]').forEach(function (placeholder) {
+            refresh(placeholder.closest('[data-renewal-region]'), applied, false);
+        });
     }
 }());

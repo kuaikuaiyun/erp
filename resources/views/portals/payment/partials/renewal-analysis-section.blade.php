@@ -37,8 +37,9 @@
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription" data-renewal-section="initial" data-renewal-applied="{{ $appliedFilters }}">
         <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
         <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
-        @php $moduleReset = array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone'])); @endphp
+        @php $moduleReset = [...array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone'])), 'load_initial'=>1]; @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="payment-renewal-filter" data-renewal-module="initial">
+            <input type="hidden" name="load_initial" value="1">
             @foreach($filters as $name=>$value)
                 @if(str_starts_with($name, 'renewal_') || in_array($name,['stage','stage_page'],true))<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endif
             @endforeach

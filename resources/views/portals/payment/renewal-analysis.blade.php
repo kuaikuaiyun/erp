@@ -10,7 +10,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-6">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-7">
 @endpush
 
 @section('content')
@@ -22,7 +22,17 @@
     <header class="payment-page-heading"><div><h1>{{ __($t.'.page_title') }}</h1><p>{{ $text('subtitle') }}</p></div></header>
     <p data-renewal-export-feedback role="status" aria-live="polite" hidden></p>
     <div data-renewal-region="initial">
-        @include('portals.payment.partials.renewal-analysis-section', ['module' => 'initial'])
+        @if (isset($dashboard['initial_calculation']))
+            @include('portals.payment.partials.renewal-analysis-section', ['module' => 'initial'])
+        @else
+            <article class="payment-panel payment-subscription-block payment-renewal-initial-placeholder" data-renewal-placeholder>
+                <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
+                <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
+                @include('portals.payment.partials.renewal-section-status')
+                @include('portals.payment.partials.renewal-table-skeleton')
+                <a class="btn btn-default" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_initial'=>1]) }}">{{ __('payment-renewal.load_initial_section') }}</a>
+            </article>
+        @endif
     </div>
     <div id="renewal-analysis-renewal" data-renewal-region="renewal">
         @if (isset($dashboard['stages']))
@@ -52,6 +62,6 @@
 @endsection
 
 @push('scripts')
-<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-3"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-5"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 @endpush

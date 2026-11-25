@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'load_initial_section' => '加载首单分析',
     'load_section' => '加载续费分析',
     'section_loading' => '正在加载分析数据…',
     'section_error' => '分析数据加载失败，请重试。',

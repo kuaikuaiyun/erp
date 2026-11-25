@@ -481,9 +481,16 @@ class PaymentPortalController extends Controller
             ])->header('Cache-Control', 'private, no-store');
         }
 
+        $dashboard = ['filters' => $filters];
+        if ($request->boolean('load_renewal')) {
+            $dashboard = $this->renewalAnalysis->dashboard($filters);
+        } elseif ($request->boolean('load_initial')) {
+            $dashboard = $this->renewalAnalysis->dashboard($filters, 'initial');
+        }
+
         return response()->view('portals.payment.renewal-analysis', [
             ...$this->viewContext($context),
-            'dashboard' => $this->renewalAnalysis->dashboard($filters, $request->boolean('load_renewal') ? null : 'initial'),
+            'dashboard' => $dashboard,
         ]);
     }
 

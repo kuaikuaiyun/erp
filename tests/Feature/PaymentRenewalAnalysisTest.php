@@ -991,13 +991,12 @@ PHP;
 
         DB::enableQueryLog();
         $this->get($url(['initial_store' => 'Test', 'renewal_store' => 'Test']))->assertOk()
-            ->assertViewHas('dashboard', fn (array $data) => $data['initial_refunds']['total']['orders'] === 4)
-            ->assertSee('data-renewal-section="initial"', false)
-            ->assertSee('data-renewal-placeholder', false)
+            ->assertSee('payment-renewal-initial-placeholder', false)
+            ->assertSee('payment-renewal-skeleton', false)
+            ->assertDontSee('data-renewal-section="initial"', false)
             ->assertDontSee('data-renewal-section="renewal"', false);
         $queries = array_column(DB::getQueryLog(), 'query');
-        self::assertStringNotContainsString('logistics_order_payment_references', implode("\n", $queries));
-        self::assertStringNotContainsString('"transaction_id" in (', implode("\n", $queries));
+        self::assertStringNotContainsString('logistics_orders', implode("\n", $queries));
         DB::flushQueryLog();
 
         $this->get($url(['section' => 'renewal', 'renewal_store' => 'Other']))->assertOk()
@@ -1009,9 +1008,13 @@ PHP;
         self::assertStringNotContainsString('无订阅', $queries);
         DB::disableQueryLog();
 
-        $this->get($url(['section' => 'initial']))->assertOk()
+        $this->get($url(['section' => 'initial', 'initial_store' => 'Test']))->assertOk()
+            ->assertViewHas('dashboard', fn (array $data) => $data['initial_refunds']['total']['orders'] === 4)
             ->assertSee('data-renewal-section="initial"', false)
             ->assertDontSee('data-renewal-placeholder', false)
+            ->assertDontSee('data-renewal-section="renewal"', false);
+        $this->get($url(['load_initial' => 1]))->assertOk()
+            ->assertSee('data-renewal-section="initial"', false)
             ->assertDontSee('data-renewal-section="renewal"', false);
         $this->get($url(['load_renewal' => 1]))->assertOk()
             ->assertSee('data-renewal-section="initial"', false)
