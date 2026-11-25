@@ -49,9 +49,9 @@
             @endforeach
         </form>
         @include('portals.payment.partials.renewal-section-status')
-        <div class="payment-renewal-initial-results">
+        <div class="payment-renewal-section-results">
         @include('portals.payment.partials.renewal-table-skeleton')
-        <div class="payment-renewal-initial-data">
+        <div class="payment-renewal-section-data">
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['initial_date_from'],'to'=>$filters['initial_date_to'],'timezone'=>$firstCalc['timezone'],'generated'=>$firstCalc['generated_at']]) }}</p>
 
         <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
@@ -137,7 +137,6 @@
     <article class="payment-panel payment-renewal-funnel" data-payment-analysis-section="renewals" data-renewal-section="renewal" data-renewal-applied="{{ $appliedFilters }}">
         <h2><span class="payment-section-number">02</span>{{ $text('renewal_title') }}</h2>
         <p class="payment-section-hint">{{ $text('renewal_hint') }}</p>
-        @include('portals.payment.partials.renewal-section-status')
         @php $moduleReset = array_diff_key($filters, array_flip(['renewal_date_from','renewal_date_to','renewal_timezone','stage','stage_page'])); @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}#renewal-analysis-renewal" class="payment-renewal-filter" data-renewal-module="renewal">
             <input type="hidden" name="load_renewal" value="1">
@@ -151,6 +150,10 @@
             @foreach(['renewal_date_from','renewal_date_to','renewal_timezone'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
             @endforeach
         </form>
+        @include('portals.payment.partials.renewal-section-status')
+        <div class="payment-renewal-section-results">
+        @include('portals.payment.partials.renewal-table-skeleton')
+        <div class="payment-renewal-section-data">
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}</p>
 
         <p class="payment-renewal-scope-note">{{ $text('stage_note') }}</p>
@@ -223,5 +226,7 @@
                 $audit('time',['timezone'=>$calc['timezone'],'generated'=>$calc['generated_at'],'expires'=>$calc['expires_at']]),
                 $audit('source_scope'),$text('channel_rule'),$audit('refund_rule'),$riskTime,$audit('rounding')]) }}
         </details>
+        </div>
+        </div>
     </article>
 @endif

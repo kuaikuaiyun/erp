@@ -1306,7 +1306,7 @@
 [data-renewal-state="error"] .payment-renewal-status-icon::before { content: "!"; }
 .payment-renewal-skeleton { display: none; margin: 0 18px 16px; border: 1px solid #e4edf4; border-radius: 8px; overflow: hidden; }
 [data-renewal-state="loading"] .payment-renewal-skeleton { display: grid; }
-[data-renewal-state="loading"] .payment-renewal-initial-data { display: none; }
+[data-renewal-state="loading"] .payment-renewal-section-data { display: none; }
 .payment-renewal-skeleton > div { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 10px; padding: 12px; }
 .payment-renewal-skeleton > div:first-child { background: #eef5fa; }
 .payment-renewal-skeleton > div + div { border-top: 1px solid #edf2f6; }
