@@ -74,6 +74,21 @@ class DomainStoreController extends Controller
         });
         $canManageStoreOwnership = $this->authorization->canAssignStoreOwners($context['user']);
         $canConfigureStoreOwnership = $this->authorization->canManageAllDomainStores($context['user']);
+        $today = now('Asia/Shanghai')->toDateString();
+        $domainRenewalReminderStores = $this->scopedStoreQuery($context['user'])
+            ->with([
+                'ownerUser:id,name,username,employment_status,resigned_at',
+                'ownerHistories' => fn ($query) => $query
+                    ->select(['id', 'assistant_domain_store_id', 'owner_name_snapshot', 'effective_from', 'effective_to'])
+                    ->whereNull('effective_to')
+                    ->orderByDesc('effective_from'),
+            ])
+            ->whereNotNull('domain_expires_at')
+            ->whereBetween('domain_expires_at', [$today, now('Asia/Shanghai')->addDays(30)->toDateString()])
+            ->where('domain_renewal_reminder_exempt', false)
+            ->orderBy('domain_expires_at')
+            ->orderBy('domain')
+            ->get();
         $assistantChildDepartments = $this->authorization->assistantChildDepartments();
         $operationScopeMap = $canConfigureStoreOwnership
             ? $this->storeOwners->scopeMap()
@@ -84,6 +99,7 @@ class DomainStoreController extends Controller
             'stores' => $stores,
             'filters' => $filters,
             'canManage' => $this->authorization->canManageDomainStores($context['user']),
+            'domainRenewalReminderStores' => $domainRenewalReminderStores,
             'canManageDepartmentAccess' => $this->authorization->canManageAllDomainStores($context['user']),
             'canManageStoreOwnership' => $canManageStoreOwnership,
             'canConfigureStoreOwnership' => $canConfigureStoreOwnership,
@@ -155,6 +171,34 @@ class DomainStoreController extends Controller
             'label' => $labels[$status] ?? $labels[AssistantEmailPurchaseSyncService::STATUS_UNSYNCED],
             'purchased' => $status === AssistantEmailPurchaseSyncService::STATUS_CURRENT,
         ]);
+    }
+
+    public function updateDomainRenewalReminder(Request $request, AssistantDomainStore $domainStore): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        $this->authorization->ensureCanManageDomainStores($context['user']);
+        abort_unless($this->scopedStoreQuery($context['user'])->whereKey($domainStore->getKey())->exists(), 403);
+        $data = $request->validate([
+            'exempt' => ['required', 'boolean'],
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+        $exempt = (bool) $data['exempt'];
+        $reason = trim((string) ($data['reason'] ?? ''));
+
+        $domainStore->forceFill([
+            'domain_renewal_reminder_exempt' => $exempt,
+            'domain_renewal_reminder_exempt_reason' => $exempt && $reason !== '' ? $reason : null,
+            'domain_renewal_reminder_exempted_by' => $exempt ? $context['user']->getKey() : null,
+            'domain_renewal_reminder_exempted_at' => $exempt ? now() : null,
+        ])->save();
+
+        return back()->with('success', $exempt
+            ? '该店铺域名已设置为无需续费，并已从到期提醒中隐藏。'
+            : '已恢复该店铺的域名续费提醒。');
     }
 
     public function export(Request $request): Response
@@ -1067,6 +1111,10 @@ class DomainStoreController extends Controller
             'domain' => $this->filterText($request, 'domain'),
             'domain_expires_from' => $this->filterDate($request, 'domain_expires_from'),
             'domain_expires_to' => $this->filterDate($request, 'domain_expires_to'),
+            'domain_renewal_status' => $this->filterEnum($request, 'domain_renewal_status', [
+                'expiring' => 'expiring',
+                'exempt' => 'exempt',
+            ]),
             'shop_status' => $shopStatus,
             'domain_check_status' => $domainCheckStatus,
             'department_id' => $this->filterPositiveInteger($request, 'department_id'),
@@ -1160,6 +1208,14 @@ class DomainStoreController extends Controller
             $query->whereNotNull('owner_user_id');
         } elseif ($filters['owner_assignment'] === 'unassigned') {
             $query->whereNull('owner_user_id');
+        }
+
+        if ($filters['domain_renewal_status'] === 'expiring') {
+            $query->whereNotNull('domain_expires_at')
+                ->whereBetween('domain_expires_at', [now('Asia/Shanghai')->toDateString(), now('Asia/Shanghai')->addDays(30)->toDateString()])
+                ->where('domain_renewal_reminder_exempt', false);
+        } elseif ($filters['domain_renewal_status'] === 'exempt') {
+            $query->where('domain_renewal_reminder_exempt', true);
         }
 
         foreach ([

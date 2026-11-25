@@ -52,6 +52,8 @@ class FashionStoreAnalyticsController extends Controller
                 'fashion_metrics.last_synced_at as analytics_last_synced_at',
             ]);
 
+        $emailReminderStores = $this->emailPurchaseReminderStores($context['user'], $project);
+
         $summaryRow = (clone $query)->reorder()->select([
             DB::raw('COUNT(assistant_domain_stores.id) stores_count'),
             DB::raw('COALESCE(SUM(fashion_metrics.orders_count),0) orders_count'),
@@ -80,12 +82,14 @@ class FashionStoreAnalyticsController extends Controller
         return view('portals.assistant.fashion-store-analytics.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'stores' => $stores, 'filters' => $filters,
+            'emailReminderStores' => $emailReminderStores,
             'reportProject' => $project,
             'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
             'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
                 'active_stores_count' => (int) ($summaryRow?->active_stores_count ?? 0),
+                'email_purchase_reminder_count' => $emailReminderStores->count(),
                 'orders_count' => $ordersCount, 'total_sales' => $totalSales,
                 'average_order_value' => $ordersCount > 0 ? $totalSales / $ordersCount : 0],
         ]);
@@ -153,6 +157,35 @@ class FashionStoreAnalyticsController extends Controller
             ->selectRaw('assistant_domain_store_id, COUNT(*) orders_count, COALESCE(SUM(total_amount),0) total_sales')
             ->selectRaw('COALESCE(AVG(total_amount),0) average_order_value, MAX(paid_at_utc) last_paid_at, MAX(source_synced_at) last_synced_at')
             ->groupBy('assistant_domain_store_id');
+    }
+
+    /** @param array<string,mixed> $project */
+    private function emailPurchaseReminderStores(AdminUser $user, array $project)
+    {
+        $metrics = FashionLogisticsOrder::query()
+            ->whereNotNull('paid_at_utc')
+            ->where(function (Builder $paid): void {
+                $paid->whereNotIn(DB::raw('LOWER(TRIM(source_platform))'), ['nbc', 'shopyy'])
+                    ->orWhere('payment_status', '230');
+            })
+            ->selectRaw('assistant_domain_store_id, COUNT(*) orders_count, COALESCE(SUM(total_amount),0) total_sales')
+            ->groupBy('assistant_domain_store_id');
+
+        return $this->authorization->scopeDomainStores(AssistantDomainStore::query(), $user)
+            ->with('ownerUser:id,name,username')
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($project))
+            ->where('assistant_domain_stores.email_purchased', false)
+            ->where('assistant_domain_stores.email_purchase_reminder_exempt', false)
+            ->joinSub($metrics, 'email_reminder_metrics', fn ($join) => $join
+                ->on('assistant_domain_stores.id', '=', 'email_reminder_metrics.assistant_domain_store_id'))
+            ->select('assistant_domain_stores.*')
+            ->addSelect([
+                'email_reminder_metrics.orders_count as analytics_orders_count',
+                'email_reminder_metrics.total_sales as analytics_total_sales',
+            ])
+            ->orderBy('assistant_domain_stores.shop_name')
+            ->orderBy('assistant_domain_stores.domain')
+            ->get();
     }
 
     /** @return array<string,mixed> */
