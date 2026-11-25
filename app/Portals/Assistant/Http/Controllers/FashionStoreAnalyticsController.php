@@ -52,11 +52,20 @@ class FashionStoreAnalyticsController extends Controller
                 'fashion_metrics.last_synced_at as analytics_last_synced_at',
             ]);
 
+        $emailReminderStores = (clone $query)
+            ->whereRaw('COALESCE(fashion_metrics.orders_count, 0) > 0')
+            ->where('assistant_domain_stores.email_purchased', false)
+            ->where('assistant_domain_stores.email_purchase_reminder_exempt', false)
+            ->orderBy('assistant_domain_stores.shop_name')
+            ->orderBy('assistant_domain_stores.domain')
+            ->get();
+
         $summaryRow = (clone $query)->reorder()->select([
             DB::raw('COUNT(assistant_domain_stores.id) stores_count'),
             DB::raw('COALESCE(SUM(fashion_metrics.orders_count),0) orders_count'),
             DB::raw('COALESCE(SUM(fashion_metrics.total_sales),0) total_sales'),
             DB::raw('SUM(CASE WHEN COALESCE(fashion_metrics.orders_count,0)>0 THEN 1 ELSE 0 END) active_stores_count'),
+            DB::raw('SUM(CASE WHEN COALESCE(fashion_metrics.orders_count,0)>0 AND assistant_domain_stores.email_purchased=0 AND assistant_domain_stores.email_purchase_reminder_exempt=0 THEN 1 ELSE 0 END) email_purchase_reminder_count'),
         ])
             ->first();
         $sortColumns = [
@@ -80,12 +89,14 @@ class FashionStoreAnalyticsController extends Controller
         return view('portals.assistant.fashion-store-analytics.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'stores' => $stores, 'filters' => $filters,
+            'emailReminderStores' => $emailReminderStores,
             'reportProject' => $project,
             'reportProjectLabel' => OperationProjectCatalog::shortName($projectCode),
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
             'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
                 'active_stores_count' => (int) ($summaryRow?->active_stores_count ?? 0),
+                'email_purchase_reminder_count' => (int) ($summaryRow?->email_purchase_reminder_count ?? 0),
                 'orders_count' => $ordersCount, 'total_sales' => $totalSales,
                 'average_order_value' => $ordersCount > 0 ? $totalSales / $ordersCount : 0],
         ]);

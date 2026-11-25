@@ -33,6 +33,7 @@ use App\Portals\Assistant\Http\Controllers\OperationDashboardDepartmentScopeCont
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
+use App\Portals\Assistant\Http\Controllers\StoreEmailPurchaseReminderController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Portals\Fashion\Http\Controllers\AppLovinSpendController as FashionAppLovinSpendController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
@@ -219,6 +220,9 @@ Route::patch('/domain-stores/{domainStore}/owner-histories/{ownerHistory}/effect
 Route::get('/shopify-analytics', [ShopifyAnalyticsController::class, 'index'])->name('assistant.shopify-analytics.index');
 Route::get('/assistant/fashion-store-analytics', [FashionStoreAnalyticsController::class, 'index'])->name('assistant.fashion-store-analytics.index');
 Route::get('/assistant/fashion-store-analytics/export', [FashionStoreAnalyticsController::class, 'export'])->name('assistant.fashion-store-analytics.export');
+Route::patch('/assistant/store-analytics/{domainStore}/email-purchase-reminder', StoreEmailPurchaseReminderController::class)
+    ->whereNumber('domainStore')
+    ->name('assistant.store-analytics.email-purchase-reminder.update');
 Route::get('/shopify-analytics/export-orders', [ShopifyAnalyticsController::class, 'exportOrders'])->name('assistant.shopify-analytics.export-orders');
 Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::class, 'refreshBatch'])->name('assistant.shopify-analytics.refresh-batch');
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');

@@ -49,6 +49,13 @@ class ShopifyAnalyticsController extends Controller
         $baseQuery = $this->filteredVisibleShopifyStores($context['user'], $filters);
         $periods = $this->periodQuery($filters);
         $summary = $this->summary(clone $baseQuery, clone $periods);
+        $emailReminderStores = $this->withPeriod(clone $baseQuery, clone $periods)
+            ->whereRaw('COALESCE(analytics_metrics.orders_count, 0) > 0')
+            ->where('assistant_domain_stores.email_purchased', false)
+            ->where('assistant_domain_stores.email_purchase_reminder_exempt', false)
+            ->orderBy('assistant_domain_stores.shop_name')
+            ->orderBy('assistant_domain_stores.domain')
+            ->get();
         $storesQuery = $this->withPeriod(clone $baseQuery, clone $periods);
         $this->applySorting($storesQuery, $filters);
         $stores = $storesQuery
@@ -101,6 +108,7 @@ class ShopifyAnalyticsController extends Controller
         return view('portals.assistant.shopify-analytics.index', [
             ...$this->viewContext($context),
             'stores' => $stores,
+            'emailReminderStores' => $emailReminderStores,
             'filters' => $filters,
             'timezoneOptions' => $this->timezoneOptions(),
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
@@ -637,6 +645,7 @@ class ShopifyAnalyticsController extends Controller
             ->selectRaw('COALESCE(SUM(analytics_metrics.subscribed_total_sales), 0) as subscribed_total_sales')
             ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_orders_count), 0) as recurring_orders_count')
             ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_total_sales), 0) as recurring_total_sales')
+            ->selectRaw('SUM(CASE WHEN COALESCE(analytics_metrics.orders_count, 0) > 0 AND assistant_domain_stores.email_purchased = 0 AND assistant_domain_stores.email_purchase_reminder_exempt = 0 THEN 1 ELSE 0 END) as email_purchase_reminder_count')
             ->first();
 
         return [
@@ -653,6 +662,7 @@ class ShopifyAnalyticsController extends Controller
             'subscribed_total_sales' => (float) ($row?->subscribed_total_sales ?? 0),
             'recurring_orders_count' => (int) ($row?->recurring_orders_count ?? 0),
             'recurring_total_sales' => (float) ($row?->recurring_total_sales ?? 0),
+            'email_purchase_reminder_count' => (int) ($row?->email_purchase_reminder_count ?? 0),
         ];
     }
 

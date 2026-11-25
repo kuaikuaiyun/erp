@@ -67,6 +67,9 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261023-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
     <link rel="stylesheet" href="{{ asset('css/assistant-store-analytics-template-controls.css') }}?v=20261124-1">
+    <style>
+        .assistant-email-reminder-alert{background:#fff8e5;border:1px solid #f2cf79;border-left:4px solid #e6a51f;border-radius:7px;color:#74520d;margin-bottom:14px;padding:11px 14px}.assistant-email-reminder-alert summary{align-items:center;cursor:pointer;display:flex;gap:10px;list-style:none}.assistant-email-reminder-alert summary::-webkit-details-marker{display:none}.assistant-email-reminder-alert summary strong{font-size:15px}.assistant-email-reminder-alert summary .fa-angle-down{margin-left:auto;transition:transform .2s}.assistant-email-reminder-alert[open] summary .fa-angle-down{transform:rotate(180deg)}.assistant-email-reminder-list{background:#fff;border:1px solid #efdda9;border-radius:6px;margin-top:11px;max-height:360px;overflow:auto}.assistant-email-reminder-list table{margin:0}.assistant-email-reminder-list th{background:#fffaf0;color:#725514;position:sticky;top:0;z-index:1}.assistant-email-reminder-list td,.assistant-email-reminder-list th{padding:8px 10px!important;vertical-align:middle!important}.assistant-email-reminder-status{display:inline-block;border-radius:12px;font-size:12px;font-weight:600;padding:4px 9px;white-space:nowrap}.assistant-email-reminder-status.is-purchased{background:#dff5ea;color:#178455}.assistant-email-reminder-status.is-exempt{background:#e8eef5;color:#5a6e82}.assistant-email-reminder-status.is-warning{background:#fff0cf;color:#b16b00}.assistant-email-reminder-status.is-idle{background:#f1f3f5;color:#87939e}.assistant-email-reminder-form{display:inline-block;margin-left:4px}
+    </style>
 @endpush
 
 @section('content')
@@ -258,6 +261,17 @@
             </div>
         @endif
 
+        @if (($summary['email_purchase_reminder_count'] ?? 0) > 0)
+            <details class="assistant-email-reminder-alert">
+                <summary><i class="fa fa-envelope-o fa-lg"></i><div><strong>{{ $number($summary['email_purchase_reminder_count']) }} 家有出单店铺尚未购买邮箱</strong><div>点击查看具体店铺；确认无需购买的店铺可直接关闭提醒。</div></div><i class="fa fa-angle-down"></i></summary>
+                <div class="assistant-email-reminder-list table-responsive"><table class="table table-condensed"><thead><tr><th>店铺</th><th>域名</th><th>邮箱购买</th><th>归属人</th><th>订单数</th><th>营业额</th><th>操作</th></tr></thead><tbody>
+                @foreach($emailReminderStores as $reminderStore)
+                    <tr><td><strong>{{ $reminderStore->shop_name ?: '—' }}</strong></td><td>{{ $reminderStore->domain ?: '—' }}</td><td><span class="assistant-email-reminder-status is-warning">未购买</span></td><td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '未归属' }}</td><td>{{ $number($reminderStore->analytics_orders_count) }}</td><td>{{ $usd }}{{ $money($reminderStore->analytics_total_sales) }}</td><td><form class="assistant-email-reminder-form" method="post" action="{{ route('assistant.store-analytics.email-purchase-reminder.update',$reminderStore) }}" data-email-reminder-form data-exempt="1">@csrf @method('PATCH')<input type="hidden" name="exempt" value="1"><input type="hidden" name="reason" value=""><button class="btn btn-xs btn-default" type="submit">无需购买</button></form></td></tr>
+                @endforeach
+                </tbody></table></div>
+            </details>
+        @endif
+
         <div id="assistant-shopify-analytics-list" class="box box-default assistant-shopify-list-box" aria-live="polite">
             <div class="assistant-shopify-batch-toolbar">
                 <button type="button" class="btn btn-default btn-sm" data-shopify-select-page>
@@ -333,6 +347,7 @@
                             $totalSales = $hasReferenceRate && $metric?->total_sales !== null
                                 ? $usd.$money($metric->total_sales)
                                 : null;
+                            $orders = (int) ($metric?->orders_count ?? 0);
                         @endphp
                         <tr class="{{ $isInactive ? 'is-inactive' : '' }}">
                             <td class="assistant-shopify-selection-column">
@@ -340,7 +355,17 @@
                             </td>
                             <td class="assistant-shopify-store-cell"><strong>{{ $store->shop_name }}</strong></td>
                             <td class="assistant-shopify-domain-cell" title="{{ $store->domain }}">{{ $store->domain }}</td>
-                            <td><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? $t('common.yes') : $t('common.no') }}</span></td>
+                            <td>
+                                @if ($store->email_purchased)
+                                    <span class="assistant-email-reminder-status is-purchased">已购买</span>
+                                @elseif ($store->email_purchase_reminder_exempt)
+                                    <span class="assistant-email-reminder-status is-exempt" title="{{ $store->email_purchase_reminder_exempt_reason }}">无需购买</span>
+                                @elseif ($orders > 0)
+                                    <span class="assistant-email-reminder-status is-warning"><i class="fa fa-exclamation-circle"></i> 有出单·未购买</span>
+                                @else
+                                    <span class="assistant-email-reminder-status is-idle">未购买·暂无订单</span>
+                                @endif
+                            </td>
                             <td class="assistant-shopify-summary-list-cell">
                                 @if (!$hasSnapshot)
                                     <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
@@ -414,6 +439,15 @@
                                         <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
                                     </form>
                                     <button type="submit" form="{{ $singleRefreshFormId }}" class="btn btn-primary btn-xs"><i class="fa fa-refresh"></i> {{ $t('actions.refresh') }}</button>
+                                @endif
+                                @if (! $store->email_purchased)
+                                    <form class="assistant-email-reminder-form" method="post" action="{{ route('assistant.store-analytics.email-purchase-reminder.update', $store) }}" data-email-reminder-form data-exempt="{{ $store->email_purchase_reminder_exempt ? '0' : '1' }}">
+                                        @csrf
+                                        @method('PATCH')
+                                        <input type="hidden" name="exempt" value="{{ $store->email_purchase_reminder_exempt ? '0' : '1' }}">
+                                        <input type="hidden" name="reason" value="">
+                                        <button type="submit" class="btn btn-xs {{ $store->email_purchase_reminder_exempt ? 'btn-warning' : 'btn-default' }}">{{ $store->email_purchase_reminder_exempt ? '恢复提醒' : '无需购买' }}</button>
+                                    </form>
                                 @endif
                             </td>
                         </tr>
@@ -520,6 +554,9 @@
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261012-3.js?v=20261012-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>
+    <script>
+        document.querySelectorAll('[data-email-reminder-form]').forEach(function(form){form.addEventListener('submit',function(event){if(form.dataset.exempt!=='1'||form.dataset.confirmed==='1')return;event.preventDefault();var reason=window.prompt('可填写无需购买邮箱的原因（选填）：','');if(reason===null)return;form.querySelector('[name="reason"]').value=reason.trim();form.dataset.confirmed='1';form.submit();});});
+    </script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({type: 'success', title: @json($t('messages.success_title')), message: @json(session('success'))});
