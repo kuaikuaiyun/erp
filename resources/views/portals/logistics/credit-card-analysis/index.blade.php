@@ -88,7 +88,7 @@
                         $shipped = $order ? in_array($order->logistics_status,[\App\Models\LogisticsOrder::LOGISTICS_SHIPPED,\App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT,\App\Models\LogisticsOrder::LOGISTICS_DELIVERED],true) : null;
                         $category = $analysis->category($record->refund_reason);
                     @endphp
-                    <tr class="{{ $record->first_handled_at ? 'ca-record-handled' : '' }}">
+                    <tr data-logistics-handling-row="{{ $record->id }}" class="{{ $record->first_handled_at ? 'ca-record-handled' : '' }}">
                         <td class="ca-dispute-select-cell"><input class="ca-record-check" type="checkbox" value="{{ $record->id }}" aria-label="{{ $t('select_record',['reference'=>$reference]) }}"></td>
                         <td><div class="ca-block"><b>{{ $t('fields.store_id') }}：</b>{{ $text($order?->store_name) }}<br><b>{{ $t('fields.collection_account') }}：</b>{{ $text($order?->collection_account) }}<br>@foreach(['refund_reference','bill_number'] as $key)<b>{{ $t('fields.'.$key) }}：</b><span class="ca-mono">{{ $text($record->$key) }}</span>@if(filled($record->$key))<button class="ca-copy-button" type="button" data-copy-value="{{ $record->$key }}" title="{{ $t('copy') }}" aria-label="{{ $t('copy').' '.$t('fields.'.$key) }}"><i class="fa fa-copy"></i></button>@endif<br>@endforeach</div></td>
                         <td><div class="ca-block"><b>{{ $t('fields.customer_email') }}：</b>{{ $text($order?->buyer_email) }}<br><b>{{ $t('fields.shopify_order_number') }}：</b>{{ $text($order?->shopify_order_number) }}<br><b>{{ $t('fields.date') }}：</b>{{ $date($record->occurred_at) }}<br><b>{{ $t('fields.order_date') }}：</b>{{ $date($order?->order_created_at) }}<br><b>{{ $t('fields.matched') }}：</b>{{ $order ? $t('matched') : $t('unmatched') }}</div></td>
@@ -98,7 +98,7 @@
                         <td><div class="ca-block"><b>{{ $t('current_logistics') }}：</b>{{ $text($order?->logistics_status) }}<br><b>{{ $t('fields.shipped') }}：</b>{{ $order ? $flag($shipped) : $t('unmatched') }}<br><b>{{ $t('fields.tracking_number') }}：</b><span class="ca-mono">{{ $text($order?->tracking_number) }}</span></div></td>
                         <td><div class="ca-block ca-product-block"><b>{{ $t('fields.tongtu_order_number') }}：</b>{{ $text($order?->tongtu_order_number) }}<br><b>{{ $t('fields.sku') }}：</b>{{ $text($items->pluck('tongtu_sku')->filter()->unique()->implode(' | ')) }}<br><b>{{ $t('fields.product_name') }}：</b>{{ $text($items->map(fn ($item) => $item->tongtu_product_name ?: $item->product_title)->filter()->unique()->implode(' | ')) }}</div></td>
                         <td><div class="ca-block"><b>{{ $t('fields.handled') }}：</b>{{ $record->first_handled_at ? $t('handled') : $t('unhandled') }}<br><b>{{ $t('fields.first_handled_at') }}：</b>{{ $date($record->first_handled_at) }}<br><b>{{ $t('fields.first_handled_by') }}：</b>{{ $text($record->first_handled_by_name) }}<hr><b>{{ $t('fields.latest_note') }}：</b><div class="ca-latest-note">{{ $text($latestNote) }}</div>@if($record->operations->isNotEmpty())<button class="ca-operation-history-link" type="button" data-toggle="modal" data-target="#ca-history-{{ $record->id }}">{{ $t('history') }} ({{ $record->operations->count() }})</button>@endif</div></td>
-                        <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#ca-handle-{{ $record->id }}"><i class="fa fa-pencil"></i> {{ $t('handle') }}</button></td>
+                        <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#ca-handle-{{ $record->id }}" data-logistics-handling-open><i class="fa fa-pencil"></i> {{ $t('handle') }}</button></td>
                     </tr>
                 @empty<tr><td colspan="10" class="text-center ca-empty">{{ $t('empty') }}</td></tr>@endforelse</tbody>
             </table>
@@ -167,7 +167,7 @@
 
     @foreach($records as $record)
         @php $reference = $record->refund_reference ?: '#'.$record->id; $oldHandle = (string)old('handling_id') === (string)$record->id; @endphp
-        <div class="modal fade" id="ca-handle-{{ $record->id }}" tabindex="-1" role="dialog" aria-labelledby="ca-handle-title-{{ $record->id }}"><div class="modal-dialog" role="document"><form class="modal-content ca-handle-form" method="post" action="{{ route('logistics.credit-card-analysis.handle',$record) }}">@csrf
+        <div class="modal fade" id="ca-handle-{{ $record->id }}" tabindex="-1" role="dialog" aria-labelledby="ca-handle-title-{{ $record->id }}"><div class="modal-dialog" role="document"><form class="modal-content ca-handle-form" method="post" action="{{ route('logistics.credit-card-analysis.handle',$record) }}" data-logistics-handling-form="{{ $record->id }}">@csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"><input type="hidden" name="handling_id" value="{{ $record->id }}">
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="ca-handle-title-{{ $record->id }}">{{ $t('handle_title',['reference'=>$reference]) }}</h4></div>
             <div class="modal-body"><p class="text-muted">{{ $t('handling_hint') }}</p>
@@ -189,7 +189,7 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ $origin }}/assets/erp/logistics-list-scrollbars.js?v=4" defer></script>
+    <script src="{{ $origin }}/assets/erp/logistics-list-scrollbars.js?v=5" defer></script>
 <script src="{{ $origin }}/assets/erp/shopify-orders-filters.js?v=7" defer></script>
 <script src="{{ $origin }}/assets/erp/credit-card-analysis.js?v=20261123-1"></script>
 @endpush

@@ -79,7 +79,7 @@
                             $rawPayload = json_decode((string) $dispute->raw_payload, true);
                             $buyerMessages = collect(is_array($rawPayload) ? ($rawPayload['messages'] ?? []) : [])->filter(fn ($message) => is_array($message) && strtoupper(trim((string) ($message['posted_by'] ?? ''))) === 'BUYER' && filled($message['content'] ?? null))->sortBy('time_posted')->values();
                         @endphp
-                        <tr class="{{ strtoupper((string) $dispute->status) === 'RESOLVED' ? 'pd-dispute-resolved' : '' }}">
+                        <tr data-logistics-handling-row="{{ $dispute->id }}" class="{{ strtoupper((string) $dispute->status) === 'RESOLVED' ? 'pd-dispute-resolved' : '' }}">
                             <td class="pd-dispute-select-cell"><input class="paypal-dispute-check" type="checkbox" value="{{ $dispute->id }}" aria-label="选择事件 {{ $dispute->dispute_id }}"></td>
                             <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->dispute_id }}" title="复制事件 ID" aria-label="复制事件 ID"><i class="fa fa-copy"></i></button><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->disputed_transaction_id }}" title="复制交易 ID" aria-label="复制交易 ID"><i class="fa fa-copy"></i></button></div></td>
                             <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
@@ -99,7 +99,7 @@
                                     <hr><b>最新处理备注：</b><div class="pd-latest-note">{{ $latestNote }}</div>
                                 @endif
                             </div></td>
-                            <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
+                            <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}" data-logistics-handling-open><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
                     @empty<tr><td colspan="11" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
                 </table>
@@ -172,7 +172,7 @@
         </div>
 
         @foreach($disputes as $dispute)
-            <div class="modal fade" id="handle-dispute-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog"><form class="modal-content" method="post" action="{{ route('logistics.paypal-dispute-analysis.handle', $dispute) }}">@csrf
+            <div class="modal fade" id="handle-dispute-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog"><form class="modal-content" method="post" action="{{ route('logistics.paypal-dispute-analysis.handle', $dispute) }}" data-logistics-handling-form="{{ $dispute->id }}">@csrf
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">处理争议：{{ $dispute->dispute_id }}</h4></div>
                 @php
                     $latestOperation = $dispute->operations->first(fn ($operation) => filled($operation->payload['note'] ?? null));
@@ -191,7 +191,7 @@
 @endsection
 
 @push('scripts')
-    <script src="{{ $origin }}/assets/erp/logistics-list-scrollbars.js?v=4" defer></script>
+    <script src="{{ $origin }}/assets/erp/logistics-list-scrollbars.js?v=5" defer></script>
 <script src="{{ $origin }}/assets/erp/shopify-orders-filters.js?v=7" defer></script>
 <script>
     (function () {
