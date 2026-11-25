@@ -72,7 +72,7 @@
         <div class="flt shopify-orders-list">
         <div class="flt-card flt-filters">
             <h3 class="orders-filter-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __('logistics.orders.list.filters') }}</h3>
-            <form method="get" action="{{ route('logistics.orders.index') }}" class="logistics-filter-form" data-loading="region" data-loading-target=".logistics-orders-scroll"
+            <form method="get" action="{{ route('logistics.orders.index') }}" class="logistics-filter-form" data-loading="region" data-loading-target="#shopify-orders-records"
                 data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
                 data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}"
                 data-selected-options="{{ __('frontend_list_template.selected_options', ['names' => '__names__', 'count' => '__count__']) }}">
@@ -88,6 +88,7 @@
                             @foreach (__('logistics.orders.list.payment_types') as $value => $label)
                                 <option value="{{ $value }}" @selected($filters['payment_type'] === $value)>{{ $label }}</option>
                             @endforeach
+                            <option value="unidentified" @selected($filters['payment_type'] === 'unidentified')>{{ __('logistics.orders.list.payment_type_unidentified') }}</option>
                         </select>
                     </div>
                     <div><label class="orders-field-label" for="orders-filter-store_domain">{{ __('logistics.orders.list.field_store_domain') }}</label><input class="form-control" name="store_domain" id="orders-filter-store_domain" value="{{ $filters['store_domain'] }}" placeholder="{{ __('logistics.orders.list.placeholder_store_domain') }}"></div>
@@ -132,14 +133,14 @@
                         <i class="fa fa-chevron-down" aria-hidden="true"></i>
                     </button>
                     <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> {{ __('logistics.common.search') }}</button>
-                    <a class="flt-btn" href="{{ route('logistics.orders.index', ['per_page' => $filters['per_page']]) }}" data-loading="region" data-loading-target=".logistics-orders-scroll">{{ __('logistics.common.reset') }}</a>
+                    <a class="flt-btn" href="{{ route('logistics.orders.index', ['per_page' => $filters['per_page']]) }}" data-loading="region" data-loading-target="#shopify-orders-records">{{ __('logistics.common.reset') }}</a>
                 </div>
             </form>
         </div>
 
         <form id="tracking-sync-form" method="post" action="{{ route('logistics.orders.sync-tracking') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
 
-        <div class="flt-card flt-records">
+        <div class="flt-card flt-records" id="shopify-orders-records">
             <div class="flt-toolbar">
                 <div class="flt-selection">
                     <span>{{ __('frontend_list_template.records', ['count' => $orders->total()]) }}</span>
@@ -325,13 +326,12 @@
             <div class="flt-pagination orders-pagination">
                 <span class="orders-pagination-summary">{{ __('logistics.orders.list.page_summary', ['first' => $orders->firstItem() ?? 0, 'last' => $orders->lastItem() ?? 0, 'total' => $orders->total()]) }}</span>
                 <div class="orders-pagination-actions">
-                    <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target=".logistics-orders-scroll">
+                    <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target="#shopify-orders-records">
                         @foreach ($filters as $filterName => $filterValue)
                             @if ($filterName !== 'per_page')
                                 @foreach ((array) $filterValue as $value)
                                     <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
                                 @endforeach
-                                <option value="unidentified" @selected($filters['payment_type'] === 'unidentified')>{{ __('logistics.orders.list.payment_type_unidentified') }}</option>
                             @endif
                         @endforeach
                         <label>{{ __('logistics.orders.list.per_page') }}
@@ -344,18 +344,18 @@
                     </form>
                     <nav class="orders-page-links" aria-label="{{ __('logistics.orders.list.pagination') }}">
                         @if ($orders->previousPageUrl())
-                            <a class="flt-btn" href="{{ $orders->previousPageUrl() }}" data-loading="region" data-loading-target=".logistics-orders-scroll">{{ __('logistics.orders.list.previous') }}</a>
+                            <a class="flt-btn" href="{{ $orders->previousPageUrl() }}" data-loading="region" data-loading-target="#shopify-orders-records">{{ __('logistics.orders.list.previous') }}</a>
                         @else
                             <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.previous') }}</button>
                         @endif
                         <span>{{ $orders->currentPage() }} / {{ $orders->lastPage() }}</span>
                         @if ($orders->nextPageUrl())
-                            <a class="flt-btn" href="{{ $orders->nextPageUrl() }}" data-loading="region" data-loading-target=".logistics-orders-scroll">{{ __('logistics.orders.list.next') }}</a>
+                            <a class="flt-btn" href="{{ $orders->nextPageUrl() }}" data-loading="region" data-loading-target="#shopify-orders-records">{{ __('logistics.orders.list.next') }}</a>
                         @else
                             <button class="flt-btn" type="button" disabled>{{ __('logistics.orders.list.next') }}</button>
                         @endif
                     </nav>
-                    <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target=".logistics-orders-scroll">
+                    <form method="get" action="{{ route('logistics.orders.index') }}" data-loading="region" data-loading-target="#shopify-orders-records">
                         @foreach ($filters as $filterName => $filterValue)
                             @foreach ((array) $filterValue as $value)
                                 <input type="hidden" name="{{ $filterName }}{{ is_array($filterValue) ? '[]' : '' }}" value="{{ $value }}">
