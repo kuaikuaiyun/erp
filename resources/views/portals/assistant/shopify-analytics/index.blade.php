@@ -263,8 +263,8 @@
 
         @if (($summary['email_purchase_reminder_count'] ?? 0) > 0)
             <details class="assistant-email-reminder-alert">
-                <summary><i class="fa fa-envelope-o fa-lg"></i><div><strong>{{ $number($summary['email_purchase_reminder_count']) }} 家有出单店铺尚未购买邮箱</strong><div>点击查看具体店铺；确认无需购买的店铺可直接关闭提醒。</div></div><i class="fa fa-angle-down"></i></summary>
-                <div class="assistant-email-reminder-list table-responsive"><table class="table table-condensed"><thead><tr><th>店铺</th><th>域名</th><th>邮箱购买</th><th>归属人</th><th>订单数</th><th>营业额</th><th>操作</th></tr></thead><tbody>
+                <summary><i class="fa fa-envelope-o fa-lg"></i><div><strong>{{ $number($summary['email_purchase_reminder_count']) }} 家历史有出单店铺尚未购买邮箱</strong><div>无需筛选，点击查看该项目全部具体店铺；确认无需购买的店铺可直接关闭提醒。</div></div><i class="fa fa-angle-down"></i></summary>
+                <div class="assistant-email-reminder-list table-responsive"><table class="table table-condensed"><thead><tr><th>店铺</th><th>域名</th><th>邮箱购买</th><th>归属人</th><th>历史订单数</th><th>历史营业额</th><th>操作</th></tr></thead><tbody>
                 @foreach($emailReminderStores as $reminderStore)
                     <tr><td><strong>{{ $reminderStore->shop_name ?: '—' }}</strong></td><td>{{ $reminderStore->domain ?: '—' }}</td><td><span class="assistant-email-reminder-status is-warning">未购买</span></td><td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '未归属' }}</td><td>{{ $number($reminderStore->analytics_orders_count) }}</td><td>{{ $usd }}{{ $money($reminderStore->analytics_total_sales) }}</td><td><form class="assistant-email-reminder-form" method="post" action="{{ route('assistant.store-analytics.email-purchase-reminder.update',$reminderStore) }}" data-email-reminder-form data-exempt="1">@csrf @method('PATCH')<input type="hidden" name="exempt" value="1"><input type="hidden" name="reason" value=""><button class="btn btn-xs btn-default" type="submit">无需购买</button></form></td></tr>
                 @endforeach

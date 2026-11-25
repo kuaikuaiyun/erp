@@ -49,13 +49,8 @@ class ShopifyAnalyticsController extends Controller
         $baseQuery = $this->filteredVisibleShopifyStores($context['user'], $filters);
         $periods = $this->periodQuery($filters);
         $summary = $this->summary(clone $baseQuery, clone $periods);
-        $emailReminderStores = $this->withPeriod(clone $baseQuery, clone $periods)
-            ->whereRaw('COALESCE(analytics_metrics.orders_count, 0) > 0')
-            ->where('assistant_domain_stores.email_purchased', false)
-            ->where('assistant_domain_stores.email_purchase_reminder_exempt', false)
-            ->orderBy('assistant_domain_stores.shop_name')
-            ->orderBy('assistant_domain_stores.domain')
-            ->get();
+        $emailReminderStores = $this->emailPurchaseReminderStores($context['user']);
+        $summary['email_purchase_reminder_count'] = $emailReminderStores->count();
         $storesQuery = $this->withPeriod(clone $baseQuery, clone $periods);
         $this->applySorting($storesQuery, $filters);
         $stores = $storesQuery
@@ -645,7 +640,6 @@ class ShopifyAnalyticsController extends Controller
             ->selectRaw('COALESCE(SUM(analytics_metrics.subscribed_total_sales), 0) as subscribed_total_sales')
             ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_orders_count), 0) as recurring_orders_count')
             ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_total_sales), 0) as recurring_total_sales')
-            ->selectRaw('SUM(CASE WHEN COALESCE(analytics_metrics.orders_count, 0) > 0 AND assistant_domain_stores.email_purchased = 0 AND assistant_domain_stores.email_purchase_reminder_exempt = 0 THEN 1 ELSE 0 END) as email_purchase_reminder_count')
             ->first();
 
         return [
@@ -662,8 +656,39 @@ class ShopifyAnalyticsController extends Controller
             'subscribed_total_sales' => (float) ($row?->subscribed_total_sales ?? 0),
             'recurring_orders_count' => (int) ($row?->recurring_orders_count ?? 0),
             'recurring_total_sales' => (float) ($row?->recurring_total_sales ?? 0),
-            'email_purchase_reminder_count' => (int) ($row?->email_purchase_reminder_count ?? 0),
         ];
+    }
+
+    private function emailPurchaseReminderStores(AdminUser $user)
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $orderTable = (new AssistantShopifyStoreOrder())->getTable();
+        $totalSales = $this->referenceUsdRowAggregate(
+            'shopify_order.original_total_price',
+            'shopify_order.original_currency_code',
+        );
+        $metrics = DB::connection($connection)->table($orderTable.' as shopify_order')
+            ->selectRaw('shopify_order.assistant_domain_store_id')
+            ->selectRaw('COUNT(*) as orders_count')
+            ->selectRaw('COALESCE(SUM('.$totalSales.'), 0) as total_sales')
+            ->where('shopify_order.is_test', false)
+            ->whereIn('shopify_order.financial_status', AssistantShopifyStoreOrder::successfulFinancialStatuses())
+            ->groupBy('shopify_order.assistant_domain_store_id');
+
+        return $this->visibleShopifyStores($user)
+            ->where('assistant_domain_stores.email_purchased', false)
+            ->where('assistant_domain_stores.email_purchase_reminder_exempt', false)
+            ->joinSub($metrics, 'email_reminder_metrics', function ($join): void {
+                $join->on('assistant_domain_stores.id', '=', 'email_reminder_metrics.assistant_domain_store_id');
+            })
+            ->select('assistant_domain_stores.*')
+            ->addSelect([
+                'email_reminder_metrics.orders_count as analytics_orders_count',
+                'email_reminder_metrics.total_sales as analytics_total_sales',
+            ])
+            ->orderBy('assistant_domain_stores.shop_name')
+            ->orderBy('assistant_domain_stores.domain')
+            ->get();
     }
 
     /** @return array<string, string> */

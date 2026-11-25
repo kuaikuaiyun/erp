@@ -195,6 +195,9 @@ Route::patch('/assistant-website-systems/{websiteSystem}/toggle', [AssistantWebs
 Route::delete('/assistant-website-systems/{websiteSystem}', [AssistantWebsiteSystemController::class, 'destroy'])->name('assistant.website-systems.destroy');
 Route::post('/domain-stores/email-purchases/sync', [DomainStoreController::class, 'syncEmailPurchases'])->name('assistant.domain-stores.email-purchases.sync');
 Route::get('/domain-stores/email-purchases/status', [DomainStoreController::class, 'emailPurchaseStatus'])->name('assistant.domain-stores.email-purchases.status');
+Route::patch('/domain-stores/{domainStore}/domain-renewal-reminder', [DomainStoreController::class, 'updateDomainRenewalReminder'])
+    ->whereNumber('domainStore')
+    ->name('assistant.domain-stores.domain-renewal-reminder.update');
 Route::get('/domain-stores/batch-edit', [DomainStoreController::class, 'batchEdit'])->name('assistant.domain-stores.batch-edit');
 Route::get('/domain-stores/create', [DomainStoreController::class, 'create'])->name('assistant.domain-stores.create');
 Route::post('/domain-stores', [DomainStoreController::class, 'store'])->middleware(\App\Portals\Assistant\Http\Middleware\DiagnoseDomainStoreSave::class)->name('assistant.domain-stores.store');

@@ -173,6 +173,15 @@
         .assistant-domain-stores-table.table-hover tbody tr.assistant-shop-status-abandoned:hover > td {
             background-color: #f9e7ad !important;
         }
+        .assistant-domain-renewal-box { border: 1px solid #f2cf84; border-left: 4px solid #f39c12; box-shadow: none; }
+        .assistant-domain-renewal-box .box-header { background: #fff9eb; border-bottom: 1px solid #f5dfae; }
+        .assistant-domain-renewal-box .box-title { color: #8a5b00; font-size: 15px; font-weight: 600; }
+        .assistant-domain-renewal-table-wrap { max-height: 310px; overflow: auto; }
+        .assistant-domain-renewal-table { margin-bottom: 0; }
+        .assistant-domain-renewal-table th, .assistant-domain-renewal-table td { vertical-align: middle !important; white-space: nowrap; }
+        .assistant-domain-renewal-days { color: #d35400; font-weight: 600; }
+        .assistant-domain-renewal-form { display: inline-block; margin: 0; }
+        .assistant-domain-expiry-meta { display: block; margin-top: 4px; }
     </style>
 @endpush
 
@@ -217,6 +226,43 @@
             </div>
         @endif
 
+        @if ($domainRenewalReminderStores->isNotEmpty())
+            <div class="box box-solid assistant-domain-renewal-box">
+                <div class="box-header with-border">
+                    <h3 class="box-title"><i class="fa fa-bell"></i> 域名即将到期提醒（30天内）</h3>
+                    <span class="label label-warning pull-right">{{ $domainRenewalReminderStores->count() }} 家</span>
+                </div>
+                <div class="box-body no-padding assistant-domain-renewal-table-wrap">
+                    <table class="table table-hover assistant-domain-renewal-table">
+                        <thead><tr><th>店铺</th><th>域名</th><th>域名到期日</th><th>剩余天数</th><th>归属人</th>@if ($canManage)<th>操作</th>@endif</tr></thead>
+                        <tbody>
+                        @foreach ($domainRenewalReminderStores as $reminderStore)
+                            @php($remainingDays = now('Asia/Shanghai')->startOfDay()->diffInDays($reminderStore->domain_expires_at->copy()->startOfDay(), false))
+                            <tr>
+                                <td>{{ $reminderStore->shop_name ?: '—' }}</td>
+                                <td>{{ $reminderStore->domain ?: '—' }}</td>
+                                <td>{{ $reminderStore->domain_expires_at?->format('Y-m-d') ?: '—' }}</td>
+                                <td><span class="assistant-domain-renewal-days">{{ $remainingDays }} 天</span></td>
+                                <td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '—' }}</td>
+                                @if ($canManage)
+                                    <td>
+                                        <form method="post" action="{{ route('assistant.domain-stores.domain-renewal-reminder.update', $reminderStore) }}" class="assistant-domain-renewal-form" data-domain-renewal-form data-domain="{{ $reminderStore->domain ?: $reminderStore->shop_name }}" data-exempt="1">
+                                            @csrf
+                                            @method('PATCH')
+                                            <input type="hidden" name="exempt" value="1">
+                                            <input type="hidden" name="reason" value="">
+                                            <button type="submit" class="btn btn-warning btn-xs"><i class="fa fa-bell-slash"></i> 无需续费</button>
+                                        </form>
+                                    </td>
+                                @endif
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        @endif
+
         <div class="box box-solid assistant-domain-stores-filter">
             <div class="box-body">
                 <form method="get" action="{{ route('assistant.domain-stores.index') }}" class="form-inline" data-loading="region" data-loading-target=".assistant-domain-stores-list">
@@ -258,6 +304,14 @@
                             <div class="assistant-advanced-filter-field assistant-advanced-filter-date-range">
                                 <label>{{ $t('fields.domain_expires_at') }}</label>
                                 <div><input type="date" class="form-control" name="domain_expires_from" value="{{ $filters['domain_expires_from'] }}" aria-label="{{ $t('filters.range_start', ['field' => $t('fields.domain_expires_at')]) }}"><span>{{ $t('common.from') }}</span><input type="date" class="form-control" name="domain_expires_to" value="{{ $filters['domain_expires_to'] }}" aria-label="{{ $t('filters.range_end', ['field' => $t('fields.domain_expires_at')]) }}"></div>
+                            </div>
+                            <div class="assistant-advanced-filter-field form-group">
+                                <label for="filter-domain-renewal-status">域名续费提醒</label>
+                                <select id="filter-domain-renewal-status" class="form-control" name="domain_renewal_status" data-filter-multiselect data-placeholder="全部" data-search-placeholder="搜索域名续费状态">
+                                    <option value="">全部</option>
+                                    <option value="expiring" @selected($filters['domain_renewal_status'] === 'expiring')>30天内到期（需要续费）</option>
+                                    <option value="exempt" @selected($filters['domain_renewal_status'] === 'exempt')>已设置无需续费</option>
+                                </select>
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-email">{{ $t('fields.email') }}</label><input id="filter-email" class="form-control" name="email" value="{{ $filters['email'] }}"></div>
                             <div class="assistant-advanced-filter-field form-group"><label for="filter-email-bound">{{ $t('fields.email_binding') }}</label><select id="filter-email-bound" class="form-control" name="email_bound" data-filter-multiselect data-placeholder="{{ $t('common.all') }}" data-search-placeholder="搜索{{ $t('fields.email_binding') }}"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_bound'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_bound'] === '0')>{{ $t('common.no') }}</option></select></div>
@@ -415,7 +469,14 @@
                             <td><span class="assistant-field-value">{{ $store->site_builder ? ($siteBuilderOptions[$store->site_builder] ?? $store->site_builder) : $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value assistant-field-strong">{{ $store->shop_name }}</span></td>
                             <td><span class="assistant-field-value assistant-truncate-value">{{ $store->domain ?: $t('common.empty') }}</span></td>
-                            <td><span class="assistant-field-value">{{ $store->domain_expires_at?->format('Y-m-d') ?: $t('common.empty') }}</span></td>
+                            <td>
+                                <span class="assistant-field-value">{{ $store->domain_expires_at?->format('Y-m-d') ?: $t('common.empty') }}</span>
+                                @if ($store->domain_renewal_reminder_exempt)
+                                    <span class="assistant-domain-expiry-meta label label-default">无需续费</span>
+                                @elseif ($store->domain_expires_at && $store->domain_expires_at->betweenIncluded(now('Asia/Shanghai')->startOfDay(), now('Asia/Shanghai')->addDays(30)->endOfDay()))
+                                    <span class="assistant-domain-expiry-meta label label-warning">即将到期</span>
+                                @endif
+                            </td>
                             <td><span class="assistant-field-value"><span class="label {{ \App\Models\AssistantDomainStore::domainCheckStatusClass($store->domain_check_status) }}">{{ $domainCheckLabels[$store->domain_check_status] ?? $store->domain_check_status }}</span></span></td>
                             <td><span class="assistant-field-value">{{ $store->email ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value"><span class="label {{ $store->email_bound ? 'label-success' : 'label-default' }}">{{ $store->email_bound ? $t('common.yes') : $t('common.no') }}</span></span></td>
@@ -457,6 +518,18 @@
                                 <button type="button" class="btn btn-default btn-xs assistant-history-trigger" data-toggle="modal" data-target="#assistant-history-modal" data-history-url="{{ route('assistant.domain-stores.history', $store) }}" data-shop-name="{{ $store->shop_name }}"><i class="fa fa-history"></i> {{ $t('common.history') }}</button>
                                 @if ($canManage)
                                     <a href="{{ route('assistant.domain-stores.edit', $store) }}" class="btn btn-primary btn-xs assistant-editor-trigger" data-loading="off" data-editor-title="{{ $t('edit_title') }} · {{ $store->shop_name }}"><i class="fa fa-pencil"></i> {{ $t('common.edit') }}</a>
+                                    @if ($store->domain_expires_at)
+                                        <form method="post" action="{{ route('assistant.domain-stores.domain-renewal-reminder.update', $store) }}" class="assistant-domain-renewal-form" data-domain-renewal-form data-domain="{{ $store->domain ?: $store->shop_name }}" data-exempt="{{ $store->domain_renewal_reminder_exempt ? '0' : '1' }}">
+                                            @csrf
+                                            @method('PATCH')
+                                            <input type="hidden" name="exempt" value="{{ $store->domain_renewal_reminder_exempt ? '0' : '1' }}">
+                                            <input type="hidden" name="reason" value="">
+                                            <button type="submit" class="btn {{ $store->domain_renewal_reminder_exempt ? 'btn-default' : 'btn-warning' }} btn-xs">
+                                                <i class="fa {{ $store->domain_renewal_reminder_exempt ? 'fa-bell' : 'fa-bell-slash' }}"></i>
+                                                {{ $store->domain_renewal_reminder_exempt ? '恢复续费提醒' : '无需续费' }}
+                                            </button>
+                                        </form>
+                                    @endif
                                     <form method="post" action="{{ route('assistant.domain-stores.destroy', $store) }}" class="assistant-delete-form">
                                         @csrf
                                         @method('DELETE')
@@ -722,6 +795,26 @@
         window.ErpAssistantDomainStoreBatchUpdateTranslations = @json($batchUpdateJavascriptTranslations);
         window.ErpAssistantDomainStoreBatchUpdateFieldGroups = @json($batchUpdateFieldGroups);
         window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
+
+        document.querySelectorAll('[data-domain-renewal-form]').forEach(function (form) {
+            form.addEventListener('submit', function (event) {
+                var domain = form.getAttribute('data-domain') || '该域名';
+                var exempt = form.getAttribute('data-exempt') === '1';
+                if (!exempt) {
+                    if (!window.confirm('确认恢复“' + domain + '”的域名续费提醒吗？')) {
+                        event.preventDefault();
+                    }
+                    return;
+                }
+
+                var reason = window.prompt('确认将“' + domain + '”设置为无需续费吗？\n可填写原因（选填）：', '');
+                if (reason === null) {
+                    event.preventDefault();
+                    return;
+                }
+                form.querySelector('input[name="reason"]').value = reason.trim();
+            });
+        });
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261121-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js?v=20261102-1"></script>

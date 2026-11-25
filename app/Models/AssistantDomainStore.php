@@ -88,6 +88,10 @@ class AssistantDomainStore extends Model
         'shop_name',
         'domain',
         'domain_expires_at',
+        'domain_renewal_reminder_exempt',
+        'domain_renewal_reminder_exempt_reason',
+        'domain_renewal_reminder_exempted_by',
+        'domain_renewal_reminder_exempted_at',
         'domain_check_status',
         'domain_check_root',
         'domain_checked_at',
@@ -138,6 +142,8 @@ class AssistantDomainStore extends Model
     {
         return [
             'domain_expires_at' => 'date',
+            'domain_renewal_reminder_exempt' => 'boolean',
+            'domain_renewal_reminder_exempted_at' => 'datetime',
             'plan_expires_at' => 'date',
             'domain_checked_at' => 'datetime',
             'domain_check_http_status' => 'integer',
