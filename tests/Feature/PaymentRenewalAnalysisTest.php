@@ -200,16 +200,24 @@ class PaymentRenewalAnalysisTest extends TestCase
     {
         $this->order(450, '2026-09-02 12:00:00', '订阅首次购买', 'credit_card', '', 'Historical', [
             'shopify_order_number' => 'ROOT-450',
-            'payment_gateway_order_id' => 'GATEWAY-450',
-            'bill_number' => 'BILL-450',
+            'bill_number' => '000450',
         ]);
-        $this->order(451, '2026-09-15 12:00:00', '订阅复购', 'credit_card', 'ROOT-450', 'Historical');
-        $this->order(452, '2026-10-02 12:00:00', '订阅复购', 'credit_card', 'GATEWAY-450', 'Historical');
-        $this->order(453, '2026-11-01 12:00:00', '订阅复购', 'credit_card', 'BILL-450', 'Historical');
+        $this->order(451, '2026-09-15 12:00:00', '订阅复购', 'credit_card', '450', 'Historical');
+        $this->order(452, '2026-10-02 12:00:00', '订阅复购', 'credit_card', 'ROOT-450', 'Historical');
+        $this->order(453, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '000450', 'Historical');
 
         $filters = $this->filters(['renewal_store' => 'Historical']);
         $service = app(PaymentRenewalAnalysisService::class);
+        DB::enableQueryLog();
         $data = $service->dashboard($filters, 'renewal');
+        $historyQueries = array_values(array_filter(DB::getQueryLog(), static fn ($query) =>
+            str_contains($query['query'], 'where "subscription_origin_order_id" in (')));
+        DB::disableQueryLog();
+        self::assertCount(1, $historyQueries);
+        foreach (['450', 'ROOT-450', '000450'] as $reference) {
+            self::assertContains($reference, $historyQueries[0]['bindings']);
+        }
+        self::assertNotContains(450, $historyQueries[0]['bindings']);
         self::assertSame(['renewal_3'], array_column($data['stages'], 'key'));
         $stage = $data['stages'][0];
         self::assertSame(1, $stage['orders']);

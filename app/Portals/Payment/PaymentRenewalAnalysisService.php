@@ -343,7 +343,8 @@ class PaymentRenewalAnalysisService
             }
             if ($entries) yield $entries;
             if (!$refs) continue;
-            $query=LogisticsOrder::query()->whereIn('subscription_origin_order_id',array_keys($refs))
+            // Numeric PHP array keys become integers, but the indexed column is a string.
+            $query=LogisticsOrder::query()->whereIn('subscription_origin_order_id',array_map('strval',array_keys($refs)))
                 ->whereNotNull('paid_at')->where('paid_at','<=',$w['to']);
             foreach ($this->orderedBatches($query) as $orders) {
                 $entries=[];
