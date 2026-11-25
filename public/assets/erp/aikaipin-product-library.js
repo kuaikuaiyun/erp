@@ -110,6 +110,115 @@
         type: document.querySelector('[data-aikaipin-filter="type"]')
     };
 
+    function initializeFilterPickers() {
+        if (!form) return;
+        var pickers = [];
+
+        form.querySelectorAll('select[data-aikaipin-filter]').forEach(function (select) {
+            var label = form.querySelector('label[for="' + select.id + '"]');
+            var emptyOption = Array.prototype.find.call(select.options, function (option) { return option.value === ''; });
+            if (!label || !emptyOption) return;
+
+            var picker = document.createElement('details');
+            picker.className = 'flt-picker aikaipin-filter-picker';
+            var summary = document.createElement('summary');
+            summary.setAttribute('aria-label', label.textContent.trim());
+            var panel = document.createElement('div');
+            panel.className = 'flt-picker-panel';
+            var search = document.createElement('input');
+            search.type = 'search';
+            search.placeholder = form.dataset.searchOptions || '搜索选项';
+            search.setAttribute('aria-label', search.placeholder);
+            var options = document.createElement('div');
+            options.className = 'flt-picker-options';
+            var actions = document.createElement('div');
+            actions.className = 'flt-picker-actions';
+            var clear = document.createElement('button');
+            clear.type = 'button';
+            clear.className = 'flt-picker-clear';
+            clear.textContent = form.dataset.clearChoice || '清除选择';
+
+            function updateSummary() {
+                var selected = select.options[select.selectedIndex];
+                summary.textContent = selected ? selected.textContent : emptyOption.textContent;
+                summary.title = summary.textContent;
+            }
+
+            function drawOptions() {
+                var query = search.value.trim().toLocaleLowerCase();
+                var visible = Array.prototype.filter.call(select.options, function (option) {
+                    return option.value !== '' && option.textContent.toLocaleLowerCase().indexOf(query) !== -1;
+                });
+                options.replaceChildren();
+                if (!visible.length) {
+                    var empty = document.createElement('p');
+                    empty.textContent = form.dataset.noOptions || '没有匹配选项';
+                    options.appendChild(empty);
+                    return;
+                }
+                visible.forEach(function (option) {
+                    var optionLabel = document.createElement('label');
+                    var radio = document.createElement('input');
+                    var text = document.createElement('span');
+                    radio.type = 'radio';
+                    radio.name = select.id + '-picker';
+                    radio.checked = option.selected;
+                    text.textContent = option.textContent;
+                    radio.addEventListener('change', function () {
+                        select.value = option.value;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        updateSummary();
+                        picker.open = false;
+                        summary.focus();
+                    });
+                    optionLabel.append(radio, text);
+                    options.appendChild(optionLabel);
+                });
+            }
+
+            clear.addEventListener('click', function () {
+                select.value = '';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                search.value = '';
+                updateSummary();
+                picker.open = false;
+                summary.focus();
+            });
+            search.addEventListener('input', drawOptions);
+            search.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') event.preventDefault();
+            });
+            picker.addEventListener('toggle', function () {
+                if (!picker.open) return;
+                pickers.forEach(function (other) { if (other !== picker) other.open = false; });
+                search.value = '';
+                drawOptions();
+                search.focus();
+            });
+            label.addEventListener('click', function (event) {
+                event.preventDefault();
+                picker.open = !picker.open;
+                summary.focus();
+            });
+
+            actions.appendChild(clear);
+            panel.append(search, options, actions);
+            picker.append(summary, panel);
+            select.after(picker);
+            select.hidden = true;
+            updateSummary();
+            pickers.push(picker);
+        });
+
+        document.addEventListener('click', function (event) {
+            pickers.forEach(function (picker) {
+                if (picker.open && !picker.contains(event.target)) picker.open = false;
+            });
+        });
+    }
+
+    initializeFilterPickers();
+
     function notify(type, title, message) {
         if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
             window.ErpAdminNotifier.notify({

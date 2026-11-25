@@ -1,29 +1,47 @@
 @php
     $currentPage = $products->currentPage();
-    $lastPage = $products->lastPage();
-    $visiblePages = collect([1, 2, $currentPage - 1, $currentPage, $currentPage + 1, $lastPage - 1, $lastPage])
-        ->filter(fn (int $page): bool => $page >= 1 && $page <= $lastPage)
-        ->unique()
-        ->sort()
-        ->values();
-    $previousVisiblePage = null;
+    $lastPage = max(1, $products->lastPage());
+    $query = request()->query();
 @endphp
 
-<div class="aikaipin-pagination-control">
-    <span class="aikaipin-pagination-summary">{{ __('aikaipin.product_library.pagination.summary', ['from' => $products->firstItem() ?? 0, 'to' => $products->lastItem() ?? 0, 'total' => $products->total()]) }}</span>
-    @if ($lastPage > 1)
-        <div class="aikaipin-pagination-actions"><nav aria-label="{{ __('aikaipin.product_library.pagination.navigation') }}">
-            <ul class="pagination pagination-sm no-margin">
-                <li class="{{ $products->onFirstPage() ? 'disabled' : '' }}"><a href="{{ $products->previousPageUrl() ?: '#' }}" aria-label="{{ __('aikaipin.product_library.pagination.previous') }}">&laquo;</a></li>
-                @foreach ($visiblePages as $page)
-                    @if ($previousVisiblePage !== null && $page - $previousVisiblePage > 1)
-                        <li class="disabled"><span>&hellip;</span></li>
-                    @endif
-                    <li class="{{ $currentPage === $page ? 'active' : '' }}"><a href="{{ $products->url($page) }}">{{ $page }}</a></li>
-                    @php($previousVisiblePage = $page)
+<nav class="flt-pagination aikaipin-pagination-control" aria-label="{{ __('aikaipin.product_library.pagination.navigation') }}">
+    <span class="aikaipin-pagination-summary">
+        {{ __('aikaipin.product_library.pagination.summary', ['from' => $products->firstItem() ?? 0, 'to' => $products->lastItem() ?? 0, 'total' => $products->total()]) }}
+    </span>
+
+    <form method="get" action="{{ request()->url() }}" data-loading="off">
+        @foreach ($query as $key => $value)
+            @if (! in_array($key, ['page', 'per_page'], true) && ! is_array($value))
+                <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+            @endif
+        @endforeach
+        <label>每页显示
+            <select name="per_page" aria-label="每页显示条数" onchange="this.form.submit()">
+                @foreach ([20, 50, 100] as $size)
+                    <option value="{{ $size }}" @selected((int) $perPage === $size)>{{ $size }}</option>
                 @endforeach
-                <li class="{{ $products->hasMorePages() ? '' : 'disabled' }}"><a href="{{ $products->nextPageUrl() ?: '#' }}" aria-label="{{ __('aikaipin.product_library.pagination.next') }}">&raquo;</a></li>
-            </ul>
-        </nav><label class="aikaipin-page-jump"><span>跳转到</span><select class="form-control input-sm" aria-label="跳转到指定页" onchange="window.location.href=this.options[this.selectedIndex].dataset.url">@for ($page = 1; $page <= $lastPage; $page++)<option value="{{ $page }}" data-url="{{ $products->url($page) }}" @selected($currentPage === $page)>第 {{ $page }} 页</option>@endfor</select></label></div>
-    @endif
-</div>
+            </select> 条
+        </label>
+    </form>
+
+    <a class="flt-btn {{ $products->onFirstPage() ? 'is-disabled' : '' }}" href="{{ $products->previousPageUrl() ?: '#' }}" @if($products->onFirstPage()) aria-disabled="true" tabindex="-1" @endif>
+        <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+    </a>
+    <strong>第 {{ $currentPage }} / {{ $lastPage }} 页</strong>
+    <a class="flt-btn {{ $products->hasMorePages() ? '' : 'is-disabled' }}" href="{{ $products->nextPageUrl() ?: '#' }}" @unless($products->hasMorePages()) aria-disabled="true" tabindex="-1" @endunless>
+        下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+    </a>
+
+    <form method="get" action="{{ request()->url() }}" data-loading="off">
+        @foreach ($query as $key => $value)
+            @if ($key !== 'page' && ! is_array($value))
+                <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+            @endif
+        @endforeach
+        <label>跳至
+            <input type="number" name="page" min="1" max="{{ $lastPage }}" step="1" required aria-label="跳转页码">
+            页
+        </label>
+        <button class="flt-btn flt-primary" type="submit">跳转</button>
+    </form>
+</nav>

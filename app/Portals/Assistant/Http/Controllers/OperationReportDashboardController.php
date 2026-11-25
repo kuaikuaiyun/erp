@@ -3,10 +3,12 @@
 namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\Department;
 use App\Models\AdminUser;
-use App\Models\OperationReport;
+use App\Models\AssistantShopifyStoreOrder;
+use App\Models\Department;
+use App\Models\LogisticsOrder;
 use App\Models\OperationDashboardDepartmentScope;
+use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
@@ -14,18 +16,20 @@ use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\Rule;
-use Illuminate\View\View;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Validation\Rule;
+use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
 class OperationReportDashboardController extends Controller
 {
     private const DASHBOARD_PORTAL_CODE = 'yunying-kanban';
+
     private const OPERATION_PORTAL_CODE = 'yunying';
 
     public function __construct(
@@ -35,13 +39,14 @@ class OperationReportDashboardController extends Controller
         private readonly OperationReportMetricsService $metrics,
         private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response|View
     {
         $context = $this->context($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
 
         $validated = $request->validate([
             'date_range' => ['nullable', Rule::in(['today', 'yesterday', 'last_7_days', 'last_15_days', 'last_30_days', 'this_month', 'last_month', 'custom'])],
@@ -84,23 +89,23 @@ class OperationReportDashboardController extends Controller
             }
         } else {
             [$dateFrom, $dateTo] = match ($dateRange) {
-            'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
-            'yesterday' => [$reportNow->copy()->subDay()->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')],
-            'last_7_days' => [$reportNow->copy()->subDays(6)->format('Y-m-d'), $reportNow->format('Y-m-d')],
-            'last_15_days' => [$reportNow->copy()->subDays(14)->format('Y-m-d'), $reportNow->format('Y-m-d')],
-            'last_30_days' => [$reportNow->copy()->subDays(29)->format('Y-m-d'), $reportNow->format('Y-m-d')],
-            'last_month' => [
-                $reportNow->copy()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d'),
-                $reportNow->copy()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d'),
-            ],
-            'custom' => [
-                (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d')),
-                (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d')),
-            ],
-            default => [
-                $reportNow->copy()->startOfMonth()->format('Y-m-d'),
-                $reportNow->copy()->endOfMonth()->format('Y-m-d'),
-            ],
+                'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
+                'yesterday' => [$reportNow->copy()->subDay()->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')],
+                'last_7_days' => [$reportNow->copy()->subDays(6)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+                'last_15_days' => [$reportNow->copy()->subDays(14)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+                'last_30_days' => [$reportNow->copy()->subDays(29)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+                'last_month' => [
+                    $reportNow->copy()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d'),
+                    $reportNow->copy()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d'),
+                ],
+                'custom' => [
+                    (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d')),
+                    (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d')),
+                ],
+                default => [
+                    $reportNow->copy()->startOfMonth()->format('Y-m-d'),
+                    $reportNow->copy()->endOfMonth()->format('Y-m-d'),
+                ],
             };
         }
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
@@ -158,6 +163,7 @@ class OperationReportDashboardController extends Controller
         ]);
         $operatorFallbackNameCounts = $operators->groupBy(function (AdminUser $operator) use ($operatorDepartments): string {
             $department = $operatorDepartments->get((int) $operator->getKey());
+
             return implode('|', [
                 (int) ($department?->getKey() ?? 0),
                 $this->normalizeOperatorName((string) ($operator->name ?: $operator->username)),
@@ -184,14 +190,27 @@ class OperationReportDashboardController extends Controller
                 $report->report_date->format('Y-m-d'),
                 $this->normalizeOperatorName((string) $report->operator_name),
             ]));
-        $cacheKey = 'assistant-operation-report:v4-timezone:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        // Include both source-table versions so a newly synchronized Shopify or
+        // logistics order cannot leave this report on a stale five-minute cache.
+        $orderSourceVersion = implode('-', [
+            (int) AssistantShopifyStoreOrder::query()->max('id'),
+            (int) LogisticsOrder::query()->max('id'),
+        ]);
+        $cacheKey = 'assistant-operation-report:v5-shopify-source:'.$orderSourceVersion.':'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
             $calculated = [];
             // 分批读取，避免整月订单及商品明细一次载入导致 PHP 内存溢出。
             foreach ($operatorIds->chunk(2) as $operatorIdBatch) {
-                $calculated += $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIdBatch->values()->all(), $timezone);
+                $calculated += $this->metrics->buildRangeForOperators(
+                    $dateFrom,
+                    $dateTo,
+                    $operatorIdBatch->values()->all(),
+                    $timezone,
+                    useShopifySourceMetrics: true,
+                );
                 gc_collect_cycles();
             }
+
             return $calculated;
         });
 
@@ -214,8 +233,7 @@ class OperationReportDashboardController extends Controller
                         $allReports
                             ->where('status', OperationReport::STATUS_APPROVED)
                             ->where('operation_department_id', (int) $operationDepartment->getKey())
-                            ->filter(fn (OperationReport $report) =>
-                                $this->normalizeOperatorName((string) $report->operator_name)
+                            ->filter(fn (OperationReport $report) => $this->normalizeOperatorName((string) $report->operator_name)
                                     === $this->normalizeOperatorName((string) ($operator->name ?: $operator->username))
                             )
                             ->map(fn (OperationReport $report) => $report->report_date->format('Y-m-d'))
@@ -264,9 +282,9 @@ class OperationReportDashboardController extends Controller
                 $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
                     && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
                 $advertisingMedia = collect($approvedReport?->advertising_rows ?: [])
-                        ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
-                        ->unique(fn (string $media) => mb_strtolower($media))
-                        ->values();
+                    ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
+                    ->unique(fn (string $media) => mb_strtolower($media))
+                    ->values();
                 if ($isEmptyOrderDay && $approvedReport) {
                     if ($advertisingMedia->isNotEmpty()) {
                         $dateRows = $advertisingMedia->map(fn (string $media) => $this->emptyMetricRow(
@@ -296,8 +314,7 @@ class OperationReportDashboardController extends Controller
                 $revenueByMedia = $dateRows->groupBy(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))))
                     ->map(fn ($items) => (float) $items->sum('first_total_revenue'));
                 $reportFirstRevenue = (float) $dateRows->sum('first_total_revenue');
-                $reportFirstCost = (float) $dateRows->sum(fn (array $row) =>
-                    (float) ($row['first_purchase_cost'] ?? 0)
+                $reportFirstCost = (float) $dateRows->sum(fn (array $row) => (float) ($row['first_purchase_cost'] ?? 0)
                     + (float) ($row['first_shipping_cost'] ?? 0)
                     + (float) ($row['first_return_fee'] ?? 0)
                 );
@@ -324,6 +341,7 @@ class OperationReportDashboardController extends Controller
                     })->all(),
                     'daily_media_rois' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): ?float {
                         $metric = $mediaMetrics->get(mb_strtolower($media));
+
                         return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
                     })->all(),
                     'daily_first_roi' => $reportActualAdSpend > 0 ? $reportFirstRevenue / $reportActualAdSpend : null,
@@ -332,39 +350,39 @@ class OperationReportDashboardController extends Controller
                 ];
 
                 foreach ($dateRows as $row) {
-                $mediaKey = mb_strtolower(trim((string) ($row['media_source'] ?? '其他')));
-                $mediaSpend = (float) ($mediaMetrics->get($mediaKey)['actual_ad_spend'] ?? 0);
-                $mediaRevenue = (float) ($revenueByMedia->get($mediaKey) ?? 0);
-                $isMediaPlaceholder = trim((string) ($row['shop_domain'] ?? '')) === '—';
-                $allocatedSpend = $mediaRevenue > 0
-                    ? $mediaSpend * (float) ($row['first_total_revenue'] ?? 0) / $mediaRevenue
-                    : ($isMediaPlaceholder ? $mediaSpend : 0.0);
-                $totalCost = (float) ($row['first_purchase_cost'] ?? 0)
-                    + (float) ($row['first_shipping_cost'] ?? 0)
-                    + (float) ($row['first_return_fee'] ?? 0);
-                $profit = (float) ($row['first_total_revenue'] ?? 0) - $allocatedSpend - $totalCost;
-                $rows[] = array_merge($row, $dailySummary, [
-                    '_report_id' => $operator->getKey().'|'.$rowDate,
-                    'operator_user_id' => (int) $operator->getKey(),
-                    'date' => (string) $rowDate,
-                    'operator_name' => (string) ($operator->name ?: $operator->username),
-                    'is_resigned' => (string) $operator->employment_status === 'resigned',
-                    'hired_at' => $operator->hired_at?->format('Y-m-d'),
-                    'operation_department_name' => (string) ($operationDepartment?->name ?: $report?->operation_department_name ?: '未填写部门'),
-                    'operation_department_id' => (int) ($operationDepartment?->getKey() ?? $report?->operation_department_id ?? 0),
-                    'team_position' => (string) ($operator->departments->firstWhere('id', $operationDepartment?->getKey())?->pivot?->position ?: Department::POSITION_MEMBER),
-                    'media_roi' => $mediaMetrics->get($mediaKey)['first_roi'] ?? null,
-                    'allocated_actual_ad_spend' => $allocatedSpend,
-                    'first_total_cost' => $totalCost,
-                    'first_profit' => $profit,
-                    'first_loss_rate' => $totalCost > 0 ? $profit / $totalCost : null,
-                    'submission_status' => $report?->status,
-                    'submission_status_label' => $report?->statusLabel() ?? '未提报',
-                    'report_actual_ad_spend' => $approvedReport ? (float) $approvedReport->actual_ad_spend : null,
-                    'report_first_roi' => $approvedReport && (float) $approvedReport->actual_ad_spend > 0
-                        ? $reportFirstRevenue / (float) $approvedReport->actual_ad_spend
-                        : null,
-                ]);
+                    $mediaKey = mb_strtolower(trim((string) ($row['media_source'] ?? '其他')));
+                    $mediaSpend = (float) ($mediaMetrics->get($mediaKey)['actual_ad_spend'] ?? 0);
+                    $mediaRevenue = (float) ($revenueByMedia->get($mediaKey) ?? 0);
+                    $isMediaPlaceholder = trim((string) ($row['shop_domain'] ?? '')) === '—';
+                    $allocatedSpend = $mediaRevenue > 0
+                        ? $mediaSpend * (float) ($row['first_total_revenue'] ?? 0) / $mediaRevenue
+                        : ($isMediaPlaceholder ? $mediaSpend : 0.0);
+                    $totalCost = (float) ($row['first_purchase_cost'] ?? 0)
+                        + (float) ($row['first_shipping_cost'] ?? 0)
+                        + (float) ($row['first_return_fee'] ?? 0);
+                    $profit = (float) ($row['first_total_revenue'] ?? 0) - $allocatedSpend - $totalCost;
+                    $rows[] = array_merge($row, $dailySummary, [
+                        '_report_id' => $operator->getKey().'|'.$rowDate,
+                        'operator_user_id' => (int) $operator->getKey(),
+                        'date' => (string) $rowDate,
+                        'operator_name' => (string) ($operator->name ?: $operator->username),
+                        'is_resigned' => (string) $operator->employment_status === 'resigned',
+                        'hired_at' => $operator->hired_at?->format('Y-m-d'),
+                        'operation_department_name' => (string) ($operationDepartment?->name ?: $report?->operation_department_name ?: '未填写部门'),
+                        'operation_department_id' => (int) ($operationDepartment?->getKey() ?? $report?->operation_department_id ?? 0),
+                        'team_position' => (string) ($operator->departments->firstWhere('id', $operationDepartment?->getKey())?->pivot?->position ?: Department::POSITION_MEMBER),
+                        'media_roi' => $mediaMetrics->get($mediaKey)['first_roi'] ?? null,
+                        'allocated_actual_ad_spend' => $allocatedSpend,
+                        'first_total_cost' => $totalCost,
+                        'first_profit' => $profit,
+                        'first_loss_rate' => $totalCost > 0 ? $profit / $totalCost : null,
+                        'submission_status' => $report?->status,
+                        'submission_status_label' => $report?->statusLabel() ?? '未提报',
+                        'report_actual_ad_spend' => $approvedReport ? (float) $approvedReport->actual_ad_spend : null,
+                        'report_first_roi' => $approvedReport && (float) $approvedReport->actual_ad_spend > 0
+                            ? $reportFirstRevenue / (float) $approvedReport->actual_ad_spend
+                            : null,
+                    ]);
                 }
             }
         }
@@ -373,6 +391,7 @@ class OperationReportDashboardController extends Controller
         $rows = array_map(function (array $row): array {
             $row['daily_first_roi_class'] = $this->roiClass($row['daily_first_roi'] ?? null);
             $row['daily_media_roi_classes'] = array_map(fn ($roi): string => $this->roiClass($roi), $row['daily_media_rois'] ?? []);
+
             return $row;
         }, $rows);
         $sortBy = $validated['sort_by'] ?? null;
@@ -384,6 +403,7 @@ class OperationReportDashboardController extends Controller
                     Department::POSITION_DEPUTY => 1,
                     default => 2,
                 };
+
                 return [$a['operation_department_name'], $rank($a), $a['operator_name'], $a['shop_domain']]
                     <=> [$b['operation_department_name'], $rank($b), $b['operator_name'], $b['shop_domain']];
             }
@@ -517,7 +537,9 @@ class OperationReportDashboardController extends Controller
     public function updateDepartmentScope(Request $request): RedirectResponse|Response
     {
         $context = $this->context($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
         abort_unless($this->isDashboard($context) && $this->isBoss($context['user']), 403);
 
         $validated = $request->validate([
@@ -556,7 +578,9 @@ class OperationReportDashboardController extends Controller
     public function orderDetails(Request $request): Response|JsonResponse
     {
         $context = $this->context($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
         $validated = $request->validate([
             'date_from' => ['required', 'date_format:Y-m-d'],
             'date_to' => ['required', 'date_format:Y-m-d', 'after_or_equal:date_from'],
@@ -600,20 +624,30 @@ class OperationReportDashboardController extends Controller
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
             $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
-            if ($value === '+08:00') $label .= '（北京时间）';
-            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) $label .= '（默认）';
+            if ($value === '+08:00') {
+                $label .= '（北京时间）';
+            }
+            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) {
+                $label .= '（默认）';
+            }
             $options[$value] = $label;
         }
+
         return $options;
     }
 
     private function context(Request $request): array|Response
     {
         $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) return $context;
-        if ($this->isDashboard($context) || $this->isOperationPortal($context)) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
+        if ($this->isDashboard($context) || $this->isOperationPortal($context)) {
+            return $context;
+        }
         $this->authorization->assertAssistantPortal($context['portal']);
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+
         return $context;
     }
 
@@ -645,13 +679,18 @@ class OperationReportDashboardController extends Controller
         if ($this->isOperationPortal($context)) {
             $allDepartmentIds = $this->assistantStoreOwners->operationDepartments()
                 ->pluck('id')->map(fn ($id): int => (int) $id);
-            if ($this->isBoss($context['user'])) return $allDepartmentIds->all();
+            if ($this->isBoss($context['user'])) {
+                return $allDepartmentIds->all();
+            }
 
             $managedDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
                 ->intersect($allDepartmentIds)->values();
-            if ($managedDepartmentIds->isNotEmpty()) return $managedDepartmentIds->all();
+            if ($managedDepartmentIds->isNotEmpty()) {
+                return $managedDepartmentIds->all();
+            }
 
             $department = $this->assistantStoreOwners->operationDepartmentForUser($context['user']);
+
             return $department ? [(int) $department->getKey()] : [];
         }
 
@@ -669,7 +708,7 @@ class OperationReportDashboardController extends Controller
 
     private function totals(array $rows, float $actualAdSpend): array
     {
-        $fields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
+        $fields = ['first_subscription_orders', 'first_subscription_revenue', 'first_normal_orders', 'first_normal_revenue', 'first_total_orders', 'first_total_revenue', 'first_purchase_cost', 'first_shipping_cost', 'first_return_fee', 'renewal_orders', 'renewal_revenue', 'renewal_cost', 'total_orders', 'total_revenue'];
         $rowCollection = collect($rows);
         $totals = collect($fields)->mapWithKeys(fn ($field) => [$field => (float) $rowCollection->sum($field)])->all();
         $totals['first_total_cost'] = $totals['first_purchase_cost'] + $totals['first_shipping_cost'] + $totals['first_return_fee'];
@@ -685,6 +724,7 @@ class OperationReportDashboardController extends Controller
         $totals['first_average_order_value'] = $totals['first_total_orders'] > 0
             ? $totals['first_total_revenue'] / $totals['first_total_orders']
             : null;
+
         return $totals;
     }
 
@@ -718,7 +758,7 @@ class OperationReportDashboardController extends Controller
     }
 
     /** @param list<array<string,mixed>> $rows
-     *  @return list<array<string,mixed>>
+     * @return list<array<string,mixed>>
      */
     private function aggregateRangeRows(array $rows, string $dateFrom, string $dateTo): array
     {
@@ -752,7 +792,9 @@ class OperationReportDashboardController extends Controller
             $mediaRois = [];
             foreach ($mediaRows as $items) {
                 $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
-                if ($mediaName === '—') continue;
+                if ($mediaName === '—') {
+                    continue;
+                }
                 $mediaRevenue = (float) $items->sum('first_total_revenue');
                 $mediaSpend = (float) $items->sum('allocated_actual_ad_spend');
                 $mediaNames[] = $mediaName;
@@ -835,7 +877,9 @@ class OperationReportDashboardController extends Controller
                     $domainMediaRois = [];
                     foreach ($domainMediaRows as $mediaItems) {
                         $mediaName = trim((string) ($mediaItems->first()['media_source'] ?? '')) ?: '其他';
-                        if ($mediaName === '—') continue;
+                        if ($mediaName === '—') {
+                            continue;
+                        }
                         $mediaRevenue = (float) $mediaItems->sum('first_total_revenue');
                         $mediaSpend = (float) $mediaItems->sum('allocated_actual_ad_spend');
                         $domainMediaNames[] = $mediaName;
@@ -866,20 +910,31 @@ class OperationReportDashboardController extends Controller
 
     private function roiClass(?float $roi): string
     {
-        if ($roi === null) return '';
-        if ($roi > 1.6) return 'roi-excellent';
-        if ($roi >= 1.3) return 'roi-good';
-        if ($roi >= 1.1) return 'roi-warning';
+        if ($roi === null) {
+            return '';
+        }
+        if ($roi > 1.6) {
+            return 'roi-excellent';
+        }
+        if ($roi >= 1.3) {
+            return 'roi-good';
+        }
+        if ($roi >= 1.1) {
+            return 'roi-warning';
+        }
+
         return 'roi-danger';
     }
 
-    /** @param \Illuminate\Support\Collection<int, array<string, mixed>> $days */
-    private function hasConsecutiveLosses(\Illuminate\Support\Collection $days, int $requiredDays): bool
+    /** @param Collection<int, array<string, mixed>> $days */
+    private function hasConsecutiveLosses(Collection $days, int $requiredDays): bool
     {
         $streak = 0;
         foreach ($days as $day) {
             $streak = (float) ($day['profit'] ?? 0) < 0 ? $streak + 1 : 0;
-            if ($streak >= $requiredDays) return true;
+            if ($streak >= $requiredDays) {
+                return true;
+            }
         }
 
         return false;
@@ -919,11 +974,18 @@ class OperationReportDashboardController extends Controller
         $spans = [];
         for ($index = 0, $count = count($rows); $index < $count; $index++) {
             $key = $keyFor($rows[$index]);
-            if ($index > 0 && $key === $keyFor($rows[$index - 1])) { $spans[$index] = 0; continue; }
+            if ($index > 0 && $key === $keyFor($rows[$index - 1])) {
+                $spans[$index] = 0;
+
+                continue;
+            }
             $span = 1;
-            while ($index + $span < $count && $key === $keyFor($rows[$index + $span])) $span++;
+            while ($index + $span < $count && $key === $keyFor($rows[$index + $span])) {
+                $span++;
+            }
             $spans[$index] = $span;
         }
+
         return $spans;
     }
 }

@@ -67,13 +67,18 @@ class ProductLibraryController extends Controller
 
         $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
         $filters = $this->productFilters($request);
+        $perPage = (int) $request->query('per_page', 20);
+        if (! in_array($perPage, [20, 50, 100], true)) {
+            $perPage = 20;
+        }
 
         return view('portals.aikaipin.product-library.index', [
             ...$context,
             'products' => $this->productQuery($context['user'], $canManageProductLibrary, $filters)
-                ->paginate(15)
+                ->paginate($perPage)
                 ->withQueryString(),
             'filters' => $filters,
+            'perPage' => $perPage,
             'categories' => $this->productCategoryOptions(),
             'canManageProductLibrary' => $canManageProductLibrary,
             'operationVisibilitySource' => $this->authorization->operationVisibilitySource(),
@@ -1580,13 +1585,18 @@ class ProductLibraryController extends Controller
 
         $canReviewAllSelectionProposals = $this->authorization->canManageProductLibrary($context['user']);
         $filters = $this->selectionProposalFilters($request);
+        $perPage = (int) $request->query('per_page', 20);
+        if (! in_array($perPage, [20, 50, 100], true)) {
+            $perPage = 20;
+        }
 
         return view('portals.aikaipin.selection-proposal.index', [
             ...$context,
             'proposals' => $this->selectionProposalQuery($context['user'], $canReviewAllSelectionProposals, $filters)
-                ->paginate(15)
+                ->paginate($perPage)
                 ->withQueryString(),
             'filters' => $filters,
+            'perPage' => $perPage,
             'canReviewAllSelectionProposals' => $canReviewAllSelectionProposals,
         ]);
     }
@@ -1823,17 +1833,26 @@ class ProductLibraryController extends Controller
         $canReviewAllPlacementEvaluations = $this->authorization->canManageProductLibrary($context['user']);
         $filters = $this->placementEvaluationFilters($request);
 
+        $evaluationScope = static fn (Builder $evaluations) => $evaluations
+            ->when(! $canReviewAllPlacementEvaluations, fn (Builder $ownEvaluations) => $ownEvaluations->where('created_by', $context['user']->getKey()));
         $products = $this->productQuery($context['user'], $canReviewAllPlacementEvaluations, [
-            'keyword' => $filters['keyword'], 'category' => '', 'source' => '', 'type' => '',
-        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')
+            'keyword' => $filters['keyword'],
+            'category' => $filters['category'],
+            'source' => $filters['source'],
+            'type' => $filters['type'],
+        ])
+            ->when($filters['evaluation_status'] === 'evaluated', fn (Builder $query) => $query->whereHas('placementEvaluations', $evaluationScope))
+            ->when($filters['evaluation_status'] === 'unevaluated', fn (Builder $query) => $query->whereDoesntHave('placementEvaluations', $evaluationScope))
+            ->with(['placementEvaluations' => fn ($query) => $query->with('records')
             ->when(! $canReviewAllPlacementEvaluations, fn ($evaluations) => $evaluations->where('created_by', $context['user']->getKey()))
             ->latest('updated_at')])
-            ->latest('updated_at')->paginate(15)->withQueryString();
+            ->latest('updated_at')->paginate($filters['per_page'])->withQueryString();
 
         return view('portals.aikaipin.placement-evaluation.index', [
             ...$context,
             'products' => $products,
             'filters' => $filters,
+            'categories' => array_column($this->productCategoryOptions(), 'value'),
             'canReviewAllPlacementEvaluations' => $canReviewAllPlacementEvaluations,
         ]);
     }
@@ -2521,11 +2540,22 @@ class ProductLibraryController extends Controller
             && array_intersect($departmentIds, $product->visibleDepartmentIds()) !== [];
     }
 
-    /** @return array{keyword:string} */
+    /** @return array{keyword:string,category:string,source:string,type:string,evaluation_status:string,per_page:int} */
     private function placementEvaluationFilters(Request $request): array
     {
+        $perPage = (int) $request->query('per_page', 15);
+        if (! in_array($perPage, [15, 30, 50, 100], true)) {
+            $perPage = 15;
+        }
+        $evaluationStatus = (string) $request->query('evaluation_status', '');
+
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
+            'category' => trim((string) $request->query('category', '')),
+            'source' => trim((string) $request->query('source', '')),
+            'type' => trim((string) $request->query('type', '')),
+            'evaluation_status' => in_array($evaluationStatus, ['evaluated', 'unevaluated'], true) ? $evaluationStatus : '',
+            'per_page' => $perPage,
         ];
     }
 
@@ -2668,11 +2698,14 @@ class ProductLibraryController extends Controller
         return 'pending-'.strtolower(Str::random(20));
     }
 
-    /** @return array{keyword:string} */
+    /** @return array{keyword:string,status:string} */
     private function selectionProposalFilters(Request $request): array
     {
+        $status = (string) $request->query('status', '');
+
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
+            'status' => in_array($status, ['active', 'withdrawn'], true) ? $status : '',
         ];
     }
 
@@ -2711,7 +2744,7 @@ class ProductLibraryController extends Controller
         }
     }
 
-    /** @param array{keyword:string} $filters */
+    /** @param array{keyword:string,status:string} $filters */
     private function selectionProposalQuery(AdminUser $user, bool $canReviewAll, array $filters): Builder
     {
         $query = AikaipinSelectionProposal::query()
@@ -2729,6 +2762,11 @@ class ProductLibraryController extends Controller
                     ->orWhere('product_name', 'like', $like)
                     ->orWhereHas('tags', static fn (Builder $tags) => $tags->where('value', 'like', $like));
             });
+        }
+        if ($filters['status'] === 'active') {
+            $query->whereNull('withdrawn_at');
+        } elseif ($filters['status'] === 'withdrawn') {
+            $query->whereNotNull('withdrawn_at');
         }
 
         return $query;

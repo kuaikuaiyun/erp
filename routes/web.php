@@ -7,6 +7,7 @@ use App\Portal\Http\Controllers\InternalMessageController;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
+use App\Portals\Aikaipin\Http\Controllers\ProductOrderStatisticsController;
 use App\Portals\AiProducts\Http\Controllers\AiProductController;
 use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
 use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
@@ -532,6 +533,10 @@ Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExcepti
 Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExceptionController::class, 'refresh'])->name('caigou.warehouse-weight-exceptions.refresh');
 Route::post('/warehouse-weight-exceptions/{id}/approve', [WarehouseWeightExceptionController::class, 'approve'])->name('caigou.warehouse-weight-exceptions.approve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
+Route::get('/product-order-statistics', [ProductOrderStatisticsController::class, 'index'])->name('aikaipin.product-order-statistics.index');
+Route::get('/product-order-statistics/{publication}/orders', [ProductOrderStatisticsController::class, 'orders'])
+    ->whereNumber('publication')
+    ->name('aikaipin.product-order-statistics.orders');
 Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
     Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
     Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');

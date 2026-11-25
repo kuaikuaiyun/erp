@@ -97,31 +97,31 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261118-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261125-4">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261118-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261125-4"></script>
 @endpush
 
 @section('content')
-<section class="content aikaipin-product-library-page">
+<section class="content aikaipin-product-library-page flt">
     @if(session('success'))
         <div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>
     @endif
-    <div class="box box-solid aikaipin-filter-box">
-        <div class="box-body">
-            <form class="aikaipin-filter-form" method="get" action="{{ route('aikaipin.product-library.index') }}" data-aikaipin-filter-form>
-                <div class="aikaipin-filter-grid">
+    <form class="flt-card flt-filters aikaipin-filter-form" method="get" action="{{ route('aikaipin.product-library.index') }}"
+        data-aikaipin-filter-form data-search-options="搜索选项" data-no-options="没有匹配选项" data-clear-choice="清除选择">
+                <div class="flt-filter-grid aikaipin-filter-grid">
                     <div class="aikaipin-filter-field aikaipin-filter-keyword">
-                        <label for="aikaipin-keyword">{{ $t('filters.keyword') }}</label>
-                        <input id="aikaipin-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off"
+                        <label for="aikaipin-keyword" class="flt-field-label">{{ $t('filters.keyword') }}</label>
+                        <input id="aikaipin-keyword" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off"
                             placeholder="{{ $t('filters.keyword_placeholder') }}" data-aikaipin-filter="keyword">
                     </div>
                     <div class="aikaipin-filter-field">
-                        <label for="aikaipin-category">{{ $t('filters.category') }}</label>
-                        <select id="aikaipin-category" class="form-control" name="category" data-aikaipin-filter="category">
+                        <label for="aikaipin-category" class="flt-field-label">{{ $t('filters.category') }}</label>
+                        <select id="aikaipin-category" name="category" data-aikaipin-filter="category" data-filter-searchable>
                             <option value="">{{ $t('filters.all') }}</option>
                             @foreach ($categories as $category)
                                 <option value="{{ $category['value'] }}" @selected($filters['category'] === $category['value'])>{{ $category['label'] }}</option>
@@ -129,8 +129,8 @@
                         </select>
                     </div>
                     <div class="aikaipin-filter-field">
-                        <label for="aikaipin-source">{{ $t('filters.source') }}</label>
-                        <select id="aikaipin-source" class="form-control" name="source" data-aikaipin-filter="source">
+                        <label for="aikaipin-source" class="flt-field-label">{{ $t('filters.source') }}</label>
+                        <select id="aikaipin-source" name="source" data-aikaipin-filter="source" data-filter-searchable>
                             <option value="">{{ $t('filters.all') }}</option>
                             @foreach (trans('aikaipin.upload.source_options') as $value => $label)
                                 <option value="{{ $value }}" @selected($filters['source'] === $value)>{{ $label }}</option>
@@ -138,50 +138,48 @@
                         </select>
                     </div>
                     <div class="aikaipin-filter-field">
-                        <label for="aikaipin-type">{{ $t('filters.type') }}</label>
-                        <select id="aikaipin-type" class="form-control" name="type" data-aikaipin-filter="type">
+                        <label for="aikaipin-type" class="flt-field-label">{{ $t('filters.type') }}</label>
+                        <select id="aikaipin-type" name="type" data-aikaipin-filter="type" data-filter-searchable>
                             <option value="">{{ $t('filters.all') }}</option>
                             @foreach (trans('aikaipin.upload.type_options') as $value => $label)
                                 <option value="{{ $value }}" @selected($filters['type'] === $value)>{{ $label }}</option>
                             @endforeach
                         </select>
                     </div>
-                    <div class="aikaipin-filter-actions">
-                        <button class="btn btn-primary" type="submit">
+                    <div class="flt-filter-actions aikaipin-filter-actions">
+                        <button class="flt-btn flt-primary" type="submit">
                             <i class="fa fa-search" aria-hidden="true"></i> {{ $t('filters.search') }}
                         </button>
-                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.index') }}">
+                        <a class="flt-btn" href="{{ route('aikaipin.product-library.index') }}">
                             <i class="fa fa-undo" aria-hidden="true"></i> {{ $t('filters.reset') }}
                         </a>
                     </div>
                 </div>
-            </form>
-        </div>
-    </div>
+    </form>
 
-    <div class="box box-solid aikaipin-table-box">
-        <div class="box-header with-border aikaipin-list-toolbar">
-            <div class="aikaipin-list-toolbar-actions">
-                <div class="aikaipin-list-toolbar-summary">
+    <div class="flt-card flt-records aikaipin-table-box">
+        <div class="flt-toolbar aikaipin-list-toolbar">
+            <div class="flt-selection aikaipin-list-toolbar-summary">
                     <i class="fa fa-cubes" aria-hidden="true"></i>
                     <span>{{ trans_choice('aikaipin.product_library.record_count', $products->total(), ['count' => $products->total()]) }}</span>
-                </div>
+                    @if ($canManageProductLibrary)<span class="flt-toolbar-divider" aria-hidden="true"></span><span class="aikaipin-selected-count" data-aikaipin-selected-count>{{ $t('visibility.selected_none') }}</span>@endif
+            </div>
+            <div class="flt-toolbar-actions aikaipin-list-toolbar-actions">
                 @if ($canManageProductLibrary)
-                    <span class="aikaipin-selected-count" data-aikaipin-selected-count>{{ $t('visibility.selected_none') }}</span>
-                    <button class="btn btn-default btn-sm" type="button" disabled data-aikaipin-batch-action="enable">
+                    <button class="flt-btn" type="button" disabled data-aikaipin-batch-action="enable">
                         <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('actions.enable_visibility') }}
                     </button>
-                    <button class="btn btn-default btn-sm" type="button" disabled data-aikaipin-batch-action="cancel">
+                    <button class="flt-btn" type="button" disabled data-aikaipin-batch-action="cancel">
                         <i class="fa fa-eye-slash" aria-hidden="true"></i> {{ $t('actions.cancel_visibility') }}
                     </button>
-                    <button class="btn btn-primary btn-sm" type="button" data-aikaipin-action="upload">
+                    <button class="flt-btn flt-primary" type="button" data-aikaipin-action="upload">
                         <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('actions.upload_product') }}
                     </button>
                 @endif
             </div>
         </div>
-        <div class="box-body no-padding">
-            <div class="table-responsive">
+        <div class="flt-table-region">
+            <div class="flt-table-scroll aikaipin-table-scroll">
                 <table class="table table-hover aikaipin-product-table">
                     <thead>
                     <tr>
@@ -303,88 +301,77 @@
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $updatedAt?->toAtomString() }}" title="北京时间">{{ $updatedAt?->format('Y-m-d H:i') }}</time></td>
-                            <td style="text-align:center;">
+                            <td class="aikaipin-publication-cell">
                                 @if($product->is_published)
-                                    <span class="label label-success"><i class="fa fa-arrow-up"></i> 已上架</span>
+                                    <span class="flt-status" data-status="active">已上架</span>
                                 @else
-                                    <span class="label label-default"><i class="fa fa-arrow-down"></i> 已下架</span>
+                                    <span class="flt-status" data-status="disabled">已下架</span>
                                 @endif
                             </td>
                             <td class="aikaipin-operation-cell">
                                 <div class="aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
-                                    <button class="btn btn-default aikaipin-row-action-icon" type="button" data-aikaipin-action="view"
+                                    <button class="flt-row-action" type="button" data-aikaipin-action="view"
                                         data-aikaipin-product-id="{{ $product->getKey() }}" title="查看产品及素材视频" aria-label="查看产品及素材视频">
-                                        <i class="fa fa-eye" aria-hidden="true"></i>
-                                        <span class="sr-only">查看产品及素材视频</span>
+                                        <i class="fa fa-eye" aria-hidden="true"></i> 查看
                                     </button>
                                     @if ($product->landing_page_url)
-                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
+                                        <a class="flt-row-action" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
                                             title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
-                                            <i class="fa fa-external-link" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.landing_page') }}</span>
+                                            <i class="fa fa-external-link" aria-hidden="true"></i> 落地页
                                         </a>
                                     @else
-                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                        <button class="flt-row-action" type="button" disabled
                                             title="{{ $t('actions.landing_page') }}" aria-label="{{ $t('actions.landing_page') }}">
-                                            <i class="fa fa-external-link" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.landing_page') }}</span>
+                                            <i class="fa fa-external-link" aria-hidden="true"></i> 落地页
                                         </button>
                                     @endif
                                     @if ($referenceFile)
-                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ route('aikaipin.product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer"
+                                        <a class="flt-row-action" href="{{ route('aikaipin.product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer"
                                             title="{{ $t('actions.reference_page') }}" aria-label="{{ $t('actions.reference_page') }}">
-                                            <i class="fa fa-file-text-o" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.reference_page') }}</span>
+                                            <i class="fa fa-file-text-o" aria-hidden="true"></i> 参考页
                                         </a>
                                     @else
-                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                        <button class="flt-row-action" type="button" disabled
                                             title="{{ $t('actions.reference_page') }}" aria-label="{{ $t('actions.reference_page') }}">
-                                            <i class="fa fa-file-text-o" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.reference_page') }}</span>
+                                            <i class="fa fa-file-text-o" aria-hidden="true"></i> 参考页
                                         </button>
                                     @endif
                                     @if ($packageFile)
-                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'package']) }}"
+                                        <a class="flt-row-action" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'package']) }}"
                                             title="{{ $t('actions.download') }}" aria-label="{{ $t('actions.download') }}">
-                                            <i class="fa fa-download" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.download') }}</span>
+                                            <i class="fa fa-download" aria-hidden="true"></i> 下载
                                         </a>
                                     @else
-                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                        <button class="flt-row-action" type="button" disabled
                                             title="{{ $t('actions.download') }}" aria-label="{{ $t('actions.download') }}">
-                                            <i class="fa fa-download" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.download') }}</span>
+                                            <i class="fa fa-download" aria-hidden="true"></i> 下载
                                         </button>
                                     @endif
                                     @if ($canManageProductLibrary)
-                                        <form method="post" action="{{ route('aikaipin.product-library.publication.update', $product) }}" style="display:inline" onsubmit="return confirm('{{ $product->is_published ? '确认下架该商品？下架后订阅运营系统将不再显示。' : '确认上架该商品？上架后订阅运营系统可以查看。' }}')">
+                                        <form method="post" action="{{ route('aikaipin.product-library.publication.update', $product) }}" onsubmit="return confirm('{{ $product->is_published ? '确认下架该商品？下架后订阅运营系统将不再显示。' : '确认上架该商品？上架后订阅运营系统可以查看。' }}')">
                                             @csrf @method('PATCH')
                                             <input type="hidden" name="is_published" value="{{ $product->is_published ? 0 : 1 }}">
-                                            <button class="btn {{ $product->is_published ? 'btn-warning' : 'btn-success' }} aikaipin-row-action-icon" type="submit"
+                                            <button class="flt-row-action" type="submit"
                                                 title="{{ $product->is_published ? '下架商品' : '上架商品' }}" aria-label="{{ $product->is_published ? '下架商品' : '上架商品' }}">
-                                                <i class="fa {{ $product->is_published ? 'fa-arrow-down' : 'fa-arrow-up' }}" aria-hidden="true"></i>
-                                                <span class="sr-only">{{ $product->is_published ? '下架商品' : '上架商品' }}</span>
+                                                <i class="fa {{ $product->is_published ? 'fa-arrow-down' : 'fa-arrow-up' }}" aria-hidden="true"></i> {{ $product->is_published ? '下架' : '上架' }}
                                             </button>
                                         </form>
-                                        <button class="btn btn-info aikaipin-row-action-icon" type="button" data-aikaipin-action="shopify-import"
+                                        <button class="flt-row-action" type="button" data-aikaipin-action="shopify-import"
                                             data-aikaipin-product-id="{{ $product->getKey() }}" data-aikaipin-product-code="{{ $product->product_code }}"
                                             data-aikaipin-product-name="{{ $productName }}" data-aikaipin-landing-page-url="{{ $product->landing_page_url }}"
                                             title="新增产品页资料" aria-label="新增产品页资料">
-                                            <i class="fa fa-file-excel-o" aria-hidden="true"></i>
-                                            <span class="sr-only">新增产品页资料</span>
+                                            <i class="fa fa-file-excel-o" aria-hidden="true"></i> 新增资料
                                         </button>
-                                        <button class="btn btn-primary aikaipin-row-action-icon" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}"
+                                        <button class="flt-row-action" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}"
                                             title="{{ $t('actions.edit') }}" aria-label="{{ $t('actions.edit') }}">
-                                            <i class="fa fa-pencil" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.edit') }}</span>
+                                            <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('actions.edit') }}
                                         </button>
-                                        <button class="btn btn-danger aikaipin-row-action-icon" type="button" data-aikaipin-action="delete"
+                                        <button class="flt-row-action" type="button" data-action="delete" data-aikaipin-action="delete"
                                             data-aikaipin-product-id="{{ $product->getKey() }}"
                                             data-aikaipin-product-code="{{ $product->product_code }}"
                                             data-aikaipin-product-name="{{ $productName }}"
                                             title="{{ $t('actions.delete') }}" aria-label="{{ $t('actions.delete') }}">
-                                            <i class="fa fa-trash" aria-hidden="true"></i>
-                                            <span class="sr-only">{{ $t('actions.delete') }}</span>
+                                            <i class="fa fa-trash" aria-hidden="true"></i> {{ $t('actions.delete') }}
                                         </button>
                                     @endif
                                 </div>
@@ -397,7 +384,7 @@
                             <div class="aikaipin-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-empty-message>{{ $t('messages.no_records') }}</p>
-                                <a class="btn btn-default btn-sm" href="{{ route('aikaipin.product-library.index') }}">{{ $t('filters.reset') }}</a>
+                                <a class="flt-btn" href="{{ route('aikaipin.product-library.index') }}">{{ $t('filters.reset') }}</a>
                             </div>
                         </td>
                     </tr>
@@ -407,9 +394,7 @@
             </div>
         </div>
         @if ($products->total() > 0)
-            <div class="box-footer clearfix">
-                @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])
-            </div>
+            @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products, 'perPage' => $perPage])
         @endif
     </div>
 </section>
