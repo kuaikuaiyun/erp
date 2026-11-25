@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\DepartmentPermissionScope;
+use App\Models\Portal;
 use App\Models\UserPermissionOverride;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -112,7 +113,25 @@ class DepartmentAuthorizationService
      */
     public function permissionsFor(AdminUser $user): Collection
     {
-        $permissionIds = $this->departmentPermissionIdsFor($user);
+        return $this->permissionsForDepartmentIds($user, $this->directDepartmentIds($user));
+    }
+
+    /**
+     * Return permissions contributed by departments that are allowed to enter
+     * the requested portal. A multi-department account must not carry page
+     * permissions from an unrelated business system into this portal.
+     */
+    public function permissionsForPortal(AdminUser $user, Portal $portal): Collection
+    {
+        return $this->permissionsForDepartmentIds(
+            $user,
+            $this->directDepartmentIdsForPortal($user, $portal),
+        );
+    }
+
+    private function permissionsForDepartmentIds(AdminUser $user, Collection $departmentIds): Collection
+    {
+        $permissionIds = $this->departmentPermissionIdsForIds($departmentIds);
 
         $overrides = UserPermissionOverride::query()
             ->where('user_id', $user->getKey())
@@ -139,7 +158,11 @@ class DepartmentAuthorizationService
 
     public function departmentPermissionIdsFor(AdminUser $user): Collection
     {
-        $directDepartmentIds = $this->directDepartmentIds($user);
+        return $this->departmentPermissionIdsForIds($this->directDepartmentIds($user));
+    }
+
+    private function departmentPermissionIdsForIds(Collection $directDepartmentIds): Collection
+    {
         $permissionIds = collect();
 
         if ($directDepartmentIds->isNotEmpty()) {
@@ -164,6 +187,42 @@ class DepartmentAuthorizationService
         return $permissionIds->filter()->unique()->values();
     }
 
+    public function directDepartmentIdsForPortal(AdminUser $user, Portal $portal): Collection
+    {
+        $directDepartmentIds = $this->directDepartmentIds($user);
+        if ($directDepartmentIds->isEmpty()) {
+            return collect();
+        }
+
+        $grantedRootIds = $portal->departmentGrants()
+            ->pluck('department_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique();
+        if ($grantedRootIds->isEmpty()) {
+            return collect();
+        }
+
+        $departments = Department::business()
+            ->get(['id', 'parent_id'])
+            ->keyBy(fn (Department $department): int => (int) $department->getKey());
+
+        return $directDepartmentIds
+            ->filter(function ($departmentId) use ($departments, $grantedRootIds): bool {
+                $department = $departments->get((int) $departmentId);
+                $visited = [];
+
+                while ($department && $department->parent_id && !in_array((int) $department->parent_id, $visited, true)) {
+                    $visited[] = (int) $department->parent_id;
+                    $department = $departments->get((int) $department->parent_id);
+                }
+
+                return $department
+                    && $grantedRootIds->contains((int) $department->getKey());
+            })
+            ->map(fn ($id): int => (int) $id)
+            ->values();
+    }
+
     public function hasPermission(AdminUser $user, string $permission, ?Collection $permissionSlugs = null): bool
     {
         if (in_array($permission, ['organization.accounts', 'organization.departments'], true)) {
@@ -171,6 +230,21 @@ class DepartmentAuthorizationService
         }
 
         $slugs = $permissionSlugs ?? $this->permissionsFor($user)->pluck('slug');
+
+        return $slugs->contains('*') || $slugs->contains($permission);
+    }
+
+    public function hasPermissionForPortal(
+        AdminUser $user,
+        Portal $portal,
+        string $permission,
+        ?Collection $permissionSlugs = null,
+    ): bool {
+        if (in_array($permission, ['organization.accounts', 'organization.departments'], true)) {
+            return $this->canManageOrganization($user);
+        }
+
+        $slugs = $permissionSlugs ?? $this->permissionsForPortal($user, $portal)->pluck('slug');
 
         return $slugs->contains('*') || $slugs->contains($permission);
     }
