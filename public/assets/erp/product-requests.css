@@ -261,6 +261,57 @@
 .product-request-image-lightbox-content img { display: block; max-width: 100%; max-height: calc(100vh - 52px); border-radius: 4px; background: #fff; box-shadow: 0 12px 40px rgba(0, 0, 0, .42); }
 .product-request-image-lightbox-close { position: absolute; z-index: 1; top: -13px; right: -13px; width: 32px; height: 32px; padding: 0; color: #fff; border: 1px solid rgba(255, 255, 255, .7); border-radius: 50%; background: rgba(23, 38, 52, .88); font-size: 24px; line-height: 27px; text-align: center; }
 body.product-request-lightbox-open { overflow: hidden; }
+.product-request-editor-modal:has(.product-request-assign-form) .product-request-workbench-modal-dialog,
+.product-request-editor-modal.product-request-assignment-modal-active .product-request-workbench-modal-dialog {
+    width: min(720px, calc(100vw - 32px)) !important;
+    max-width: 720px !important;
+    height: auto !important;
+    margin: 6vh auto 20px !important;
+}
+.product-request-editor-modal:has(.product-request-assign-form) .modal-content,
+.product-request-editor-modal:has(.product-request-assign-form) .modal-content > .product-request-assign-form,
+.product-request-editor-modal.product-request-assignment-modal-active .modal-content,
+.product-request-editor-modal.product-request-assignment-modal-active .modal-content > .product-request-assign-form {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 88vh !important;
+}
+.product-request-editor-modal .product-request-assign-form .modal-header { padding: 16px 20px; border-bottom: 1px solid #e3edf4; background: #f8fbfd; }
+.product-request-editor-modal .product-request-assign-form .modal-title { color: #294e66; font-size: 18px; font-weight: 700; }
+.product-request-editor-modal .product-request-assign-form .modal-body { flex: 0 1 auto !important; min-height: 0 !important; padding: 17px 20px; overflow-y: auto; background: #fff; }
+.product-request-editor-modal .product-request-assign-form .modal-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 9px; margin: 0; padding: 13px 20px; border-top: 1px solid #e3ebf1; background: #f8fbfd; }
+.product-request-editor-modal .product-request-assign-form .modal-footer .btn { min-width: 88px; margin: 0; border-radius: 5px; }
+.product-request-assign-intro { display: flex; align-items: flex-start; gap: 11px; padding: 11px 13px; border: 1px solid #d7e8f3; border-radius: 7px; background: #f3f9fd; color: #557287; }
+.product-request-assign-intro-icon { display: inline-flex; width: 32px; height: 32px; flex: 0 0 32px; align-items: center; justify-content: center; border-radius: 50%; background: #dff1fc; color: #2487bd; }
+.product-request-assign-intro strong { display: block; margin-bottom: 2px; color: #2e5872; }
+.product-request-assign-intro p { margin: 0; font-size: 12px; line-height: 1.55; }
+.product-request-assign-records { max-height: 78px; margin: 10px 0 14px; padding: 7px 12px 7px 28px; overflow-y: auto; border: 1px solid #edf1f4; border-radius: 6px; background: #fbfcfd; }
+.product-request-assign-records li { padding: 2px 0; color: #61798a; }
+.product-request-assign-report { color: #2f536b; font-weight: 600; }
+.product-request-assign-name, .product-request-assign-current { margin-left: 8px; }
+.product-request-assign-current { color: #889aa6; font-size: 12px; }
+.product-request-assignee-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+.product-request-assignee-heading label { margin: 0; color: #34576e; font-weight: 700; }
+.product-request-assignee-heading > span { color: #8a9ba7; font-size: 12px; }
+.product-request-assignee-search { display: flex; height: 42px; align-items: center; margin-bottom: 10px; overflow: hidden; border: 1px solid #cbdce8; border-radius: 8px; background: #f8fbfd; box-shadow: 0 1px 2px rgba(39, 83, 110, .04); transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.product-request-assignee-search:focus-within { border-color: #319bd0; background: #fff; box-shadow: 0 0 0 3px rgba(49, 155, 208, .12); }
+.product-request-assignee-search > i { position: static; display: inline-flex; width: 42px; height: 24px; flex: 0 0 42px; align-items: center; justify-content: center; color: #4b91b8; border-right: 1px solid #dbe7ef; }
+.product-request-assignee-search .form-control { height: 40px; padding: 0 12px; border: 0 !important; border-radius: 0; outline: 0; background: transparent; color: #31536a; box-shadow: none !important; }
+.product-request-assignee-search .form-control::placeholder { color: #9aabb6; }
+.product-request-assignee-options { display: grid; max-height: 228px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; overflow-y: auto; padding: 2px; }
+.product-request-assignee-option { position: relative; display: flex; min-width: 0; align-items: center; gap: 10px; margin: 0; padding: 10px 11px; border: 1px solid #dbe6ed; border-radius: 7px; background: #fff; cursor: pointer; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.product-request-assignee-option:hover { border-color: #8fc4e1; background: #f7fbfe; }
+.product-request-assignee-option.is-selected { border-color: #2495cd; background: #eef8fe; box-shadow: 0 0 0 2px rgba(36,149,205,.1); }
+.product-request-assignee-option input { position: absolute; opacity: 0; pointer-events: none; }
+.product-request-assignee-avatar { display: inline-flex; width: 32px; height: 32px; flex: 0 0 32px; align-items: center; justify-content: center; border-radius: 50%; background: #e4f2fa; color: #277ca9; font-weight: 700; }
+.product-request-assignee-copy { min-width: 0; flex: 1; }
+.product-request-assignee-copy strong { display: block; overflow: hidden; color: #31536a; text-overflow: ellipsis; white-space: nowrap; }
+.product-request-assignee-copy small { display: block; margin-top: 2px; color: #8396a3; font-weight: 400; }
+.product-request-assignee-check { display: none; color: #238ec5; }
+.product-request-assignee-option.is-selected .product-request-assignee-check { display: block; }
+.product-request-assignee-empty { grid-column: 1 / -1; padding: 20px; border: 1px dashed #d9e3ea; border-radius: 6px; color: #8a9ba7; text-align: center; }
+.product-request-assignee-option[hidden], .product-request-assignee-empty[hidden] { display: none !important; }
+.product-request-assignee-hint { margin: 8px 0 0; color: #287ca8; }
 .product-request-editor-modal .product-request-workbench-modal-dialog { width: 94vw; max-width: 1500px; height: calc(100vh - 36px); margin: 18px auto; }
 .product-request-editor-modal .modal-content { display: flex; height: 100%; min-height: 0; flex-direction: column; border: 0; border-radius: 5px; }
 .product-request-editor-modal .modal-content > form,

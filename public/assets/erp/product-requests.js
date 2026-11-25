@@ -1369,11 +1369,12 @@
 
     function initializeAssignment(root) {
         var select = root.querySelector ? root.querySelector('[data-product-request-assignee-select]') : null;
-        if (!select) { return; }
+        var choices = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll('[data-product-request-assignee-choice]')) : [];
+        if (!select && !choices.length) { return; }
+        if (editorModal) { editorModal.classList.add('product-request-assignment-modal-active'); }
         var hint = root.querySelector('[data-product-request-assignee-hint]');
-        function refreshHint() {
+        function refreshHint(option) {
             if (!hint) { return; }
-            var option = select.options[select.selectedIndex];
             if (!option || !option.value) {
                 hint.hidden = true;
                 hint.textContent = '';
@@ -1386,8 +1387,38 @@
                 .replace(':count', count);
             hint.hidden = false;
         }
-        select.addEventListener('change', refreshHint);
-        refreshHint();
+        if (select) {
+            function refreshSelectHint() {
+                refreshHint(select.options[select.selectedIndex]);
+            }
+            select.addEventListener('change', refreshSelectHint);
+            refreshSelectHint();
+        }
+        if (choices.length) {
+            choices.forEach(function (choice) {
+                choice.addEventListener('change', function () {
+                    choices.forEach(function (item) {
+                        var card = item.closest('[data-product-request-assignee-option]');
+                        if (card) { card.classList.toggle('is-selected', item.checked); }
+                    });
+                    refreshHint(choice);
+                });
+            });
+            var search = root.querySelector('[data-product-request-assignee-search]');
+            var noResult = root.querySelector('[data-product-request-assignee-no-result]');
+            if (search) {
+                search.addEventListener('input', function () {
+                    var keyword = search.value.trim().toLowerCase();
+                    var visible = 0;
+                    root.querySelectorAll('[data-product-request-assignee-option]').forEach(function (card) {
+                        var matched = !keyword || (card.getAttribute('data-search-text') || '').toLowerCase().indexOf(keyword) !== -1;
+                        card.hidden = !matched;
+                        if (matched) { visible += 1; }
+                    });
+                    if (noResult) { noResult.hidden = visible !== 0; }
+                });
+            }
+        }
     }
 
     function bindAssignCheckAll() {
@@ -1717,6 +1748,7 @@
 
     if (window.jQuery && editorModal) {
         window.jQuery(editorModal).on('hidden.bs.modal', function () {
+            editorModal.classList.remove('product-request-assignment-modal-active');
             setEditorMessage(config.loading, false);
         });
     }
