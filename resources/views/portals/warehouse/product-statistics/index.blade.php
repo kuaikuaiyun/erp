@@ -20,9 +20,28 @@
         'productId' => request('product_id', ''),
         'labels' => $labels,
     ];
+    $warehouseStatusOptions = [
+        '' => '全部',
+        'pending_review' => '待审核',
+        'pending' => '待整改',
+        'resolved' => '已整改',
+        'approved' => '已审核',
+    ];
+    $warehousePaginationTotal = (int) ($productPagination['total'] ?? 0);
+    $warehousePaginationPage = max(1, (int) ($productPagination['page'] ?? $productPagination['current_page'] ?? 1));
+    $warehousePaginationPerPage = max(1, (int) ($productPagination['per_page'] ?? 10));
+    $warehousePaginationLastPage = max(1, (int) ($productPagination['last_page'] ?? 1));
+    $warehousePaginationFrom = (int) ($productPagination['from'] ?? 0);
+    $warehousePaginationTo = (int) ($productPagination['to'] ?? 0);
+    $warehousePaginationQuery = request()->except(['page', 'per_page']);
+    $warehousePaginationUrl = static fn (int $page, ?int $perPage = null): string => route(
+        'warehouse.product-statistics.index',
+        array_merge($warehousePaginationQuery, ['page' => $page, 'per_page' => $perPage ?? $warehousePaginationPerPage])
+    );
 @endphp
 
 @push('styles')
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261021-2">
     <style>
         /* 规格详情 / 填写弹窗共用表格样式 */
@@ -171,20 +190,45 @@
         .wh-fill-item-images .wh-fill-physical-preview {
             width: 72px; min-width: 72px; height: 72px;
         }
-        /* 6 列布局：产品信息 | PCL 编号 | SKU与重量 | 实拍图 | 审核状态 | 操作 */
-        #warehouse-product-statistics-table { min-width: 0 !important; width: 100%; table-layout: fixed; }
+        /* 8 列布局：产品、PCL、SKU、最新订单、订单 ID、实拍图、状态、操作 */
+        .warehouse-product-statistics-template { padding-top: 0; }
+        .warehouse-product-statistics-template .product-statistics-filter-box { margin-bottom: 18px; }
+        .warehouse-product-statistics-template .product-statistics-filter-form { display: block; }
+        .warehouse-product-statistics-template .product-statistics-filters {
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px;
+        }
+        .warehouse-product-statistics-template .product-statistics-filter-field label { margin-bottom: 8px; }
+        .warehouse-product-statistics-template .product-statistics-filter-actions {
+            display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 14px;
+        }
+        .warehouse-product-statistics-template .product-statistics-list-toolbar { padding: 13px 18px; }
+        .warehouse-product-statistics-template .warehouse-product-count { color: #71899d; font-size: 12px; }
+        .warehouse-product-statistics-template .product-statistics-table-scroll { overflow: auto; }
+        #warehouse-product-statistics-table { min-width: 1420px !important; width: 100%; table-layout: fixed; }
         #warehouse-product-statistics-table th:nth-child(1),
-        #warehouse-product-statistics-table td:nth-child(1) { width: 24%; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(1) { width: 250px; min-width: 250px; }
         #warehouse-product-statistics-table th:nth-child(2),
         #warehouse-product-statistics-table td:nth-child(2) { width: 130px; min-width: 130px; }
         #warehouse-product-statistics-table th:nth-child(3),
         #warehouse-product-statistics-table td:nth-child(3) { width: 240px; min-width: 240px; }
         #warehouse-product-statistics-table th:nth-child(4),
-        #warehouse-product-statistics-table td:nth-child(4) { width: 200px; min-width: 200px; }
+        #warehouse-product-statistics-table td:nth-child(4) { width: 150px; min-width: 150px; }
         #warehouse-product-statistics-table th:nth-child(5),
-        #warehouse-product-statistics-table td:nth-child(5) { width: 90px; min-width: 90px; }
+        #warehouse-product-statistics-table td:nth-child(5) { width: 135px; min-width: 135px; }
         #warehouse-product-statistics-table th:nth-child(6),
-        #warehouse-product-statistics-table td:nth-child(6) { width: 220px; min-width: 220px; }
+        #warehouse-product-statistics-table td:nth-child(6) { width: 200px; min-width: 200px; }
+        #warehouse-product-statistics-table th:nth-child(7),
+        #warehouse-product-statistics-table td:nth-child(7) { width: 95px; min-width: 95px; }
+        #warehouse-product-statistics-table th:nth-child(8),
+        #warehouse-product-statistics-table td:nth-child(8) { width: 220px; min-width: 220px; }
+        #warehouse-product-statistics-table th { position: sticky; top: 0; }
+        #warehouse-product-statistics-table td { position: static; }
+        #warehouse-product-statistics-table th:nth-child(1),
+        #warehouse-product-statistics-table th:nth-child(2),
+        #warehouse-product-statistics-table th:last-child { left: auto; right: auto; box-shadow: none; }
+        #warehouse-product-statistics-table td:nth-child(1),
+        #warehouse-product-statistics-table td:nth-child(2),
+        #warehouse-product-statistics-table td:last-child { left: auto; right: auto; box-shadow: none; }
         #warehouse-product-statistics-table td:nth-child(1) { overflow: hidden; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell { min-width: 0; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-meta { min-width: 0; }
@@ -193,7 +237,23 @@
             display: inline-block; max-width: 100%; overflow: hidden;
             text-overflow: ellipsis; vertical-align: middle;
         }
-        #warehouse-product-statistics-table td:nth-child(6) .btn { margin: 1px 1px; padding: 3px 7px; }
+        .warehouse-product-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+        .warehouse-product-actions .flt-row-action { border-left: 0 !important; border-radius: 4px; }
+        .warehouse-product-actions .flt-row-action:hover { background: #edf7fd; color: #176f9d; }
+        .warehouse-product-actions .is-warning { color: #b87916; }
+        .warehouse-product-actions .is-warning:hover { background: #fff7e7; color: #94600f; }
+        .warehouse-product-actions .is-success { color: #29885b; }
+        .warehouse-product-actions .is-success:hover { background: #edf9f3; color: #216c49; }
+        .warehouse-product-actions .is-info { color: #397da4; }
+        .warehouse-product-statistics-template .flt-pagination { border-top: 1px solid #e3edf4; }
+        .warehouse-product-statistics-template .flt-pagination-total { margin-right: auto; }
+        .warehouse-product-statistics-template .flt-pagination .is-disabled { opacity: .45; pointer-events: none; }
+        .warehouse-product-statistics-template .flt-pagination form { display: flex; align-items: center; gap: 8px; }
+        @media (max-width: 900px) {
+            .warehouse-product-statistics-template .product-statistics-filters { grid-template-columns: 1fr; }
+            .warehouse-product-statistics-template .flt-pagination { justify-content: center; }
+            .warehouse-product-statistics-template .flt-pagination-total { width: 100%; margin: 0; text-align: center; }
+        }
         /* 列表列：SKU 与重量 */
         #warehouse-product-statistics-table .product-statistics-variant-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
         #warehouse-product-statistics-table .wh-count-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; }
@@ -239,14 +299,13 @@
         <h1>{{ $labels['pageTitle'] }} <small>{{ $labels['subtitle'] }}</small></h1>
     </section>
 
-    <section class="content logistics-page product-statistics-page">
-        <div class="box box-solid product-statistics-filter-box">
-            <div class="box-body">
+    <section class="content logistics-page product-statistics-page flt warehouse-product-statistics-template">
+        <div class="flt-card flt-filters product-statistics-filter-box">
                 <form id="warehouse-product-statistics-filter-form" class="product-statistics-filter-form" autocomplete="off" method="get" action="{{ route('warehouse.product-statistics.index') }}">
                     <input id="warehouse-product-statistics-sort-field" type="hidden" name="sort" value="{{ $filters['sort'] }}">
                     <input id="warehouse-product-statistics-direction-field" type="hidden" name="direction" value="{{ $filters['direction'] }}">
                     <input id="warehouse-product-statistics-per-page-field" type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
-                    <div class="product-statistics-filters">
+                    <div class="flt-filter-grid product-statistics-filters">
                         <div class="product-statistics-filter-field">
                             <label>产品名称</label>
                             <input name="name" type="search" class="form-control" value="{{ $filters['name'] }}" placeholder="输入产品名称">
@@ -261,38 +320,40 @@
                         <div class="product-statistics-filter-field">
                             <label>审核状态</label>
                             <select name="warehouse_status" class="form-control">
-                                <option value="">全部</option>
-                                <option value="pending_review" @selected(($filters['warehouse_status'] ?? '') === 'pending_review')>待审核</option>
-                                <option value="pending" @selected(($filters['warehouse_status'] ?? '') === 'pending')>待整改</option>
-                                <option value="resolved" @selected(($filters['warehouse_status'] ?? '') === 'resolved')>已整改</option>
-                                <option value="approved" @selected(($filters['warehouse_status'] ?? '') === 'approved')>已审核</option>
+                                @foreach($warehouseStatusOptions as $value => $label)
+                                    <option value="{{ $value }}" @selected(($filters['warehouse_status'] ?? '') === $value)>{{ $label }}</option>
+                                @endforeach
                             </select>
                         </div>
                     </div>
-                    <div class="product-statistics-filter-actions">
-                        <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
-                        <a class="btn btn-default" href="{{ route('warehouse.product-statistics.index') }}">重置</a>
+                    <div class="flt-filter-actions product-statistics-filter-actions">
+                        <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
+                        <a class="flt-btn" href="{{ route('warehouse.product-statistics.index') }}"><i class="fa fa-refresh"></i> 重置</a>
                     </div>
                 </form>
-            </div>
         </div>
 
-        <div class="box box-solid product-statistics-table-box">
-            <div class="box-header with-border product-statistics-list-toolbar">
-                <h3 class="box-title">产品列表 <small>共 {{ $productPagination['total'] }} 条</small></h3>
+        <div class="flt-card flt-records product-statistics-table-box">
+            <div class="flt-toolbar product-statistics-list-toolbar">
+                <div class="flt-selection">
+                    <strong>产品列表</strong>
+                    <span class="flt-toolbar-divider"></span>
+                    <span class="warehouse-product-count">共 {{ $warehousePaginationTotal }} 条</span>
+                </div>
             </div>
-            <div class="box-body table-responsive no-padding product-statistics-table-scroll">
+            <div class="flt-table-region">
+            <div class="flt-table-scroll product-statistics-table-scroll">
                 <table class="table table-hover product-statistics-table" id="warehouse-product-statistics-table">
                     <thead>
                     <tr>
                         <th>{{ $labels['productInfo'] }}</th>
-                        <th style="width:130px;">{{ $labels['productCode'] }}</th>
-                        <th style="width:240px;">{{ $labels['specification'] }}</th>
-                        <th style="width:165px;">最新出单时间</th>
-                        <th style="width:130px;">对应订单 ID</th>
-                        <th style="width:200px;">实拍图</th>
-                        <th style="width:90px;">审核状态</th>
-                        <th class="product-statistics-operation-column" style="width:220px;">操作</th>
+                        <th>{{ $labels['productCode'] }}</th>
+                        <th>{{ $labels['specification'] }}</th>
+                        <th>最新出单时间</th>
+                        <th>对应订单 ID</th>
+                        <th>实拍图</th>
+                        <th>审核状态</th>
+                        <th class="product-statistics-operation-column">操作</th>
                     </tr>
                     </thead>
                     <tbody id="warehouse-product-statistics-body">
@@ -371,10 +432,10 @@
                             {{-- 审核状态 --}}
                             <td>
                                 @switch($product['warehouse_display_status'] ?? 'pending_review')
-                                    @case('approved') <span class="label label-success">已审核</span> @break
-                                    @case('pending') <span class="label label-warning">待整改</span> @break
-                                    @case('resolved') <span class="label label-info">已整改</span> @break
-                                    @default <span class="label label-default">待审核</span>
+                                    @case('approved') <span class="flt-status">已审核</span> @break
+                                    @case('pending') <span class="flt-status" data-status="pending">待整改</span> @break
+                                    @case('resolved') <span class="flt-status">已整改</span> @break
+                                    @default <span class="flt-status" data-status="disabled">待审核</span>
                                 @endswitch
                             </td>
                             {{-- 操作 --}}
@@ -390,24 +451,26 @@
                                         ? collect($product['variant_skus'] ?? [])->pluck('sku')->filter()->unique()->values()
                                         : $missingWeightSkus;
                                 @endphp
-                                <button type="button" class="btn btn-default btn-xs warehouse-product-statistics-view-btn" data-product-id="{{ $product['id'] }}">
-                                    <i class="fa fa-eye"></i> {{ $labels['view'] }}
-                                </button>
-                                <button type="button" class="btn btn-warning btn-xs warehouse-product-statistics-fill-btn" data-product-id="{{ $product['id'] }}">
-                                    <i class="fa fa-exclamation-triangle"></i> {{ $labels['fill'] }}
-                                </button>
-                                @if(in_array(($product['warehouse_display_status'] ?? 'pending_review'), ['pending_review', 'resolved'], true))
-                                    <button type="button" class="btn btn-success btn-xs warehouse-product-statistics-approve-btn" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-review-status="{{ $product['warehouse_review_status'] ?? 'pending' }}">
-                                        <i class="fa fa-check"></i> {{ $labels['approve'] }}
+                                <div class="warehouse-product-actions">
+                                    <button type="button" class="flt-row-action warehouse-product-statistics-view-btn" data-product-id="{{ $product['id'] }}">
+                                        <i class="fa fa-eye"></i> {{ $labels['view'] }}
                                     </button>
-                                @endif
-                                @if($refreshSkus->isNotEmpty())
-                                    <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
-                                            data-skus="{{ $refreshSkus->implode(',') }}"
-                                            title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已整改，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
-                                        <i class="fa fa-cloud-download"></i> 抓取最新数据
+                                    <button type="button" class="flt-row-action is-warning warehouse-product-statistics-fill-btn" data-product-id="{{ $product['id'] }}">
+                                        <i class="fa fa-exclamation-triangle"></i> {{ $labels['fill'] }}
                                     </button>
-                                @endif
+                                    @if(in_array(($product['warehouse_display_status'] ?? 'pending_review'), ['pending_review', 'resolved'], true))
+                                        <button type="button" class="flt-row-action is-success warehouse-product-statistics-approve-btn" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-review-status="{{ $product['warehouse_review_status'] ?? 'pending' }}">
+                                            <i class="fa fa-check"></i> {{ $labels['approve'] }}
+                                        </button>
+                                    @endif
+                                    @if($refreshSkus->isNotEmpty())
+                                        <button type="button" class="flt-row-action is-info warehouse-product-statistics-refresh-weight-btn"
+                                                data-skus="{{ $refreshSkus->implode(',') }}"
+                                                title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已整改，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
+                                            <i class="fa fa-cloud-download"></i> 抓取最新数据
+                                        </button>
+                                    @endif
+                                </div>
                             </td>
                         </tr>
                     @empty
@@ -420,14 +483,46 @@
                     </tbody>
                 </table>
             </div>
+            </div>
 
-            @if($productPagination['total'] > 0)
-                @include('portals.partials.pagination', [
-                    'p' => $productPagination,
-                    'routeName' => 'warehouse.product-statistics.index',
-                    'queryParams' => request()->except(['page', 'per_page']),
-                    'perPageOptions' => [5, 10, 20],
-                ])
+            @if($warehousePaginationTotal > 0)
+                <nav class="flt-pagination" aria-label="产品列表分页">
+                    <span class="flt-pagination-total">显示 {{ $warehousePaginationFrom }}-{{ $warehousePaginationTo }} 条，共 {{ $warehousePaginationTotal }} 条</span>
+                    <form method="get" action="{{ route('warehouse.product-statistics.index') }}">
+                        @foreach($warehousePaginationQuery as $key => $value)
+                            @if(is_scalar($value))
+                                <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                            @endif
+                        @endforeach
+                        <input type="hidden" name="page" value="1">
+                        <label>每页显示
+                            <select name="per_page" onchange="this.form.submit()">
+                                @foreach([5, 10, 20] as $size)
+                                    <option value="{{ $size }}" @selected($warehousePaginationPerPage === $size)>{{ $size }}</option>
+                                @endforeach
+                            </select>
+                            条
+                        </label>
+                    </form>
+                    <a class="flt-btn {{ $warehousePaginationPage <= 1 ? 'is-disabled' : '' }}"
+                       href="{{ $warehousePaginationPage > 1 ? $warehousePaginationUrl($warehousePaginationPage - 1) : '#' }}" rel="prev">上一页</a>
+                    <strong>第 {{ $warehousePaginationPage }} / {{ $warehousePaginationLastPage }} 页</strong>
+                    <a class="flt-btn {{ $warehousePaginationPage >= $warehousePaginationLastPage ? 'is-disabled' : '' }}"
+                       href="{{ $warehousePaginationPage < $warehousePaginationLastPage ? $warehousePaginationUrl($warehousePaginationPage + 1) : '#' }}" rel="next">下一页</a>
+                    <form method="get" action="{{ route('warehouse.product-statistics.index') }}">
+                        @foreach($warehousePaginationQuery as $key => $value)
+                            @if(is_scalar($value))
+                                <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                            @endif
+                        @endforeach
+                        <input type="hidden" name="per_page" value="{{ $warehousePaginationPerPage }}">
+                        <label>跳至
+                            <input type="number" name="page" min="1" max="{{ $warehousePaginationLastPage }}" value="{{ $warehousePaginationPage }}" required>
+                            页
+                        </label>
+                        <button type="submit" class="flt-btn flt-primary">跳转</button>
+                    </form>
+                </nav>
             @endif
         </div>
     </section>
@@ -533,11 +628,11 @@
             }
 
             function renderReviewStatus(row, status) {
-                var td = row.querySelectorAll('td')[4];
+                var td = row.querySelectorAll('td')[6];
                 if (!td) return;
                 td.innerHTML = status === 'approved'
-                    ? '<span class="label label-success">已审核</span>'
-                    : '<span class="label label-warning">待审核</span>';
+                    ? '<span class="flt-status">已审核</span>'
+                    : '<span class="flt-status" data-status="disabled">待审核</span>';
             }
 
             document.addEventListener('click', function (e) {
