@@ -109,10 +109,12 @@ class FashionAppLovinPerformanceReportController extends Controller
         ]);
         $timezone = (string) ($filters['timezone'] ?? '-08:00');
         $today = now($timezone)->startOfDay();
+        $closedPeriodEnd = $today->copy()->subDays(2);
         $dateRange = (string) ($filters['date_range'] ?? ($request->hasAny(['date_from', 'date_to']) ? 'custom' : 'last_7'));
         [$presetFrom, $presetTo] = match ($dateRange) {
             'yesterday' => [$today->copy()->subDay(), $today->copy()->subDay()],
             'last_3' => [$today->copy()->subDays(2), $today->copy()],
+            'last_7' => [$closedPeriodEnd->copy()->subDays(6), $closedPeriodEnd->copy()],
             'last_15' => [$today->copy()->subDays(14), $today->copy()],
             'last_30' => [$today->copy()->subDays(29), $today->copy()],
             'last_60' => [$today->copy()->subDays(59), $today->copy()],
