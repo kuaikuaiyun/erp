@@ -67,48 +67,56 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261125-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-selection-proposal.js?v=20261020-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-selection-proposal.js?v=20261125-1"></script>
 @endpush
 
 @section('content')
-<section class="content aikaipin-submission-page" data-aikaipin-submission-page="selection-proposal">
-    <div class="box box-solid aikaipin-submission-filter-box">
-        <div class="box-body">
-            <form class="aikaipin-submission-filter-form" method="get" action="{{ route('aikaipin.selection-proposals.index') }}" data-aikaipin-list-filter-form>
-                <div class="aikaipin-submission-filter-grid">
+<section class="content aikaipin-submission-page flt" data-aikaipin-submission-page="selection-proposal">
+    <div class="flt-card flt-filters aikaipin-submission-filter-box">
+            <form class="aikaipin-submission-filter-form" method="get" action="{{ route('aikaipin.selection-proposals.index') }}" data-aikaipin-list-filter-form
+                data-search-options="搜索选项" data-clear-choice="清除选择" data-no-options="没有匹配选项">
+                <div class="flt-filter-grid aikaipin-submission-filter-grid">
                     <div class="aikaipin-submission-filter-field">
                         <label for="aikaipin-selection-proposal-keyword">{{ $t('selection_proposal.filters.keyword') }}</label>
                         <input id="aikaipin-selection-proposal-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off"
                             placeholder="{{ $t('selection_proposal.filters.keyword_placeholder') }}" data-aikaipin-list-filter>
                     </div>
-                    <div class="aikaipin-submission-filter-actions">
-                        <button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ $t('selection_proposal.filters.search') }}</button>
-                        <a class="btn btn-default" href="{{ route('aikaipin.selection-proposals.index') }}"><i class="fa fa-undo" aria-hidden="true"></i> {{ $t('selection_proposal.filters.reset') }}</a>
+                    <div class="aikaipin-submission-filter-field">
+                        <label for="aikaipin-selection-proposal-status">状态</label>
+                        <select id="aikaipin-selection-proposal-status" name="status" data-aikaipin-searchable-select>
+                            <option value="">全部状态</option>
+                            <option value="active" @selected($filters['status'] === 'active')>{{ $t('selection_proposal.messages.status_active') }}</option>
+                            <option value="withdrawn" @selected($filters['status'] === 'withdrawn')>{{ $t('selection_proposal.messages.status_withdrawn') }}</option>
+                        </select>
                     </div>
                 </div>
+                <div class="flt-filter-actions aikaipin-submission-filter-actions">
+                    <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ $t('selection_proposal.filters.search') }}</button>
+                    <a class="flt-btn" href="{{ route('aikaipin.selection-proposals.index') }}"><i class="fa fa-undo" aria-hidden="true"></i> {{ $t('selection_proposal.filters.reset') }}</a>
+                </div>
             </form>
-        </div>
     </div>
 
-    <div class="box box-solid aikaipin-submission-list-box">
-        <div class="box-header with-border aikaipin-submission-list-toolbar">
-            <div class="aikaipin-submission-list-toolbar-summary">
+    <div class="flt-card flt-records aikaipin-submission-list-box">
+        <div class="flt-toolbar aikaipin-submission-list-toolbar">
+            <div class="flt-selection aikaipin-submission-list-toolbar-summary">
                 <i class="fa fa-list-alt" aria-hidden="true"></i>
                 <span>{{ trans_choice('aikaipin.selection_proposal.list.record_count', $proposals->total(), ['count' => $proposals->total()]) }}</span>
             </div>
-            <div class="aikaipin-submission-list-toolbar-actions">
-                <button class="btn btn-primary btn-sm" type="button" data-aikaipin-open-modal="selection">
+            <div class="flt-toolbar-actions aikaipin-submission-list-toolbar-actions">
+                <button class="flt-btn flt-primary" type="button" data-aikaipin-open-modal="selection">
                     <i class="fa fa-plus" aria-hidden="true"></i> {{ $t('selection_proposal.actions.new') }}
                 </button>
             </div>
         </div>
-        <div class="box-body no-padding">
-            <div class="table-responsive">
+        <div class="flt-table-region">
+            <div class="flt-table-scroll table-responsive">
                 <table class="table table-hover aikaipin-submission-table aikaipin-selection-proposal-table">
                     <colgroup>
                         <col class="aikaipin-selection-code-column">
@@ -209,9 +217,9 @@
                             <td class="aikaipin-selection-status-cell">
                                 <div class="aikaipin-selection-cell-content">
                                     @if ($proposal->withdrawn_at)
-                                        <span class="label label-default">{{ $t('selection_proposal.messages.status_withdrawn') }}</span>
+                                        <span class="flt-status" data-status="disabled">{{ $t('selection_proposal.messages.status_withdrawn') }}</span>
                                     @else
-                                        <span class="label label-success">{{ $t('selection_proposal.messages.status_active') }}</span>
+                                        <span class="flt-status">{{ $t('selection_proposal.messages.status_active') }}</span>
                                     @endif
                                 </div>
                             </td>
@@ -220,15 +228,15 @@
                             </td>
                             <td class="aikaipin-submission-operation-cell aikaipin-selection-operation-cell">
                                 <div class="aikaipin-selection-cell-content aikaipin-selection-cell-content--operation">
-                                    <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('selection_proposal.table.operation') }}">
-                                        <button class="btn btn-default" type="button" data-aikaipin-selection-view data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                    <div class="aikaipin-selection-row-actions" role="group" aria-label="{{ $t('selection_proposal.table.operation') }}">
+                                        <button class="flt-row-action" type="button" data-aikaipin-selection-view data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
                                             <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('selection_proposal.actions.view') }}
                                         </button>
                                         @if ($canEditProposal)
-                                            <button class="btn btn-primary" type="button" data-aikaipin-selection-edit data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                            <button class="flt-row-action" type="button" data-aikaipin-selection-edit data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
                                                 <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('selection_proposal.actions.edit') }}
                                             </button>
-                                            <button class="btn btn-default" type="button" data-aikaipin-selection-withdraw data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                            <button class="flt-row-action" data-action="delete" type="button" data-aikaipin-selection-withdraw data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
                                                 <i class="fa fa-reply" aria-hidden="true"></i> {{ $t('selection_proposal.actions.withdraw') }}
                                             </button>
                                         @endif
@@ -249,11 +257,44 @@
                 </table>
             </div>
         </div>
-        @if ($proposals->hasPages())
-            <div class="box-footer clearfix aikaipin-submission-pagination">
-                <div class="pull-right">{{ $proposals->links() }}</div>
-            </div>
-        @endif
+        @php
+            $currentPage = $proposals->currentPage();
+            $lastPage = max(1, $proposals->lastPage());
+            $paginationQuery = request()->query();
+        @endphp
+        <nav class="flt-pagination aikaipin-submission-pagination" aria-label="选品提报分页">
+            <span class="aikaipin-pagination-summary">显示 {{ $proposals->firstItem() ?? 0 }}-{{ $proposals->lastItem() ?? 0 }} 条，共 {{ $proposals->total() }} 条</span>
+            <form method="get" action="{{ request()->url() }}" data-loading="off">
+                @foreach ($paginationQuery as $key => $value)
+                    @if (! in_array($key, ['page', 'per_page'], true) && ! is_array($value))
+                        <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                    @endif
+                @endforeach
+                <label>每页显示
+                    <select name="per_page" aria-label="每页显示条数" onchange="this.form.submit()">
+                        @foreach ([20, 50, 100] as $size)
+                            <option value="{{ $size }}" @selected((int) $perPage === $size)>{{ $size }}</option>
+                        @endforeach
+                    </select> 条
+                </label>
+            </form>
+            <a class="flt-btn {{ $proposals->onFirstPage() ? 'is-disabled' : '' }}" href="{{ $proposals->previousPageUrl() ?: '#' }}" @if($proposals->onFirstPage()) aria-disabled="true" tabindex="-1" @endif>
+                <i class="fa fa-angle-left" aria-hidden="true"></i> 上一页
+            </a>
+            <strong>第 {{ $currentPage }} / {{ $lastPage }} 页</strong>
+            <a class="flt-btn {{ $proposals->hasMorePages() ? '' : 'is-disabled' }}" href="{{ $proposals->nextPageUrl() ?: '#' }}" @unless($proposals->hasMorePages()) aria-disabled="true" tabindex="-1" @endunless>
+                下一页 <i class="fa fa-angle-right" aria-hidden="true"></i>
+            </a>
+            <form method="get" action="{{ request()->url() }}" data-loading="off">
+                @foreach ($paginationQuery as $key => $value)
+                    @if ($key !== 'page' && ! is_array($value))
+                        <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                    @endif
+                @endforeach
+                <label>跳至 <input type="number" name="page" min="1" max="{{ $lastPage }}" step="1" required aria-label="跳转页码"> 页</label>
+                <button class="flt-btn flt-primary" type="submit">跳转</button>
+            </form>
+        </nav>
     </div>
 </section>
 
