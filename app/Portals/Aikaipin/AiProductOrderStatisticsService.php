@@ -142,6 +142,10 @@ class AiProductOrderStatisticsService
     /** @param list<int> $publicationIds */
     private function query(array $publicationIds, ?CarbonInterface $from, ?CarbonInterface $to): array
     {
+        // Collection::chunk() preserves the original numeric keys. The second
+        // and subsequent chunks therefore start at 500, 1000, ...; PDO only
+        // accepts positional bindings with consecutive zero-based keys.
+        $publicationIds = array_values($publicationIds);
         $placeholders = implode(',', array_fill(0, count($publicationIds), '?'));
         $currentMatch = $this->identifierMatchSql('publications', 'items');
         $candidateMatch = $this->identifierMatchSql('candidate', 'items');
@@ -195,7 +199,7 @@ class AiProductOrderStatisticsService
         SQL;
 
         return DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->select($sql, $bindings);
+            ->select($sql, array_values($bindings));
     }
 
     private function identifierMatchSql(string $publicationAlias, string $itemAlias): string
