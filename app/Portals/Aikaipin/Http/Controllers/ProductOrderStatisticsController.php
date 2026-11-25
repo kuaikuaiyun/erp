@@ -59,7 +59,7 @@ class ProductOrderStatisticsController extends Controller
         $pagePositions = $pageIds->flip();
         $pagePublications = $query
             ->with([
-                'product:id,product_code,name',
+                'product:id,product_code,name,images,updated_at',
                 'productPage:id,aikaipin_product_id,name',
                 'store:id,shop_name,domain',
             ])
