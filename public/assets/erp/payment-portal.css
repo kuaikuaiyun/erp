@@ -6,7 +6,7 @@
     padding-bottom: 0;
 }
 .payment-product-risk-page .payment-risk-filter-grid {
-    grid-template-columns: minmax(260px, 1.3fr) repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(260px, 1.3fr) repeat(2, minmax(0, 1fr));
     align-items: start;
 }
 .payment-product-risk-page .payment-risk-filter-grid .flt-field-label {
@@ -157,6 +157,11 @@
 .payment-product-risk-page .payment-product-scroll-table {
     max-width: 100%;
     overflow-x: auto;
+}
+@media (min-width: 768px) {
+    .payment-product-risk-page .payment-product-scroll-table {
+        height: clamp(530px, calc(100vh - 250px), 790px);
+    }
 }
 .payment-product-risk-page .payment-product-grouped-table {
     min-width: 1800px;
@@ -319,6 +324,9 @@
     font-size: 12px;
 }
 .payment-product-risk-page .payment-risk-summary-toggle { flex-shrink: 0; }
+.payment-product-risk-page .payment-risk-summary-card.is-loading > summary { cursor: default; }
+.payment-product-risk-page .payment-risk-summary-card:not(.is-loading) .payment-risk-summary-loading,
+.payment-product-risk-page .payment-risk-summary-card.is-loading :is(.payment-risk-summary-expand, .payment-risk-summary-collapse, [data-payment-risk-summary-body]),
 .payment-product-risk-page .payment-risk-summary-card:not([open]) .payment-risk-summary-collapse,
 .payment-product-risk-page .payment-risk-summary-card[open] .payment-risk-summary-expand { display: none; }
 .payment-product-risk-page [data-payment-risk-summary-body] { padding: 12px 14px; }
@@ -349,4 +357,174 @@
     margin-top: 4px;
     color: #60788f;
     font-size: 11px;
+}
+
+.payment-product-risk-page .payment-risk-list-loading {
+    z-index: 10;
+    border-radius: inherit;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.payment-product-risk-page .payment-risk-list-error {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0d6da;
+    background: #fff5f6;
+    color: #9d3745;
+}
+
+.payment-product-risk-page :is(.payment-risk-list-loading, .payment-risk-list-error)[hidden],
+#payment-product-detail-modal .payment-risk-detail-filters[hidden] {
+    display: none;
+}
+
+#payment-product-detail-modal {
+    overflow: hidden;
+}
+
+#payment-product-detail-modal .modal-dialog {
+    margin-block: 12px;
+}
+
+#payment-product-detail-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+}
+
+#payment-product-detail-modal :is(.modal-header, .modal-footer, .payment-detail-tabs) {
+    flex-shrink: 0;
+}
+
+#payment-product-detail-modal .modal-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 12px 18px 0;
+}
+
+#payment-product-detail-modal .payment-risk-detail-scroll {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: #869caf #edf2f6;
+    scrollbar-gutter: stable;
+    padding: 12px 0;
+}
+
+#payment-product-detail-modal :is(.payment-detail-tabs button, .payment-risk-detail-scroll, .flt-table-scroll):focus-visible {
+    outline: 2px solid #2788c9;
+    outline-offset: -2px;
+}
+
+#payment-product-detail-modal [data-payment-product-detail-body] {
+    margin: 0;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+}
+
+#payment-product-detail-modal .payment-risk-detail-filters {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+}
+
+#payment-product-detail-modal .payment-risk-detail-filters .flt-filter-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+    gap: 10px 12px;
+}
+
+#payment-product-detail-modal .payment-risk-detail-filter-selects {
+    display: contents;
+}
+
+#payment-product-detail-modal .payment-risk-detail-filter-selects .flt-picker-panel {
+    min-width: 0;
+}
+
+#payment-product-detail-modal .payment-detail-state {
+    gap: 10px;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records {
+    overflow: hidden;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records .flt-table-scroll {
+    max-height: clamp(180px, 48vh, 460px);
+}
+
+#payment-product-detail-modal .payment-risk-detail-records table {
+    min-width: max(100%, 980px);
+    table-layout: fixed;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records th {
+    top: 0;
+    left: auto;
+    right: auto;
+    width: auto;
+    padding: 10px 8px;
+    z-index: 2;
+    box-shadow: none;
+    white-space: normal;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records td {
+    position: static;
+    padding: 11px 8px;
+    box-shadow: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records .payment-detail-sort {
+    max-width: 100%;
+    padding: 0;
+    white-space: normal;
+}
+
+#payment-product-detail-modal .payment-risk-detail-records td[colspan] {
+    height: 96px;
+}
+
+#payment-product-detail-modal .payment-risk-detail-pagination {
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-top: 1px solid #dfe9f1;
+}
+
+#payment-product-detail-modal .payment-risk-detail-page-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+@media (max-width: 767px) {
+    .payment-product-risk-page .payment-product-scroll-table {
+        max-height: min(62vh, 520px);
+        overflow: auto;
+    }
+    #payment-product-detail-modal .modal-dialog { margin-block: 8px; }
+    #payment-product-detail-modal .modal-content {
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - 16px);
+    }
+    #payment-product-detail-modal .modal-body { padding-inline: 10px; }
+    #payment-product-detail-modal .payment-detail-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0;
+    }
+    #payment-product-detail-modal .payment-detail-tabs button {
+        padding: 8px 4px;
+        font-size: 12px;
+    }
 }

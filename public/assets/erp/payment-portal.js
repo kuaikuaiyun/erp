@@ -35,6 +35,14 @@
 
         initFormulaTooltips(page);
 
+        var riskPanel = page.find('[data-payment-risk-list]');
+        var riskFilter = page.find('[data-payment-product-filter]');
+        var riskExportModal = page.find('#payment-risk-export-modal');
+        var riskExportFilters = riskExportModal.find('[data-payment-risk-export-filters]');
+        var riskApplied = Object.fromEntries(riskExportFilters.find('input').serializeArray().map(function (field) {
+            return [field.name, field.value];
+        }));
+
         page.on('click', '[data-payment-refund-report-toggle]', function () {
             var button = $(this);
             var panel = button.closest('[data-payment-refund-report-panel]');
@@ -42,8 +50,7 @@
             if (lazyPanel.length && String(lazyPanel.attr('data-loaded')) !== 'true') {
                 var text = config.refundReport || {};
                 var originalHtml = button.html();
-                var refundReportQuery = page.find('[data-payment-product-filter]').serializeArray().filter(function (field) { return field.name !== 'page'; });
-                refundReportQuery.push({ name: 'tab', value: 'refund_reason' });
+                var refundReportQuery = Object.assign({}, riskApplied, { tab: 'refund_reason', page: 1 });
                 button.prop('disabled', true).attr('aria-busy', 'true').html('<i class="fa fa-spinner fa-spin"></i> <span>' + escapeHtml(text.loading || '') + '</span>');
                 $.ajax({
                     url: String(lazyPanel.data('url') || ''),
@@ -58,6 +65,7 @@
                     loadedPanel.find('[data-payment-refund-report-toggle] span').text(String(button.data('collapseText') || ''));
                     lazyPanel.replaceWith(loadedPanel);
                 }).fail(function () {
+                    if (!lazyPanel[0].isConnected) return;
                     button.prop('disabled', false).attr('aria-busy', 'false').html(originalHtml);
                     notify('error', '', text.load_failed || '');
                 });
@@ -70,26 +78,55 @@
 
         page.find('[data-payment-risk-summary]').each(function () {
             var card = this;
+            var summary = $(card).children('summary');
+            var button = summary.find('.payment-risk-summary-toggle');
             var body = card.querySelector('[data-payment-risk-summary-body]');
             var loaded = false;
             var request = null;
-            card.addEventListener('toggle', function () {
-                if (!card.open || loaded || request) return;
 
-                body.textContent = card.dataset.loading;
+            function showSummaryError() {
+                body.textContent = card.dataset.failed;
+                card.open = true;
+            }
+
+            $(card).on('payment:risk-scope-changed', function () {
+                card.open = false;
+                if (request) request.abort();
+                loaded = false;
+                body.textContent = '';
+            });
+
+            summary.on('click', function (event) {
+                if (request) {
+                    event.preventDefault();
+                    return;
+                }
+                if (card.open || loaded) return;
+                event.preventDefault();
+
+                $(card).addClass('is-loading');
+                summary.attr('aria-disabled', 'true');
+                button.addClass('disabled');
                 body.setAttribute('aria-busy', 'true');
-                request = $.get(card.dataset.url).done(function (html) {
+                var summaryQuery = Object.assign({}, riskApplied);
+                delete summaryQuery.page;
+                request = $.ajax({ url: card.dataset.url, data: summaryQuery, dataType: 'html', timeout: 45000 });
+                request.done(function (html) {
                     var content = $(html).filter('.payment-risk-summary-scroll');
                     if (content.length !== 1) {
-                        body.textContent = card.dataset.failed;
+                        showSummaryError();
                         return;
                     }
                     $(body).empty().append(content);
                     loaded = true;
-                }).fail(function () {
-                    body.textContent = card.dataset.failed;
+                    card.open = true;
+                }).fail(function (xhr, status) {
+                    if (status !== 'abort') showSummaryError();
                 }).always(function () {
                     request = null;
+                    $(card).removeClass('is-loading');
+                    summary.removeAttr('aria-disabled');
+                    button.removeClass('disabled');
                     body.removeAttribute('aria-busy');
                 });
             });
@@ -115,14 +152,10 @@
             });
         }
 
-        var riskExportModal = page.find('#payment-risk-export-modal');
-        var riskPanel = page.find('.payment-product-risk-primary-panel');
-        var riskChecks = riskPanel.find('[data-payment-risk-check]');
-        var riskCheckPage = riskPanel.find('[data-payment-risk-check-page]');
-
         function updateRiskSelection() {
+            var riskChecks = riskPanel.find('[data-payment-risk-check]');
             var count = riskChecks.filter(':checked').length;
-            riskCheckPage.prop({
+            riskPanel.find('[data-payment-risk-check-page]').prop({
                 checked: count > 0 && count === riskChecks.length,
                 indeterminate: count > 0 && count < riskChecks.length,
                 disabled: riskChecks.length === 0
@@ -135,18 +168,175 @@
         }
 
         function clearRiskSelection() {
-            riskChecks.prop('checked', false);
+            riskPanel.find('[data-payment-risk-check]').prop('checked', false);
             updateRiskSelection();
+        }
+
+        var riskListRequest = null;
+        var riskNavigation = null;
+
+        function riskListUrl(params) {
+            var url = new URL(riskFilter[0].action);
+            Object.entries(params).forEach(function (entry) {
+                if (String(entry[1]).trim() !== '') url.searchParams.set(entry[0], entry[1]);
+            });
+            return url;
+        }
+
+        if (riskPanel.length) {
+            var riskResults = riskPanel.find('[data-payment-risk-results]');
+            var riskLoading = riskPanel.find('[data-payment-risk-loading]');
+            var riskListError = riskPanel.find('[data-payment-risk-list-error]');
+            var riskFilterErrors = riskFilter.find('[data-payment-risk-filter-errors]');
+            var reportHost = page.find('[data-payment-risk-report]');
+            var initialReport = reportHost.children().clone();
+
+            function listScope(query) {
+                var params = new URLSearchParams(query);
+                ['page', 'per_page', 'sort', 'direction'].forEach(function (key) { params.delete(key); });
+                params.sort();
+                return params.toString();
+            }
+
+            function applyRiskList(payload, navigation) {
+                var filters = payload.filters;
+                var pagination = payload.pagination;
+                var query = {
+                    date_from: filters.date_from, date_to: filters.date_to,
+                    name: filters.name, keyword: filters.keyword, only_abnormal: filters.only_abnormal,
+                    sort: filters.sort, direction: filters.direction, page: pagination.current_page, per_page: pagination.per_page
+                };
+                var ranges = filters.metric_ranges || {};
+                Object.keys(ranges).forEach(function (metric) {
+                    Object.keys(ranges[metric]).forEach(function (bound) {
+                        query[metric + '_' + bound] = ranges[metric][bound];
+                    });
+                });
+                var scopeChanged = listScope(query) !== listScope(riskApplied);
+                var table = riskResults.find('.payment-product-scroll-table');
+                var previousScrollLeft = table.scrollLeft();
+                riskApplied = query;
+
+                riskFilter.find('input[name], select[name]').each(function () {
+                    this.value = query[this.name] ?? '';
+                    if (this.tagName === 'SELECT') this.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                riskFilter.find('.payment-product-metric-filters').prop('open', Object.keys(ranges).length > 0 || !navigation.reset && riskFilter.find('.payment-product-metric-filters').prop('open'));
+
+                riskExportFilters.empty();
+                Object.keys(query).forEach(function (field) {
+                    $('<input>', { type: 'hidden', name: field, value: query[field] }).appendTo(riskExportFilters);
+                });
+                riskExportModal.find('[data-payment-risk-export-filtered]').each(function () {
+                    this.textContent = this.dataset.countLabel.replace(':count', Number(pagination.total).toLocaleString(config.locale));
+                });
+                riskResults.html(payload.html);
+                if (!scopeChanged) riskResults.find('.payment-product-scroll-table').scrollLeft(previousScrollLeft);
+                clearRiskSelection();
+                initFormulaTooltips(riskResults);
+                if (scopeChanged) {
+                    reportHost.empty().append(initialReport.clone());
+                    page.find('[data-payment-risk-summary]').triggerHandler('payment:risk-scope-changed');
+                }
+
+                if (navigation.push && navigation.url.href !== window.location.href) {
+                    window.history.pushState(null, '', navigation.url);
+                }
+            }
+
+            function navigateRiskList(url, options) {
+                var navigation = { url: url, push: options.push, reset: options.reset };
+                riskNavigation = navigation;
+                if (riskListRequest) riskListRequest.abort();
+                riskFilterErrors.empty().prop('hidden', true);
+                riskFilter.find('[aria-invalid="true"]').removeAttr('aria-invalid');
+                riskListError.prop('hidden', true);
+                riskResults.attr('aria-busy', 'true').prop('inert', true);
+                riskLoading.prop('hidden', false);
+
+                if (options.reveal && riskPanel[0].getBoundingClientRect().top > window.innerHeight * 0.65) {
+                    riskPanel[0].scrollIntoView({ block: 'start' });
+                }
+                var request = $.ajax({ url: url.href, dataType: 'json', timeout: 45000 });
+                riskListRequest = request;
+                request.done(function (payload) {
+                    if (riskListRequest !== request) return;
+                    if (!payload || typeof payload.html !== 'string' || !payload.filters || !payload.pagination) {
+                        riskListError.prop('hidden', false);
+                        return;
+                    }
+                    applyRiskList(payload, navigation);
+                }).fail(function (xhr, status) {
+                    if (riskListRequest !== request || status === 'abort') return;
+                    var errors = xhr.status === 422 && xhr.responseJSON && xhr.responseJSON.errors;
+                    if (!errors) {
+                        riskListError.prop('hidden', false);
+                        return;
+                    }
+                    var firstField = null;
+                    Object.keys(errors).forEach(function (key) {
+                        errors[key].forEach(function (message) { $('<li>').text(message).appendTo(riskFilterErrors); });
+                        var field = riskFilter[0].elements.namedItem(key);
+                        if (field) {
+                            field.setAttribute('aria-invalid', 'true');
+                            $(field).closest('details').prop('open', true);
+                            firstField = firstField || field;
+                        }
+                    });
+                    riskFilterErrors.prop('hidden', false);
+                    if (firstField) firstField.focus();
+                }).always(function () {
+                    if (riskListRequest !== request) return;
+                    riskListRequest = null;
+                    riskLoading.prop('hidden', true);
+                    riskResults.attr('aria-busy', 'false').prop('inert', false);
+                });
+            }
+
+            riskFilter.on('submit', function (event) {
+                event.preventDefault();
+                var fields = Object.fromEntries($(this).serializeArray().map(function (field) {
+                    return [field.name, field.value];
+                }));
+                navigateRiskList(riskListUrl(fields), { push: true, reveal: true });
+            });
+            page.on('click', '[data-payment-risk-reset], [data-payment-risk-list] .payment-unified-pagination a', function (event) {
+                if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                if ($(this).hasClass('disabled')) return;
+                var reset = this.hasAttribute('data-payment-risk-reset');
+                navigateRiskList(new URL(this.href), { push: true, reset: reset, reveal: reset });
+            });
+            riskPanel.on('submit', '.payment-pagination-form', function (event) {
+                event.preventDefault();
+                var pageNumber = this.elements.page.value;
+                if (pageNumber === '') return;
+                navigateRiskList(riskListUrl(Object.assign({}, riskApplied, {
+                    page: pageNumber, per_page: this.elements.per_page.value
+                })), { push: true });
+            });
+            riskPanel.on('click', '[data-payment-risk-list-retry]', function () {
+                if (riskNavigation) navigateRiskList(riskNavigation.url, riskNavigation);
+            });
+            riskPanel.on('click', '[data-payment-product-sort]', function (event) {
+                event.stopPropagation();
+                var sort = this.dataset.paymentProductSort;
+                var direction = sort === riskApplied.sort && riskApplied.direction === 'desc' ? 'asc' : 'desc';
+                navigateRiskList(riskListUrl(Object.assign({}, riskApplied, { sort: sort, direction: direction, page: 1 })), { push: true });
+            });
+            window.addEventListener('popstate', function () {
+                navigateRiskList(new URL(window.location.href), { push: false });
+            });
         }
 
         if (riskExportModal.length) {
             clearRiskSelection();
             window.addEventListener('pageshow', clearRiskSelection);
-            riskCheckPage.on('change', function () {
-                riskChecks.prop('checked', this.checked);
+            riskPanel.on('change', '[data-payment-risk-check-page]', function () {
+                riskPanel.find('[data-payment-risk-check]').prop('checked', this.checked);
                 updateRiskSelection();
             });
-            riskChecks.on('change', updateRiskSelection);
+            riskPanel.on('change', '[data-payment-risk-check]', updateRiskSelection);
             riskPanel.on('click', '[data-payment-risk-clear]', clearRiskSelection);
             riskPanel.on('click', '[data-payment-product-export]', function () {
                 riskExportModal.find('[name="scope"][value="filtered"]').prop('checked', true);
@@ -163,7 +353,7 @@
             var button = $(form).find('[type="submit"]');
             if (button.prop('disabled')) return;
             var scope = form.elements.scope.value;
-            var selected = riskChecks.filter(':checked');
+            var selected = riskPanel.find('[data-payment-risk-check]:checked');
             if (scope === 'selected' && !selected.length) return;
             var body = new URLSearchParams(new FormData(form));
             if (scope === 'selected') {
@@ -209,7 +399,7 @@
 
         page.on('change', '[data-payment-per-page]', function () {
             $(this).closest('form').find('[name="page"]').val('1');
-            if ($(this).closest('[data-payment-product-main-tab]').length) {
+            if ($(this).closest('[data-payment-product-main-tab], [data-payment-risk-list]').length) {
                 $(this.form).trigger('submit');
             } else {
                 this.form.submit();
@@ -1317,8 +1507,16 @@
         });
         if (productModal.length && config.productDetailUrl) {
             var productText = config.productDetail || {};
-            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, refundRows: [], filterOptions: {} };
+            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, refundRows: [] };
             var productPaginationText = config.pagination || {};
+            var productScroll = productModal.find('[data-payment-risk-detail-scroll]');
+            var productTabButtons = productModal.find('[data-payment-product-detail-tab]');
+            var productFilter = productModal.find('[data-payment-product-detail-filter]');
+            var productDetailFields = {
+                orders: ['logistics_status'],
+                refunds: ['payment_method', 'status', 'source_reason', 'manual_reason'],
+                disputes: ['type', 'status', 'outcome']
+            };
             var productColumns = {
                 orders: ['shopify_order_number', 'store', 'tongtu_product_codes', 'tongtu_skus', 'shopify_skus', 'bill_number', 'payment_method', 'quantity', 'revenue', 'paypal_refund', 'credit_card_refund', 'paypal_dispute_count', 'tracking_number', 'logistics_status', 'order_created_at'],
                 variants: ['tongtu_sku', 'tongtu_product_name', 'shopify_skus', 'stores', 'order_count', 'sales', 'revenue', 'paypal_refund_amount', 'paypal_dispute_count', 'credit_card_refund_amount', 'shipping_rate', 'delivery_rate'],
@@ -1333,9 +1531,9 @@
             function pMoney(value) { return '$' + Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
             function pRate(value) { return Number(value || 0).toFixed(2) + '%'; }
             function replaceProductTokens(template, values) {
-                return Object.keys(values).reduce(function (text, key) {
-                    return text.replace(new RegExp(':' + key, 'g'), values[key]);
-                }, String(template || ''));
+                return String(template || '').replace(/:([a-z_]+)/gi, function (token, key) {
+                    return Object.hasOwn(values, key) ? values[key] : token;
+                });
             }
 
             function renderProductOverview(product) {
@@ -1381,13 +1579,13 @@
                 return '<div class="payment-product-detail-identity">' + (product.image_url ? '<img src="' + pEscape(product.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>') + '<div class="payment-product-identity-fields"><div class="payment-product-identity-field"><b>' + pEscape(labels.product_name) + '：</b><strong>' + pEscape(product.name) + '</strong></div><div class="payment-product-identity-field"><b>' + pEscape(labels.product_pcl) + '：</b><span>' + pEscape(product.product_code || product.sku) + '</span></div><div class="payment-product-identity-field payment-product-identity-stores"><b>' + pEscape(labels.related_stores) + '：</b><span class="payment-product-store-tags">' + storeTags + '</span></div></div></div><div class="payment-product-module-grid">' + ['overall', 'paypal', 'credit_card'].map(function (key) {
                     var module = modules[key] || {};
                     var metrics = metric(labels.unit_count, pNumber(module.unit_count)) + metric(labels.order_count, pNumber(module.order_count)) + metric(labels.received_amount, pMoney(module.received_amount)) + metric(labels.refund_amount, pMoney(module.refund_amount));
-                    metrics += metric(labels.refund_rate, pRate(module.refund_rate), replaceProductTokens(labels.refund_formula, { refund: pMoney(module.refund_amount), received: pMoney(module.received_amount) }));
+                    metrics += metric(labels.refund_rate, pRate(module.refund_rate), replaceProductTokens(labels.refund_formula, { refund: pMoney(module.refund_amount), received: pMoney(module.refund_rate_received_amount ?? module.received_amount) }));
                     if (key === 'credit_card') {
                         metrics += metric(labels.warning_rate, pRate(module.chargeback_rate), replaceProductTokens(labels.warning_formula, { amount: pMoney(module.chargeback_amount), received: pMoney(module.received_amount) }));
                         metrics += metric(labels.customer_service_rate, pRate(module.customer_service_refund_rate), replaceProductTokens(labels.customer_service_formula, { amount: pMoney(module.customer_service_refund_amount), received: pMoney(module.received_amount) }));
                         metrics += metric(labels.card_dispute_rate, pRate(module.credit_card_dispute_rate), replaceProductTokens(labels.card_dispute_formula, { count: pNumber(module.credit_card_dispute_count), orders: pNumber(module.order_count) }));
                     } else {
-                        metrics += metric(labels.paypal_dispute_rate, pRate(module.dispute_rate), replaceProductTokens(labels.dispute_formula, { count: pNumber(module.dispute_order_count), orders: pNumber(module.order_count) }));
+                        metrics += metric(labels.paypal_dispute_rate, pRate(module.dispute_rate), replaceProductTokens(labels.dispute_formula, { count: pNumber(module.dispute_order_count), orders: pNumber(module.dispute_rate_order_count ?? module.order_count) }));
                     }
                     metrics += metric(labels.shipping_rate, pRate(module.shipping_rate), replaceProductTokens(labels.shipping_formula, { count: pNumber(module.shipping_count), orders: pNumber(module.order_count) }));
                     metrics += metric(labels.delivery_rate, pRate(module.delivery_rate), replaceProductTokens(labels.delivery_formula, { count: pNumber(module.delivery_count), shipped: pNumber(module.shipping_count) }));
@@ -1504,49 +1702,43 @@
                 return value || '-';
             }
 
-            function productOptionHtml(options, selected) {
-                return (options || []).map(function (option) {
-                    var value = typeof option === 'object' ? option.value : option;
-                    var label = typeof option === 'object' ? option.label : option;
-                    return '<option value="' + pEscape(value) + '"' + (String(value) === String(selected || '') ? ' selected' : '') + '>' + pEscape(label) + '</option>';
-                }).join('');
-            }
-
             function renderProductFilters(options) {
+                var target = productModal.find('[data-payment-product-extra-filters]');
                 var selected = {};
-                productModal.find('[data-payment-product-extra-filters] select').each(function () { selected[this.name] = $(this).val(); });
-                productState.filterOptions = options || productState.filterOptions || {};
+                target.find('select').each(function () { selected[this.name] = this.value; });
                 var labels = productText.filters || {};
-                var html = '';
-                if (productState.tab === 'orders') {
-                    html = '<label><span>' + pEscape(labels.logistics_status || labels.status) + '</span><select class="form-control" name="detail_logistics_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.logistics_status) + '</select></label>';
-                } else if (productState.tab === 'refunds') {
-                    html = '<label><span>' + pEscape(labels.payment_method) + '</span><select class="form-control" name="detail_payment_method"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.payment_method) + '</select></label>' +
-                        '<label><span>' + pEscape(labels.status) + '</span><select class="form-control" name="detail_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.status) + '</select></label>' +
-                        '<label><span>' + pEscape(labels.source_reason) + '</span><select class="form-control" name="detail_source_reason"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.source_reason) + '</select></label>' +
-                        '<label><span>' + pEscape(labels.manual_reason) + '</span><select class="form-control" name="detail_manual_reason"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.manual_reason) + '</select></label>';
-                } else if (productState.tab === 'disputes') {
-                    html = '<label><span>' + pEscape(labels.type) + '</span><select class="form-control" name="detail_type"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.type) + '</select></label>' +
-                        '<label><span>' + pEscape(labels.status) + '</span><select class="form-control" name="detail_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.status) + '</select></label>' +
-                        '<label><span>' + pEscape(labels.outcome) + '</span><select class="form-control" name="detail_outcome"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.outcome) + '</select></label>';
-                }
-                productModal.find('[data-payment-product-extra-filters]').html(html);
+                var fields = target.clone().empty();
+                (productDetailFields[productState.tab] || []).forEach(function (key) {
+                    var name = 'detail_' + key;
+                    var id = 'payment-risk-detail-' + key;
+                    var control = $('<select>', { id: id, name: name, 'data-filter-searchable': '' }).append(new Option(labels.all, ''));
+                    (options[key] || []).forEach(function (option) {
+                        control.append(typeof option === 'object' ? new Option(option.label, option.value) : new Option(option, option));
+                    });
+                    control.val(selected[name] || '');
+                    var label = $('<label>', { class: 'flt-field-label', for: id }).text(labels[key] || labels.status);
+                    $('<div>').append(label, control).appendTo(fields);
+                });
+                target.replaceWith(fields);
+                fields[0].dispatchEvent(new Event('logistics:initialize-filters', { bubbles: true }));
                 var placeholders = productText.search_placeholders || {};
                 productModal.find('[name="detail_keyword"]').attr('placeholder', placeholders[productState.tab] || productText.search_placeholder || '');
-                Object.keys(selected).forEach(function (name) { productModal.find('[name="' + name + '"]').val(selected[name]); });
             }
 
-            function productDetailSortButton(tab, key) {
+            function productDetailHeading(key) {
                 var labels = productText.columns || {};
                 var active = productState.sort === key;
-                return '<button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-product-detail-sort="' + pEscape(key) + '">' + pEscape(labels[key] || key) + ' <i class="fa ' + (active ? (productState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort') + '"></i></button>';
+                var direction = productState.direction === 'asc' ? 'ascending' : 'descending';
+                var icon = active ? (productState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort';
+                return '<th scope="col"' + (active ? ' aria-sort="' + direction + '"' : '') + '><button type="button" class="payment-detail-sort' + (active ? ' active' : '') +
+                    '" data-payment-product-detail-sort="' + pEscape(key) + '">' + pEscape(labels[key] || key) + ' <i class="fa ' + icon + '" aria-hidden="true"></i></button></th>';
             }
 
             function productOrderLink(row) {
                 var label = pEscape(row.shopify_order_number || '-');
                 var detailUrl = row.detail_url || row.order_detail_url || '';
                 return row.order_id && detailUrl
-                    ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + pEscape(detailUrl) + '">' + label + '</button>'
+                    ? '<button type="button" class="flt-row-action js-logistics-order-detail" data-order-detail-url="' + pEscape(detailUrl).replace(/"/g, '&quot;') + '">' + label + '</button>'
                     : label;
             }
 
@@ -1580,18 +1772,31 @@
                 var columns = productColumns[tab] || [];
                 var body = rows.length
                     ? rows.map(function (row) { return '<tr>' + columns.map(function (key) { return '<td>' + productDetailCell(row, key) + '</td>'; }).join('') + '</tr>'; }).join('')
-                    : '<tr><td colspan="' + columns.length + '" class="text-center text-muted">' + pEscape(productText.empty) + '</td></tr>';
-                var table = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + columns.map(function (key) { return '<th>' + productDetailSortButton(tab, key) + '</th>'; }).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+                    : '<tr><td colspan="' + columns.length + '" class="text-muted">' + pEscape(productText.empty) + '</td></tr>';
+                var table = '<div class="flt flt-card payment-risk-detail-records"><div class="flt-table-scroll" tabindex="0" role="region" aria-labelledby="payment-risk-detail-tab-' + tab + '">' +
+                    '<table><thead><tr>' + columns.map(productDetailHeading).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+                    renderProductPagination(detail.pagination) + '</div>';
                 return (tab === 'refunds' ? renderRefundSummary(detail) : '') + table;
             }
 
             function renderProductPagination(meta) {
-                var target = productModal.find('[data-payment-product-detail-pagination]');
-                if (!meta) { target.empty(); return; }
-                target.html('<label><span>' + pEscape(productPaginationText.per_page) + '</span><select class="form-control input-sm" data-payment-product-per-page><option value="50" ' + (productState.perPage === 50 ? 'selected' : '') + '>50</option><option value="100" ' + (productState.perPage === 100 ? 'selected' : '') + '>100</option></select></label><button class="btn btn-default btn-sm" type="button" data-payment-product-page="' + (meta.current_page - 1) + '" ' + (meta.current_page <= 1 ? 'disabled' : '') + '>' + pEscape(productText.previous) + '</button><span>' + pEscape(String(productText.page_status || '').replace(':current', meta.current_page).replace(':last', meta.last_page).replace(':total', meta.total)) + '</span><button class="btn btn-default btn-sm" type="button" data-payment-product-page="' + (meta.current_page + 1) + '" ' + (meta.current_page >= meta.last_page ? 'disabled' : '') + '>' + pEscape(productText.next) + '</button><label><span>' + pEscape(productPaginationText.jump_to) + '</span><input class="form-control input-sm payment-page-jump-input" type="number" min="1" max="' + meta.last_page + '" placeholder="' + pEscape(productPaginationText.page_placeholder) + '" autocomplete="off" data-payment-product-jump-input></label><button class="btn btn-primary btn-sm" type="button" data-payment-product-jump>' + pEscape(productPaginationText.jump) + '</button>');
+                if (!meta) return '';
+                var summary = replaceProductTokens(productPaginationText.summary, { from: pNumber(meta.from), to: pNumber(meta.to), total: pNumber(meta.total) });
+                var position = replaceProductTokens(productPaginationText.page_status, { current: meta.current_page, last: meta.last_page });
+                return '<div class="flt-pagination payment-risk-detail-pagination"><span>' + pEscape(summary) + '</span><div class="payment-risk-detail-page-actions">' +
+                    '<label><span>' + pEscape(productPaginationText.per_page) + '</span><select data-payment-product-per-page>' +
+                    '<option value="50"' + (productState.perPage === 50 ? ' selected' : '') + '>50</option>' +
+                    '<option value="100"' + (productState.perPage === 100 ? ' selected' : '') + '>100</option></select></label>' +
+                    '<button class="flt-btn" type="button" data-payment-product-page="' + (meta.current_page - 1) + '"' + (meta.current_page <= 1 ? ' disabled' : '') + '>' + pEscape(productText.previous) + '</button>' +
+                    '<strong>' + pEscape(position) + '</strong>' +
+                    '<button class="flt-btn" type="button" data-payment-product-page="' + (meta.current_page + 1) + '"' + (meta.current_page >= meta.last_page ? ' disabled' : '') + '>' + pEscape(productText.next) + '</button>' +
+                    '<form data-payment-product-jump data-loading="off"><label><span>' + pEscape(productPaginationText.jump_to) + '</span>' +
+                    '<input name="page" type="number" min="1" max="' + meta.last_page + '" placeholder="' + pEscape(productPaginationText.page_placeholder) + '" autocomplete="off" required></label>' +
+                    '<button class="flt-btn flt-primary" type="submit">' + pEscape(productPaginationText.jump) + '</button></form></div></div>';
             }
 
             function loadProductDetail() {
+                productScroll.scrollTop(0);
                 var query = {
                     product_id: productState.id, detail_tab: productState.tab, detail_page: productState.page, detail_per_page: productState.perPage,
                     detail_keyword: productModal.find('[name="detail_keyword"]').val(),
@@ -1603,8 +1808,8 @@
                     detail_manual_reason: productModal.find('[name="detail_manual_reason"]').val(),
                     detail_type: productModal.find('[name="detail_type"]').val(),
                     detail_outcome: productModal.find('[name="detail_outcome"]').val(),
-                    date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
-                    store: page.find('[data-payment-product-filter] [name="store"]').val(), keyword: page.find('[data-payment-product-filter] [name="keyword"]').val()
+                    date_from: riskApplied.date_from, date_to: riskApplied.date_to,
+                    name: riskApplied.name, keyword: riskApplied.keyword
                 };
                 var cacheKey = String(config.productDetailUrl) + '?' + $.param(query);
                 var cached = productState.cache[cacheKey];
@@ -1616,20 +1821,22 @@
                     renderProductDetailPayload(cached.payload);
                     return;
                 }
-                productModal.addClass('is-loading').attr('aria-busy', 'true');
+                productModal.addClass('is-loading');
                 productModal.find('[data-payment-product-loading]').prop('hidden', false);
                 productModal.find('[data-payment-product-error]').prop('hidden', true);
-                productModal.find('[data-payment-product-detail-body], [data-payment-product-detail-pagination]').empty();
+                productModal.find('[data-payment-product-detail-body]').empty().attr('aria-busy', 'true');
                 var request = $.getJSON(config.productDetailUrl, query);
                 productState.request = request;
                 request.done(function (payload) {
+                    if (productState.request !== request) return;
                     productState.cache[cacheKey] = { payload: payload, expires: Date.now() + 30000 };
                     renderProductDetailPayload(payload);
                 }).fail(function (xhr, status) {
-                    if (status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
+                    if (productState.request === request && status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
                 }).always(function () {
                     if (productState.request !== request) return;
-                    productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                    productModal.removeClass('is-loading');
+                    productModal.find('[data-payment-product-detail-body]').attr('aria-busy', 'false');
                     productModal.find('[data-payment-product-loading]').prop('hidden', true);
                     productState.request = null;
                 });
@@ -1638,35 +1845,69 @@
             function renderProductDetailPayload(payload) {
                 var dashboard = productState.tab === 'overview' || productState.tab === 'first_renewal';
                 var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}, payload.channel_risk || {}) : renderProductRows(payload.detail || {}, productState.tab));
-                productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                productModal.removeClass('is-loading');
                 productModal.find('[data-payment-product-loading], [data-payment-product-error]').prop('hidden', true);
-                productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content);
+                productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content).attr('aria-busy', 'false');
                 renderProductFilters((payload.detail || {}).options || {});
-                renderProductPagination(dashboard ? null : (payload.detail || {}).pagination);
                 initFormulaTooltips(productModal);
+            }
+
+            function selectProductTab(button) {
+                productState.tab = button.dataset.paymentProductDetailTab;
+                productState.page = 1;
+                productState.sort = '';
+                productState.direction = 'desc';
+                productTabButtons.removeClass('active').attr({ 'aria-selected': 'false', tabindex: '-1' });
+                $(button).addClass('active').attr({ 'aria-selected': 'true', tabindex: '0' });
+                productScroll.attr('aria-labelledby', button.id);
+                productFilter.prop('hidden', productState.tab === 'overview' || productState.tab === 'first_renewal').find('input[name], select[name]').val('');
+                renderProductFilters({});
             }
 
             page.on('click keydown', '[data-payment-product-detail]', function (event) {
                 if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
                 if ($(event.target).closest('button, a, input, select, textarea, label').length) return;
                 event.preventDefault();
-                productState.id = String($(this).data('productId')); productState.name = String($(this).data('productName')); productState.tab = 'overview'; productState.page = 1; productState.sort = ''; productState.direction = 'desc'; productState.filterOptions = {};
-                productModal.find('[data-payment-product-detail-tab]').removeClass('active').attr('aria-selected', 'false').first().addClass('active').attr('aria-selected', 'true');
-                productModal.find('[data-payment-product-detail-filter]').prop('hidden', true).get(0).reset();
+                productState.id = String($(this).data('productId'));
+                productState.name = String($(this).data('productName'));
+                selectProductTab(productTabButtons[0]);
+                productModal.data('riskDetailTrigger', this);
                 productModal.find('[data-payment-product-detail-subtitle]').text(productState.name);
                 productModal.modal('show'); loadProductDetail();
             });
             productModal.on('click', '[data-payment-product-detail-tab]', function () {
-                productState.tab = String($(this).data('paymentProductDetailTab')); productState.page = 1; productState.sort = ''; productState.direction = 'desc'; productState.filterOptions = {};
-                productModal.find('[data-payment-product-detail-tab]').removeClass('active').attr('aria-selected', 'false'); $(this).addClass('active').attr('aria-selected', 'true');
-                productModal.find('[data-payment-product-detail-filter]').prop('hidden', productState.tab === 'overview' || productState.tab === 'first_renewal').get(0).reset(); renderProductFilters({}); loadProductDetail();
+                if (productState.tab === this.dataset.paymentProductDetailTab) return;
+                selectProductTab(this);
+                loadProductDetail();
+            });
+            productModal.on('keydown', '[data-payment-product-detail-tab]', function (event) {
+                var index = productTabButtons.index(this);
+                var next = { ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: productTabButtons.length - 1 }[event.key];
+                if (next === undefined) return;
+                event.preventDefault();
+                var button = productTabButtons[(next + productTabButtons.length) % productTabButtons.length];
+                button.focus();
+                button.click();
             });
             productModal.on('click', '[data-payment-product-detail-sort]', function () { var sort = String($(this).data('paymentProductDetailSort') || ''); productState.direction = productState.sort === sort && productState.direction === 'desc' ? 'asc' : 'desc'; productState.sort = sort; productState.page = 1; loadProductDetail(); });
             productModal.on('submit', '[data-payment-product-detail-filter]', function (event) { event.preventDefault(); productState.page = 1; loadProductDetail(); });
-            productModal.on('reset', '[data-payment-product-detail-filter]', function () { window.setTimeout(function () { productState.page = 1; loadProductDetail(); }, 0); });
+            productModal.on('reset', '[data-payment-product-detail-filter]', function (event) {
+                event.preventDefault();
+                productFilter.find('input[name], select[name]').val('');
+                productFilter.find('.flt-picker[open]').prop('open', false);
+                productFilter.find('select[name]').each(function () {
+                    this.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                productState.page = 1;
+                loadProductDetail();
+            });
             productModal.on('click', '[data-payment-product-page]', function () { productState.page = Number($(this).data('paymentProductPage')) || 1; loadProductDetail(); });
             productModal.on('change', '[data-payment-product-per-page]', function () { productState.perPage = Number($(this).val()) === 100 ? 100 : 50; productState.page = 1; loadProductDetail(); });
-            productModal.on('click', '[data-payment-product-jump]', function () { var input = productModal.find('[data-payment-product-jump-input]'); if ($.trim(input.val()) === '') return; var max = Number(input.attr('max')) || 1; productState.page = Math.max(1, Math.min(max, Number(input.val()) || 1)); loadProductDetail(); });
+            productModal.on('submit', '[data-payment-product-jump]', function (event) {
+                event.preventDefault();
+                productState.page = Number(this.elements.page.value);
+                loadProductDetail();
+            });
             productModal.on('click keydown', '[data-payment-refund-event-row]', function (event) {
                 if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
@@ -1680,8 +1921,12 @@
             productModal.on('hidden.bs.modal', function () {
                 if (productState.request) productState.request.abort();
                 productState.request = null;
-                productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                productModal.removeClass('is-loading');
+                productModal.find('[data-payment-product-detail-body]').attr('aria-busy', 'false');
                 productModal.find('[data-payment-product-loading]').prop('hidden', true);
+                var trigger = productModal.data('riskDetailTrigger');
+                if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
+                productModal.removeData('riskDetailTrigger');
             });
         }
     });

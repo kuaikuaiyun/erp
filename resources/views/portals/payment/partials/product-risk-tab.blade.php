@@ -1,7 +1,7 @@
 @php
     $translationPrefix = 'payment.product_risk_profit';
     $pagination = $dashboard['pagination'] ?? [];
-    $filters = $dashboard['filters'] ?? request()->only(['date_from', 'date_to', 'store']);
+    $filters = $dashboard['filters'] ?? request()->only(['date_from', 'date_to']);
     $money = static fn ($value) => '$'.number_format((float) $value, 2);
     $number = static fn ($value) => number_format((float) $value, ((float) $value == (int) $value) ? 0 : 2);
     $rate = static fn ($value) => number_format((float) $value, 2).'%';
@@ -66,7 +66,7 @@
             }
             foreach ($definitions as $metric => $terms) {
                 if (isset($formulaLabels[$metric]) && is_array($terms) && is_string($terms[0] ?? null) && is_string($terms[1] ?? null)) {
-                    $formulaDetails[$metric] = [$scope, $description, $terms[0], $terms[1]];
+                    $formulaDetails[$metric] = [$description, $terms[0], $terms[1]];
                 }
             }
         }
@@ -112,7 +112,7 @@
                         @endif
                         @if(isset($formulaDetails[$metric], $data['denominator']))
                             @php
-                                [$scope, $description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
+                                [$description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
                                 $format = $data['amount'] ? $money : $number;
                                 $values = ['numerator' => $format($data['numerator']), 'denominator' => $format($data['denominator']), 'rate' => $rate($data['value'])];
                                 $group = $loop->index < 4 ? 'layout.summary_overall' : ($loop->index < 10 ? 'table.paypal_fee_info' : 'table.card_fee_info');
@@ -123,9 +123,6 @@
                                 <p>{{ __($formulaText.'.expression', ['numerator' => $numeratorLabel, 'denominator' => $denominatorLabel]) }}</p>
                                 <p><strong>{{ (float) $data['denominator'] === 0.0 ? __($formulaText.'.zero') : __($formulaText.'.substitution', $values) }}</strong></p>
                                 <p>{{ __($formulaText.'.scope', ['value' => $description]) }}</p>
-                                @if($scope === 'selected')
-                                    <p>{{ __($formulaText.'.store', ['value' => ($filters['store'] ?? '') ?: __($translationPrefix.'.filters.all_stores')]) }}</p>
-                                @endif
                                 <p>{{ __($formulaText.'.summary_deduplication') }}</p>
                                 @if(in_array($metric, $refundOrderRates, true))
                                     <p>{{ __($formulaText.'.refund_link') }}</p>
@@ -257,7 +254,7 @@
                         </small>
                         @if(isset($formulaDetails[$metric]))
                             @php
-                                [$scope, $description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
+                                [$description, $numeratorLabel, $denominatorLabel] = $formulaDetails[$metric];
                                 $title = __($translationPrefix.'.'.$formulaLabels[$metric]);
                                 $channel = match (true) {
                                     str_starts_with($metric, 'paypal_') => __($translationPrefix.'.table.paypal_fee_info'),
@@ -271,9 +268,6 @@
                                     <p>{{ __($formulaText.'.expression', ['numerator' => $numeratorLabel, 'denominator' => $denominatorLabel]) }}</p>
                                     <p><strong>{{ (float) $denominator === 0.0 ? __($formulaText.'.zero') : __($formulaText.'.substitution', $values) }}</strong></p>
                                     <p>{{ __($formulaText.'.scope', ['value' => $description]) }}</p>
-                                    @if($scope === 'selected')
-                                        <p>{{ __($formulaText.'.store', ['value' => ($filters['store'] ?? '') ?: __($translationPrefix.'.filters.all_stores')]) }}</p>
-                                    @endif
                                     @if(in_array($metric, $refundOrderRates, true))
                                         <p>{{ __($formulaText.'.refund_link') }}</p>
                                     @endif
@@ -292,5 +286,5 @@
         @empty<tr><td colspan="{{ $columnCount + 1 }}" class="payment-product-empty">{{ __($translationPrefix.'.empty_results') }}</td></tr>@endforelse
 </tbody></table></div>
 
-@include('portals.payment.partials.pagination', ['pagination' => $pagination, 'routeName' => 'payment.product-risk-profit.index', 'controlsOnly' => true])
+@include('portals.payment.partials.pagination', ['pagination' => $pagination, 'routeName' => 'payment.product-risk-profit.index', 'controlsOnly' => true, 'extraQuery' => ['store' => null]])
 @endif

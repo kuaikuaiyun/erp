@@ -1,11 +1,14 @@
 (function () {
     'use strict';
     var page = document.querySelector('.payment-renewal-page');
-    var pageButtons = Array.from(document.querySelectorAll('[data-renewal-export-url]'));
     var pageFeedback = page ? page.querySelector('[data-renewal-export-feedback]') : null;
     var pageMessages = page ? JSON.parse(page.dataset.renewalExportMessages || '{}') : {};
     var pageExporting = false;
     var savedButtons = new WeakMap();
+
+    function pageButtons() {
+        return Array.from(document.querySelectorAll('[data-renewal-export-url]'));
+    }
 
     function busyButtons(buttons, busy, label) {
         buttons.filter(Boolean).forEach(function (button) {
@@ -67,11 +70,13 @@
         }
     }
 
-    pageButtons.forEach(function (button) {
+    function bindPageExport(button) {
+        if (!button) return;
+        if (pageExporting || exporting) busyButtons([button], true, pageMessages.exporting);
         button.addEventListener('click', async function () {
             if (pageExporting || exporting) return;
             pageExporting = true;
-            busyButtons(pageButtons.concat(content ? [content.querySelector('[data-renewal-detail-export]')] : []), true, pageMessages.exporting);
+            busyButtons(pageButtons().concat(content ? [content.querySelector('[data-renewal-detail-export]')] : []), true, pageMessages.exporting);
             if (pageFeedback) {
                 pageFeedback.hidden = false;
                 pageFeedback.className = 'text-muted';
@@ -90,18 +95,22 @@
                 }
             } finally {
                 pageExporting = false;
-                busyButtons(pageButtons.concat(content ? [content.querySelector('[data-renewal-detail-export]')] : []), false);
+                busyButtons(pageButtons().concat(content ? [content.querySelector('[data-renewal-detail-export]')] : []), false);
             }
         });
-    });
-
+    }
+    pageButtons().forEach(bindPageExport);
     var modal = document.getElementById('payment-renewal-detail-modal');
+    if (page && page.dataset.renewalUrl) {
+        initSections();
+    }
+
     if (!modal || !window.jQuery) return;
     var content = modal.querySelector('[data-renewal-detail-content]');
     var feedback = modal.querySelector('[data-renewal-detail-feedback]');
     var title = modal.querySelector('.modal-title');
     var messages = JSON.parse(modal.dataset.messages);
-    var parent = JSON.parse(modal.dataset.parentFilters);
+    var parent;
     var base = null, current = {}, controller = null, sequence = 0, returnFocus = null, exporting = false;
 
     function filtersFromForm() {
@@ -173,7 +182,7 @@
         params.delete('detail_per_page');
         var request = sequence;
         exporting = true;
-        busyButtons([button].concat(pageButtons), true, pageMessages.exporting || messages.exporting);
+        busyButtons([button].concat(pageButtons()), true, pageMessages.exporting || messages.exporting);
         feedback.classList.remove('payment-renewal-detail-error');
         feedback.textContent = messages.exporting;
         try {
@@ -188,7 +197,7 @@
             }
         } finally {
             exporting = false;
-            busyButtons([button, content.querySelector('[data-renewal-detail-export]')].concat(pageButtons), false);
+            busyButtons([button, content.querySelector('[data-renewal-detail-export]')].concat(pageButtons()), false);
         }
     }
 
@@ -197,6 +206,7 @@
         if (!trigger) return;
         returnFocus = trigger;
         title.textContent = trigger.dataset.title;
+        parent = JSON.parse(modal.dataset.parentFilters);
         base = { detail_group: trigger.dataset.group, detail_purchase: trigger.dataset.purchase, detail_kind: trigger.dataset.kind };
         content.replaceChildren();
         window.jQuery(modal).modal('show');
@@ -228,4 +238,146 @@
         content.removeAttribute('aria-busy');
         if (returnFocus && returnFocus.isConnected) returnFocus.focus();
     });
+
+    function initSections() {
+        var applied = new URLSearchParams(JSON.parse(page.dataset.renewalFilters));
+        applied.delete('risk_date_mode');
+        var sectionMessages = JSON.parse(page.dataset.renewalSectionMessages);
+        var renewalStageKeys = ['stage', 'stage_page'];
+        var pending = new Map();
+        var placeholder = page.querySelector('[data-renewal-placeholder]');
+        var refreshIcon = document.querySelector('.main-header .navbar .fa-refresh');
+        var refreshLink = refreshIcon && refreshIcon.closest('a');
+        var observer;
+
+        function belongsTo(module, name) {
+            return name.startsWith(module + '_') || (module === 'renewal' && renewalStageKeys.includes(name));
+        }
+
+        function withSection(module, source) {
+            var params = new URLSearchParams(applied);
+            Array.from(applied.keys()).forEach(function (name) {
+                if (belongsTo(module, name)) params.delete(name);
+            });
+            source.forEach(function (value, name) {
+                if (belongsTo(module, name)) params.set(name, value);
+            });
+            return params;
+        }
+
+        function syncControls() {
+            page.querySelectorAll('[data-renewal-navigation]').forEach(function (link) {
+                var module = link.closest('[data-renewal-region]').dataset.renewalRegion;
+                var url = new URL(link.href);
+                var params = withSection(module, url.searchParams);
+                if (url.searchParams.has('load_renewal')) params.set('load_renewal', '1');
+                url.search = params;
+                link.href = url.href;
+            });
+            page.querySelectorAll('[data-renewal-module] input[type="hidden"]').forEach(function (input) {
+                if (applied.has(input.name) && !belongsTo(input.form.dataset.renewalModule, input.name)) {
+                    input.value = applied.get(input.name);
+                }
+            });
+            pageButtons().forEach(function (button) {
+                var url = new URL(button.dataset.renewalExportUrl, window.location.href);
+                url.search = new URLSearchParams(applied);
+                url.searchParams.delete('stage_page');
+                button.dataset.renewalExportUrl = url.href;
+            });
+            if (modal) {
+                modal.dataset.parentFilters = JSON.stringify(Object.fromEntries(
+                    Array.from(applied.entries()).filter(function (entry) { return belongsTo('initial', entry[0]); })
+                ));
+            }
+        }
+
+        async function refresh(region, params, updateUrl) {
+            var module = region.dataset.renewalRegion;
+            var article = region.querySelector('article');
+            var status = region.querySelector('[data-renewal-section-status]');
+            var previous = pending.get(module);
+            if (previous && article.hasAttribute('data-renewal-placeholder')) return;
+            if (previous) previous.abort();
+            if (observer && module === 'renewal') observer.disconnect();
+            var request = new AbortController();
+            pending.set(module, request);
+            var url = new URL(page.dataset.renewalUrl, window.location.href);
+            url.search = params;
+            url.searchParams.set('section', module);
+            status.textContent = sectionMessages.loading;
+            status.classList.remove('text-danger');
+            status.hidden = false;
+            article.setAttribute('aria-busy', 'true');
+            try {
+                var response = await fetch(url, {
+                    credentials: 'same-origin',
+                    signal: request.signal,
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                if (response.redirected) throw new Error(sectionMessages.error);
+                if (!response.ok) {
+                    var problem = await response.json().catch(function () { return {}; });
+                    var errors = problem.errors ? Object.values(problem.errors).flat() : [];
+                    throw new Error(errors.length ? errors.join('；') : sectionMessages.error);
+                }
+                var html = await response.text();
+                if (pending.get(module) !== request) return;
+                var fragment = new DOMParser().parseFromString(html, 'text/html').querySelector('[data-renewal-section="' + module + '"]');
+                if (!fragment) throw new Error(sectionMessages.error);
+                var replacement = document.importNode(fragment, true);
+                var restoreFocus = article.contains(document.activeElement);
+                applied = withSection(module, new URLSearchParams(JSON.parse(replacement.dataset.renewalApplied)));
+                article.replaceWith(replacement);
+                syncControls();
+                bindPageExport(replacement.querySelector('[data-renewal-export-url]'));
+                if (restoreFocus) replacement.querySelector('.payment-renewal-filter button[type="submit"]').focus({ preventScroll: true });
+                if (updateUrl) {
+                    var nextUrl = new URL(window.location.href);
+                    nextUrl.search = applied;
+                    if (nextUrl.href !== window.location.href) window.history.pushState(null, '', nextUrl);
+                    if (refreshLink) refreshLink.href = nextUrl.href;
+                }
+                status.hidden = true;
+            } catch (error) {
+                if (request.signal.aborted || pending.get(module) !== request) return;
+                status.textContent = error instanceof TypeError ? sectionMessages.error : (error.message || sectionMessages.error);
+                status.classList.add('text-danger');
+            } finally {
+                if (pending.get(module) === request) {
+                    pending.delete(module);
+                    article.removeAttribute('aria-busy');
+                }
+            }
+        }
+
+        page.addEventListener('input', function (event) {
+            if (!event.target.matches('.payment-renewal-filter input[type="date"]')) return;
+            var dates = event.target.form.querySelectorAll('input[type="date"]');
+            dates[1].setCustomValidity(dates[0].value && dates[1].value && dates[1].value < dates[0].value ? sectionMessages.invalidDate : '');
+        });
+        page.addEventListener('submit', function (event) {
+            var form = event.target;
+            if (!form.matches('[data-renewal-module]')) return;
+            event.preventDefault();
+            refresh(form.closest('[data-renewal-region]'), withSection(form.dataset.renewalModule, new FormData(form)), true);
+        });
+        page.addEventListener('click', function (event) {
+            var link = event.target.closest('[data-renewal-navigation]');
+            if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            if (link.classList.contains('disabled')) return;
+            var region = link.closest('[data-renewal-region]');
+            refresh(region, withSection(region.dataset.renewalRegion, new URL(link.href).searchParams), !link.closest('[data-renewal-placeholder]'));
+        });
+        window.addEventListener('popstate', function () { window.location.reload(); });
+        if (placeholder && 'IntersectionObserver' in window) {
+            observer = new IntersectionObserver(function (entries) {
+                if (entries.some(function (entry) { return entry.isIntersecting; })) {
+                    refresh(placeholder.closest('[data-renewal-region]'), applied, false);
+                }
+            }, { rootMargin: '180px' });
+            observer.observe(placeholder);
+        }
+    }
 }());

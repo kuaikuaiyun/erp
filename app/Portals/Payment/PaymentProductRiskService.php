@@ -43,7 +43,9 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:product-risk-dashboard:v7:'.sha1((string) json_encode(
+        unset($filters['store']);
+        $filters['use_payment_type'] = true;
+        $cacheKey = 'payment:product-risk-dashboard:v11:'.sha1((string) json_encode(
             $filters,
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
@@ -58,27 +60,22 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     private function buildDashboard(array $filters): array
     {
-        $data = $this->productList($filters);
-        $summary = $data['summary'];
-        $revenue = (float) ($summary['revenue'] ?? 0);
-        $refunds = (float) ($summary['actual_refunds'] ?? 0);
-
         return [
-            ...$data,
+            ...$this->productList($filters),
             'filters' => $filters,
-            'stores' => $this->statistics->storeOptions($filters),
-            'refund_rate' => $revenue > 0 ? round($refunds / $revenue * 100, 2) : 0.0,
         ];
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function tab(array $filters, string $tab): array
     {
+        unset($filters['store']);
+        $filters['use_payment_type'] = true;
         if ($tab === 'all_products_summary') {
             $filters = [...$filters, 'page' => 1, 'per_page' => 50];
         }
 
-        $cacheKey = 'payment:product-risk-tab:v8:'.sha1((string) json_encode([
+        $cacheKey = 'payment:product-risk-tab:v11:'.sha1((string) json_encode([
             'filters' => $filters,
             'tab' => $tab,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -131,6 +128,8 @@ class PaymentProductRiskService
     /** @param list<string>|null $selectedIds */
     public function exportList(array $filters, ?array $selectedIds): iterable
     {
+        unset($filters['store']);
+        $filters['use_payment_type'] = true;
         if ($selectedIds !== null) {
             foreach ($this->productList($filters)['products'] as $product) {
                 if (in_array($product['id'], $selectedIds, true)) {
@@ -158,7 +157,7 @@ class PaymentProductRiskService
     {
         $keys = $this->productList($filters, keysOnly: true);
         $orders = $keys === [] ? (object) [] : $this->statistics->paymentOrderTotals($filters, $keys);
-        $first = $this->alerts->initialOrderTotals($keys);
+        $first = $this->alerts->initialOrderTotals($keys, usePaymentType: true);
         $paypalRefund = (float) ($first->paypal_refund_amount ?? 0);
         $cardRefund = (float) ($first->card_refund_amount ?? 0);
         $paypalReceived = (float) ($first->paypal_received_amount ?? 0);
@@ -205,14 +204,15 @@ class PaymentProductRiskService
     {
         $ranges = (array) ($filters['metric_ranges'] ?? []);
         $sort = (string) ($filters['sort'] ?? '');
+        $filters['skip_product_store_aggregates'] = $sort !== 'shop_count';
         $extraMetrics = array_values(array_intersect(
             ['order_count', ...self::SUPPLEMENTARY_RATES],
             [...array_keys($ranges), $sort],
         ));
         if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
-            $data = $this->statistics->page([...$filters, 'skip_refund_report' => true], $keysOnly);
+            $data = $this->statistics->page([...$filters, 'skip_refund_report' => true], $keysOnly, includeSummary: false);
 
-            return $keysOnly ? $data : $this->withPaymentProductNames($data, $filters);
+            return $keysOnly ? $data : $this->withPaymentProductNames($data);
         }
 
         $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics, $filters): void {
@@ -222,34 +222,18 @@ class PaymentProductRiskService
             }
             $rates = array_values(array_intersect(self::SUPPLEMENTARY_RATES, $extraMetrics));
             if ($rates !== []) {
-                $query->leftJoinSub($this->alerts->listRatesQuery($rates, $candidateKeys), 'payment_rates', 'payment_rates.product_key', '=', 'base.product_key');
+                $query->leftJoinSub($this->alerts->listRatesQuery($rates, $candidateKeys, usePaymentType: true), 'payment_rates', 'payment_rates.product_key', '=', 'base.product_key');
                 foreach ($rates as $rate) {
                     $query->selectRaw("COALESCE(payment_rates.{$rate}, 0) as {$rate}");
                 }
             }
-        }, $keysOnly);
+        }, $keysOnly, includeSummary: false);
 
-        return $keysOnly ? $data : $this->withPaymentProductNames($data, $filters);
+        return $keysOnly ? $data : $this->withPaymentProductNames($data);
     }
 
-    /** @param list<string> $keys */
-    private function paidOrderDatesQuery(array $keys): Builder
-    {
-        $key = $this->productKeyExpression('items');
-        $query = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->table('logistics_order_items as items')
-            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
-            ->whereIn(DB::raw($key), $keys)
-            ->whereNotNull('orders.paid_at');
-
-        return $query->selectRaw("{$key} as product_key")
-            ->selectRaw('MIN(orders.paid_at) as first_paid_at')
-            ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
-            ->groupByRaw($key);
-    }
-
-    /** @param array<string,mixed> $data @param array<string,mixed> $filters @return array<string,mixed> */
-    private function withPaymentProductNames(array $data, array $filters): array
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private function withPaymentProductNames(array $data): array
     {
         $products = $data['products'] ?? [];
         $keys = collect($products)->mapWithKeys(function (array $product): array {
@@ -263,29 +247,28 @@ class PaymentProductRiskService
         }
 
         $keyExpression = $this->productKeyExpression('items');
-        $firstItems = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->table('logistics_order_items as items')
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $productFacts = $database->table('logistics_order_items as items')
+            ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereIn(DB::raw($keyExpression), array_values($keys))
             ->selectRaw("{$keyExpression} as product_key")
             ->selectRaw('MIN(items.id) as first_item_id')
+            ->selectRaw('MIN(orders.paid_at) as first_paid_at')
+            ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
             ->groupByRaw($keyExpression);
-        $names = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->query()->fromSub($firstItems, 'payment_product_names')
-            ->join('logistics_order_items as source_item', 'source_item.id', '=', 'payment_product_names.first_item_id')
-            ->get(['payment_product_names.product_key', 'source_item.product_title', 'source_item.tongtu_product_name'])
+        $factsByProduct = $database->query()->fromSub($productFacts, 'payment_product_facts')
+            ->join('logistics_order_items as source_item', 'source_item.id', '=', 'payment_product_facts.first_item_id')
+            ->get(['payment_product_facts.product_key', 'source_item.product_title', 'source_item.tongtu_product_name', 'payment_product_facts.first_paid_at', 'payment_product_facts.latest_paid_at'])
             ->keyBy('product_key');
 
-        $orderDates = $this->paidOrderDatesQuery(array_values($keys))->get()->keyBy('product_key');
-        $orderCounts = $this->statistics->relatedOrderCountsQuery($filters, array_values($keys))->pluck('order_count', 'product_key');
-
-        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys));
-        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $orderDates, $orderCounts): array {
+        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), usePaymentType: true);
+        $data['products'] = collect($products)->map(function (array $product) use ($factsByProduct, $riskMetrics): array {
             $encoded = substr((string) $product['id'], 8);
             $encoded = strtr($encoded, '-_', '+/').str_repeat('=', (4 - strlen($encoded) % 4) % 4);
             $key = base64_decode($encoded, true);
-            $name = $key === false ? null : $names->get($key);
-            $product['source_product_name'] = trim((string) ($name->product_title ?? ''));
-            $product['tongtu_product_name'] = trim((string) ($name->tongtu_product_name ?? ''));
+            $facts = $key === false ? null : $factsByProduct->get($key);
+            $product['source_product_name'] = trim((string) ($facts->product_title ?? ''));
+            $product['tongtu_product_name'] = trim((string) ($facts->tongtu_product_name ?? ''));
             $channels = $key === false ? [] : ($riskMetrics[$key] ?? []);
             $paypal = $channels['paypal'] ?? [];
             $card = $channels['credit_card'] ?? [];
@@ -316,8 +299,6 @@ class PaymentProductRiskService
             $product['credit_card_delivered_order_count'] = (int) ($card['delivered_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_count'] = (int) ($card['delivered_dispute_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_rate'] = (float) ($card['delivered_dispute_rate'] ?? 0);
-            $facts = $key === false ? null : $orderDates->get($key);
-            $product['order_count'] = $key === false ? 0 : (int) $orderCounts->get($key, 0);
             $firstPaidAt = $facts->first_paid_at ?? null;
             $product['first_paid_at'] = $firstPaidAt
                 ? Carbon::parse((string) $firstPaidAt, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i')
@@ -335,7 +316,9 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @param array<string,mixed> $options @return array<string,mixed>|null */
     public function detail(array $filters, string $productId, array $options): ?array
     {
-        $cacheKey = 'payment:product-risk-detail:v2:'.sha1((string) json_encode([
+        unset($filters['store']);
+        $filters['use_payment_type'] = true;
+        $cacheKey = 'payment:product-risk-detail:v3:'.sha1((string) json_encode([
             'filters' => $filters,
             'product_id' => $productId,
             'options' => $options,
@@ -370,7 +353,7 @@ class PaymentProductRiskService
         }
         $key = $this->decodeProductKey($productId);
         if ($key !== null) {
-            $detail['channel_risk'] = $this->alerts->metricsByProductKey([$key])[$key] ?? [];
+            $detail['channel_risk'] = $this->alerts->metricsByProductKey([$key], usePaymentType: true)[$key] ?? [];
             $context = $this->productOrderContext($filters, $key);
             $detail['product'] = [...($detail['product'] ?? []), ...$context];
             if (($options['tab'] ?? '') === 'overview') {
@@ -398,7 +381,6 @@ class PaymentProductRiskService
                 $query->whereNull('orders.operator_name')->orWhere('orders.operator_name', 'not like', '%刷单%');
             });
         $this->applyOrderDateRange($orders, $filters);
-        if (($filters['store'] ?? '') !== '') $orders->where('orders.store_name', $filters['store']);
         if ($productKey !== null) {
             $orders->whereRaw("{$expression} = ?", [$productKey]);
         } elseif (($filters['keyword'] ?? '') !== '') {
@@ -430,6 +412,7 @@ class PaymentProductRiskService
             ->selectRaw('refund.refund_reason as source_reason')
             ->selectRaw('refund.manual_reason as manual_reason')
             ->selectRaw("COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END) as amount");
+        $this->applyPaymentEventScope($paypal, 'refund', 'paypal');
         if (($filters['date_mode'] ?? 'order') === 'event') {
             if (($filters['date_from'] ?? '') !== '') $paypal->where('refund.refunded_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
             if (($filters['date_to'] ?? '') !== '') $paypal->where('refund.refunded_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
@@ -440,6 +423,7 @@ class PaymentProductRiskService
             ->selectRaw("'' as source_reason")
             ->selectRaw('refund.refund_reason as manual_reason')
             ->selectRaw('COALESCE(refund.refund_amount_usd, 0) as amount');
+        $this->applyPaymentEventScope($creditCard, 'refund', 'credit_card');
         $rows = $database->query()->fromSub($paypal->unionAll($creditCard), 'payment_refund_reason_rows');
         $totals = (clone $rows)->selectRaw('COUNT(DISTINCT order_id) as order_count')
             ->selectRaw('COUNT(*) as record_count')->selectRaw('COALESCE(SUM(amount), 0) as amount')->first();
@@ -496,7 +480,6 @@ class PaymentProductRiskService
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereRaw("{$expression} = ?", [$productKey]);
         $this->applyOrderDateRange($query, $filters);
-        if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
 
         $timeline = (clone $query)->selectRaw('MIN(orders.paid_at) as first_order_at, MAX(orders.paid_at) as last_order_at')->first();
         $stores = (clone $query)
@@ -591,6 +574,7 @@ class PaymentProductRiskService
         if ($orderIds !== []) {
             $paypalRefundQuery = $database->table('logistics_paypal_refunds')
                 ->whereIn('logistics_order_id', $orderIds);
+            $this->applyPaymentEventScope($paypalRefundQuery, 'logistics_paypal_refunds', 'paypal');
             $this->applyPayPalEventDateFilters($paypalRefundQuery, $filters, 'refunded_at');
             $paypalRefunds = $paypalRefundQuery
                 ->selectRaw("logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = 'USD' THEN original_amount ELSE 0 END)) as amount")
@@ -600,12 +584,14 @@ class PaymentProductRiskService
         if ($orderIds !== []) {
             $paypalDisputeQuery = $database->table('logistics_paypal_disputes')
                 ->whereIn('logistics_order_id', $orderIds);
+            $this->applyPaymentEventScope($paypalDisputeQuery, 'logistics_paypal_disputes', 'paypal');
             $this->applyPayPalEventDateFilters($paypalDisputeQuery, $filters, 'dispute_created_at');
             $paypalDisputes = $paypalDisputeQuery->selectRaw('logistics_order_id, COUNT(DISTINCT id) as total')
                 ->groupBy('logistics_order_id')->pluck('total', 'logistics_order_id');
         }
-        $creditCardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
-            ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
+        $cardQuery = $database->table('logistics_credit_card_refunds')->whereIn('logistics_order_id', $orderIds);
+        $this->applyPaymentEventScope($cardQuery, 'logistics_credit_card_refunds', 'credit_card');
+        $creditCardRows = $orderIds === [] ? collect() : $cardQuery->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
         $statusByOrder = $orderRows->keyBy('id');
 
         $resultRows = $rows->map(function (object $row) use ($orderGroups, $paypalRefunds, $paypalDisputes, $creditCardRows, $statusByOrder): array {
@@ -696,7 +682,6 @@ class PaymentProductRiskService
     private function applyVariantFilters(object $query, array $filters, array $options): void
     {
         $this->applyOrderDateRange($query, $filters);
-        if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
         $keyword = trim((string) ($options['keyword'] ?? ''));
         if ($keyword !== '') {
             $query->where(function ($nested) use ($keyword): void {
@@ -743,13 +728,12 @@ class PaymentProductRiskService
             });
         $columns = [
             'orders.id', 'orders.paid_amount_usd', 'orders.subscription_type', 'orders.subscription_origin_order_id',
-            'orders.paypal_account_id', 'orders.paypal_association_source', 'orders.shopify_payload', 'orders.paid_at',
+            'orders.payment_type', 'orders.paid_at',
             'orders.transaction_id as subscription_chain_id', 'orders.shopify_order_id',
             'orders.shopify_order_number', 'orders.payment_gateway_order_id',
         ];
         $baseOrdersQuery = $ordersQuery();
         $this->applyOrderDateRange($baseOrdersQuery, $filters);
-        if (($filters['store'] ?? '') !== '') $baseOrdersQuery->where('orders.store_name', $filters['store']);
         $baseOrders = $baseOrdersQuery->select($columns)->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
         $cohortReferences = $baseOrders
             ->filter(function (object $order): bool {
@@ -771,7 +755,6 @@ class PaymentProductRiskService
             $renewalOrdersQuery = $ordersQuery()
                 ->whereIn('orders.subscription_origin_order_id', $cohortReferences)
                 ->where('orders.paid_at', '<=', now()->utc());
-            if (($filters['store'] ?? '') !== '') $renewalOrdersQuery->where('orders.store_name', $filters['store']);
             $renewalOrders = $renewalOrdersQuery->select($columns)->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
         }
         $orders = $baseOrders
@@ -784,6 +767,7 @@ class PaymentProductRiskService
         $paypalRefunds = collect();
         if ($orderIds !== []) {
             $paypalRefundQuery = $database->table('logistics_paypal_refunds')->whereIn('logistics_order_id', $orderIds);
+            $this->applyPaymentEventScope($paypalRefundQuery, 'logistics_paypal_refunds', 'paypal');
             $this->applyPayPalEventDateFilters($paypalRefundQuery, $filters, 'refunded_at');
             $paypalRefunds = $paypalRefundQuery
                 ->selectRaw('logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = \'USD\' THEN original_amount ELSE 0 END)) amount')
@@ -792,12 +776,14 @@ class PaymentProductRiskService
         $paypalDisputes = collect();
         if ($orderIds !== []) {
             $paypalDisputeQuery = $database->table('logistics_paypal_disputes')->whereIn('logistics_order_id', $orderIds);
+            $this->applyPaymentEventScope($paypalDisputeQuery, 'logistics_paypal_disputes', 'paypal');
             $this->applyPayPalEventDateFilters($paypalDisputeQuery, $filters, 'dispute_created_at');
             $paypalDisputes = $paypalDisputeQuery->selectRaw('logistics_order_id, COUNT(DISTINCT id) count')
                 ->groupBy('logistics_order_id')->pluck('count', 'logistics_order_id');
         }
-        $cardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
-            ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
+        $cardQuery = $database->table('logistics_credit_card_refunds')->whereIn('logistics_order_id', $orderIds);
+        $this->applyPaymentEventScope($cardQuery, 'logistics_credit_card_refunds', 'credit_card');
+        $cardRows = $orderIds === [] ? collect() : $cardQuery->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
 
         $empty = static fn (string $key, ?int $renewalNumber, int $sort): array => [
             'key' => $key, 'renewal_number' => $renewalNumber, 'sort' => $sort,
@@ -812,10 +798,8 @@ class PaymentProductRiskService
         }
         $seenRecurring = ['paypal' => [], 'credit_card' => []];
         foreach ($orders as $order) {
-            $payload = strtolower((string) $order->shopify_payload);
-            $channel = $order->paypal_account_id !== null && $order->paypal_association_source === 'actual_transaction'
-                ? 'paypal' : (str_contains($payload, 'creditcardby') ? 'credit_card' : null);
-            if ($channel === null) continue;
+            $channel = $order->payment_type;
+            if (!in_array($channel, ['paypal', 'credit_card'], true)) continue;
             $type = trim((string) $order->subscription_type);
             $origin = trim((string) $order->subscription_origin_order_id);
             $lifecycle = PaymentSubscriptionLifecycle::classify($type, $origin, $seenRecurring[$channel]);
@@ -852,6 +836,19 @@ class PaymentProductRiskService
         }
         unset($channelGroups);
         return $groups;
+    }
+
+    private function applyPaymentEventScope(Builder $query, string $eventAlias, string $paymentType): void
+    {
+        $query->whereExists(function (Builder $orders) use ($eventAlias, $paymentType): void {
+            $orders->selectRaw('1')->from('logistics_orders as payment_order')
+                ->whereColumn('payment_order.id', $eventAlias.'.logistics_order_id')
+                ->where('payment_order.payment_type', $paymentType);
+            if ($paymentType === 'paypal') {
+                $orders->where('payment_order.paypal_association_source', 'actual_transaction')
+                    ->whereColumn('payment_order.paypal_account_id', $eventAlias.'.logistics_paypal_account_id');
+            }
+        });
     }
 
     /** @param array<string,mixed> $filters */

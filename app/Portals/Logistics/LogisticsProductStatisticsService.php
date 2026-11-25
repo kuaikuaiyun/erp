@@ -43,17 +43,19 @@ class LogisticsProductStatisticsService
      * @param array<string, mixed> $filters
      * @return array{products:list<array<string,mixed>>,summary:array<string,mixed>,pagination:array<string,int>}
      */
-    public function page(array $filters, bool $keysOnly = false): array
+    public function page(array $filters, bool $keysOnly = false, bool $includeSummary = true): array
     {
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) ($filters['page'] ?? 1));
+        $useLightweightQuery = $this->canUseLightweightPageQuery($filters);
+        $omitVariantDetails = $useLightweightQuery && !$includeSummary && ($filters['date_mode'] ?? '') === 'placed';
 
-        if ($this->canUseLightweightPageQuery($filters)) {
-            $candidates = $this->lightweightProductCandidates($filters);
+        if ($useLightweightQuery) {
+            $candidates = $this->lightweightProductCandidates($filters, $omitVariantDetails);
             if ($keysOnly) {
                 return $candidates->pluck('product_key')->all();
             }
-            $summary = $this->cachedLightweightSummary($candidates, $filters);
+            $summary = $includeSummary ? $this->cachedLightweightSummary($candidates, $filters) : [];
             $total = $candidates->count();
             $lastPage = max(1, (int) ceil($total / $perPage));
             $page = min($page, $lastPage);
@@ -64,18 +66,22 @@ class LogisticsProductStatisticsService
                 trim((string) ($filters['direction'] ?? '')),
             )->slice($offset, $perPage)->values();
             $pageKeys = $pageCandidates->pluck('product_key')->map(static fn ($key): string => (string) $key)->all();
-            $fullRows = $this->productStatisticsQuery($filters, false, $pageKeys)->get()->keyBy('product_key');
-            $productRows = $pageCandidates
-                ->map(static fn (object $candidate) => $fullRows->get($candidate->product_key))
-                ->filter()
-                ->values();
+            if ($omitVariantDetails) {
+                $productRows = $this->fillPagePaymentStatistics($pageCandidates, $filters, $pageKeys);
+            } else {
+                $fullRows = $this->productStatisticsQuery($filters, false, $pageKeys)->get()->keyBy('product_key');
+                $productRows = $pageCandidates
+                    ->map(static fn (object $candidate) => $fullRows->get($candidate->product_key))
+                    ->filter()
+                    ->values();
+            }
         } else {
             // Specialised sorts use the complete statistics data set.
             $query = $this->productStatisticsQuery($filters, false);
             if ($keysOnly) {
                 return $query->pluck('product_statistics.product_key')->all();
             }
-            $summary = $this->overallSummaryFromQuery($query, $filters);
+            $summary = $includeSummary ? $this->overallSummaryFromQuery($query, $filters) : [];
             $total = (clone $query)->count();
             $lastPage = max(1, (int) ceil($total / $perPage));
             $page = min($page, $lastPage);
@@ -88,7 +94,9 @@ class LogisticsProductStatisticsService
         $products = $productRows
             ->map(fn (object $row): array => $this->listProduct($row))
             ->all();
-        $this->fillVariantSkuWeights($products);
+        if (!$omitVariantDetails) {
+            $this->fillVariantSkuWeights($products);
+        }
 
         return [
             'products' => $products,
@@ -115,7 +123,7 @@ class LogisticsProductStatisticsService
      * @param list<string> $extraMetrics
      * @param Closure(Builder, Builder): void $addMetrics
      */
-    public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics, bool $keysOnly = false): array
+    public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics, bool $keysOnly = false, bool $includeSummary = true): array
     {
         $sort = (string) $filters['sort'];
         $baseSort = in_array($sort, $extraMetrics, true) ? '' : $sort;
@@ -126,9 +134,9 @@ class LogisticsProductStatisticsService
             'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate',
         ] : [];
         $cacheKey = $this->statisticsCacheKey('payment-metric-selection-v3', $filters)
-            .'.'.sha1(json_encode([$ranges, $extraMetrics, $useFullQuery, $filters['only_abnormal']]));
+            .'.'.sha1(json_encode([$ranges, $extraMetrics, $useFullQuery, $filters['only_abnormal'], $includeSummary]));
 
-        $selection = Cache::flexible($cacheKey, [120, 600], function () use ($filters, $ranges, $baseMetrics, $useFullQuery, $addMetrics): array {
+        $selection = Cache::flexible($cacheKey, [120, 600], function () use ($filters, $ranges, $baseMetrics, $useFullQuery, $addMetrics, $includeSummary): array {
             $base = $useFullQuery ? $this->productStatisticsQuery($filters, false) : $this->metricCandidateQuery($filters);
             $query = $this->database()->query()->fromSub($base, 'base')
                 ->select([
@@ -160,6 +168,14 @@ class LogisticsProductStatisticsService
             }
 
             $candidates = $matching->get();
+            $selection = [
+                'rows' => $candidates->map(static fn (object $row): array => (array) $row)->all(),
+                'summary' => [],
+            ];
+            if (!$includeSummary) {
+                return $selection;
+            }
+
             $refunds = ['paypal' => 0.0, 'credit_card' => 0.0];
             if ($candidates->isNotEmpty()) {
                 $keys = $candidates->count() <= 500 ? $candidates->pluck('product_key')->all() : null;
@@ -168,10 +184,9 @@ class LogisticsProductStatisticsService
                     : $this->uniqueRefundSummaryForBaseFilters($filters);
             }
 
-            return [
-                'rows' => $candidates->map(static fn (object $row): array => (array) $row)->all(),
-                'summary' => $this->overallSummaryFromCandidates($candidates, $filters, $refunds),
-            ];
+            $selection['summary'] = $this->overallSummaryFromCandidates($candidates, $filters, $refunds);
+
+            return $selection;
         });
 
         $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
@@ -265,7 +280,7 @@ class LogisticsProductStatisticsService
 
         // Reuse the list's lightweight index instead of issuing another
         // whole-table scan just to build the store dropdown.
-        return $this->lightweightProductCandidates($optionFilters)
+        return $this->lightweightProductCandidates($optionFilters, omitVariantDetails: ($filters['date_mode'] ?? '') === 'placed')
             ->flatMap(static fn (object $row): array => explode("\x1F", (string) ($row->store_names ?? '')))
             ->filter(static fn (string $store): bool => $store !== '' && $store !== '__unassigned__')
             ->unique()
@@ -448,11 +463,11 @@ class LogisticsProductStatisticsService
      * @param array<string,mixed> $filters
      * @return Collection<int,object>
      */
-    private function lightweightProductCandidates(array $filters): Collection
+    private function lightweightProductCandidates(array $filters, bool $omitVariantDetails = false): Collection
     {
-        $cacheKey = $this->statisticsCacheKey('candidates', $filters);
-        $rows = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($filters): array {
-            $query = $this->lightweightProductCandidateQuery($filters);
+        $cacheKey = $this->statisticsCacheKey($omitVariantDetails ? 'candidates-compact' : 'candidates', $filters);
+        $rows = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($filters, $omitVariantDetails): array {
+            $query = $this->lightweightProductCandidateQuery($filters, $omitVariantDetails);
             if (!empty($filters['require_tongtu_match'])) {
                 $query->where('item_statistics.product_key', 'like', 'tongtu-product-code:%');
             }
@@ -491,6 +506,7 @@ class LogisticsProductStatisticsService
     public function forgetPageCache(array $filters): void
     {
         Cache::forget($this->statisticsCacheKey('candidates', $filters));
+        Cache::forget($this->statisticsCacheKey('candidates-compact', $filters));
         Cache::forget($this->statisticsCacheKey('summary', $filters));
         Cache::forget($this->statisticsCacheKey('refund-reasons', $filters));
     }
@@ -574,6 +590,12 @@ class LogisticsProductStatisticsService
         }
         $keyFilters['require_tongtu_match'] = (bool) ($filters['require_tongtu_match'] ?? false);
         $keyFilters['exclude_tipping'] = (bool) ($filters['exclude_tipping'] ?? false);
+        if (!empty($filters['use_payment_type'])) {
+            $keyFilters['use_payment_type'] = true;
+        }
+        if (!empty($filters['skip_product_store_aggregates'])) {
+            $keyFilters['skip_product_store_aggregates'] = true;
+        }
         $keyFilters['include_product_codes'] = array_values($filters['include_product_codes'] ?? []);
         $keyFilters['exclude_product_codes'] = array_values($filters['exclude_product_codes'] ?? []);
 
@@ -606,6 +628,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('refund.refund_reason as source_reason')
             ->selectRaw('refund.manual_reason as manual_reason')
             ->selectRaw("COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END) as amount");
+        $this->applyStoredPaymentEventScope($paypal, $filters, 'refund', 'paypal');
         $this->applyPayPalEventDateFilters($paypal, $filters, 'refund.refunded_at');
         $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
             ->whereIn('refund.logistics_order_id', clone $selectedOrders)
@@ -613,6 +636,7 @@ class LogisticsProductStatisticsService
             ->selectRaw("'' as source_reason")
             ->selectRaw('refund.refund_reason as manual_reason')
             ->selectRaw('refund.refund_amount_usd as amount');
+        $this->applyStoredPaymentEventScope($creditCard, $filters, 'refund', 'credit_card');
         $rows = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_reason_rows');
         $totals = (clone $rows)
             ->selectRaw('COUNT(*) as record_count')
@@ -633,7 +657,7 @@ class LogisticsProductStatisticsService
     private function selectedOrderIdsForReasonReport(array $filters): Builder
     {
         return $this->database()->query()
-            ->fromSub($this->productOrderQuery($filters, false), 'reason_product_orders')
+            ->fromSub($this->productOrderQuery($filters, false, includeShopifyPayload: false), 'reason_product_orders')
             ->select('reason_product_orders.order_id')
             ->distinct();
     }
@@ -763,6 +787,16 @@ class LogisticsProductStatisticsService
         $this->hydrateTongtuProductMetadata(collect([$row]));
         $product = $this->listProduct($row);
         if ($withOverview) {
+            if (!empty($filters['use_payment_type'])) {
+                $overall = &$product['overview_modules']['overall'];
+                $received = (float) $row->paypal_module_revenue + (float) $row->credit_card_module_revenue;
+                $orderCount = (int) $row->paid_order_count;
+                $overall['refund_rate_received_amount'] = $received;
+                $overall['dispute_rate_order_count'] = $orderCount;
+                $overall['refund_rate'] = $received > 0 ? round($overall['refund_amount'] / $received * 100, 2) : 0.0;
+                $overall['dispute_rate'] = $orderCount > 0 ? round($overall['dispute_order_count'] / $orderCount * 100, 2) : 0.0;
+                unset($overall);
+            }
             // The overview query deliberately keeps the main product list
             // lightweight.  Reason distribution is only needed inside this
             // one product modal, so fetch it here instead of loading every
@@ -811,6 +845,10 @@ class LogisticsProductStatisticsService
             ->map(static fn ($id): int => (int) $id)->all();
         $rows = collect($this->hydratedOrderRows($filters, $key, $orderIds))->keyBy('order_id');
         $orders = LogisticsOrder::query()->whereIn('id', $orderIds)
+            ->when(!empty($filters['use_payment_type']), fn ($query) => $query->select([
+                'id', 'payment_type', 'paid_at', 'subscription_type', 'subscription_origin_order_id',
+                'shopify_order_id', 'shopify_order_number', 'subscription_link_status',
+            ]))
             ->orderBy('paid_at')->orderBy('id')->get();
 
         $groups = [];
@@ -827,6 +865,9 @@ class LogisticsProductStatisticsService
         $subscriptionFirstCount = 0;
         $linkedSubscriptionCount = 0;
         foreach ($orders as $order) {
+            if (!empty($filters['use_payment_type']) && !in_array($order->payment_type, ['paypal', 'credit_card'], true)) {
+                continue;
+            }
             $row = $rows->get((int) $order->getKey(), []);
             $type = trim((string) $order->subscription_type);
             $origin = trim((string) $order->subscription_origin_order_id);
@@ -930,7 +971,10 @@ class LogisticsProductStatisticsService
             ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key])
             ->whereNotNull('orders.paypal_account_id')
             ->where('orders.paypal_association_source', 'actual_transaction')
-            ->whereRaw("NOT {$creditCardTag}")
+            ->when(!empty($filters['use_payment_type']),
+                fn (Builder $query) => $query->where('orders.payment_type', 'paypal')
+                    ->whereRaw('(orders.paid_at IS NOT NULL OR COALESCE(orders.paid_amount_usd, 0) > 0)'),
+                fn (Builder $query) => $query->whereRaw("NOT {$creditCardTag}"))
             ->select([
                 'orders.id as order_id',
                 'orders.paypal_account_id as paypal_account_id',
@@ -978,12 +1022,16 @@ class LogisticsProductStatisticsService
      */
     private function overviewCreditCardReasonSummaries(array $filters, string $key): array
     {
-        $productOrders = $this->productOrderQuery($filters, false, [$key]);
+        $usePaymentType = !empty($filters['use_payment_type']);
+        $productOrders = $this->productOrderQuery($filters, false, [$key], includeShopifyPayload: !$usePaymentType);
         $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
 
         $records = $this->database()->table('logistics_credit_card_refunds as refund')
             ->joinSub($productOrders, 'product_orders', 'product_orders.order_id', '=', 'refund.logistics_order_id')
-            ->whereRaw($creditCardTag)
+            ->when($usePaymentType,
+                fn (Builder $query) => $query->where('product_orders.payment_type', 'credit_card')
+                    ->whereRaw('(product_orders.paid_at IS NOT NULL OR product_orders.paid_amount_usd > 0)'),
+                fn (Builder $query) => $query->whereRaw($creditCardTag))
             ->select([
                 'refund.id',
                 'refund.logistics_order_id as order_id',
@@ -1110,7 +1158,13 @@ class LogisticsProductStatisticsService
             return [];
         }
 
+        $usePaymentType = !empty($filters['use_payment_type']);
         $orders = LogisticsOrder::query()
+            ->when($usePaymentType, fn ($query) => $query->select([
+                'id', 'store_name', 'shopify_order_number', 'bill_number', 'tracking_number', 'logistics_status',
+                'paid_at', 'paid_amount_usd', 'payment_type', 'payment_status', 'subscription_type',
+                'paypal_account_id', 'paypal_association_source',
+            ]))
             ->with([
                 'paypalRefunds.disputeLinks.dispute',
                 'paypalDisputes.refundLinks.refund',
@@ -1137,8 +1191,8 @@ class LogisticsProductStatisticsService
             })
             ->values();
 
-        $payment = $this->realPaymentSummary($orders->values());
-        $rows = collect($this->relatedOrders($items->all(), $payment))
+        $payment = $this->realPaymentSummary($orders->values(), $usePaymentType);
+        $rows = collect($this->relatedOrders($items->all(), $payment, $usePaymentType))
             ->keyBy(static fn (array $row): int => (int) $row['order_id']);
 
         return array_values(array_filter(array_map(
@@ -1171,7 +1225,7 @@ class LogisticsProductStatisticsService
     {
         $query = $this->baseItemQuery($filters)
             ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
-        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders', !empty($filters['use_payment_type']));
         $this->applyDetailOrderFilters($query, $options, 'orders');
 
         return $query->select('orders.id as order_id')->distinct();
@@ -1185,7 +1239,7 @@ class LogisticsProductStatisticsService
     {
         $query = $this->baseItemQuery($filters)
             ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
-        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders', !empty($filters['use_payment_type']));
         $this->applyDetailOrderFilters($query, $options, 'orders');
 
         return $query
@@ -1216,9 +1270,15 @@ class LogisticsProductStatisticsService
         }
     }
 
-    private function applyDetailPaymentKind(object $query, ?string $paymentKind, string $orderTable): void
+    private function applyDetailPaymentKind(object $query, ?string $paymentKind, string $orderTable, bool $usePaymentType = false): void
     {
         if ($paymentKind === null) {
+            return;
+        }
+
+        if ($usePaymentType) {
+            $query->where("{$orderTable}.payment_type", $paymentKind);
+
             return;
         }
 
@@ -1234,6 +1294,24 @@ class LogisticsProductStatisticsService
             ->whereRaw("NOT {$creditCardTag}");
     }
 
+    private function applyStoredPaymentEventScope(object $query, array $filters, string $eventAlias, string $paymentType): void
+    {
+        if (empty($filters['use_payment_type'])) {
+            return;
+        }
+
+        $query->whereExists(function (Builder $orders) use ($eventAlias, $paymentType): void {
+            $orders->selectRaw('1')
+                ->from('logistics_orders as payment_order')
+                ->whereColumn('payment_order.id', $eventAlias.'.logistics_order_id')
+                ->where('payment_order.payment_type', $paymentType);
+            if ($paymentType === 'paypal') {
+                $orders->where('payment_order.paypal_association_source', 'actual_transaction')
+                    ->whereColumn('payment_order.paypal_account_id', $eventAlias.'.logistics_paypal_account_id');
+            }
+        });
+    }
+
     /**
      * @param array<string,mixed> $filters
      * @return list<string>
@@ -1242,7 +1320,7 @@ class LogisticsProductStatisticsService
     {
         $query = $this->baseItemQuery($filters)
             ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
-        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders', !empty($filters['use_payment_type']));
 
         return $query
             ->whereNotNull('orders.logistics_status')
@@ -1278,6 +1356,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('refund.manual_reason as manual_reason')
             ->selectRaw('COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = \'USD\' THEN refund.original_amount ELSE 0 END) as amount')
             ->selectRaw('COALESCE(refund.refunded_at, refund.created_at) as happened_at');
+        $this->applyStoredPaymentEventScope($paypal, $filters, 'refund', 'paypal');
         $this->applyPayPalEventDateFilters($paypal, $filters, 'refund.refunded_at');
         $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
             ->join('logistics_orders as orders', 'orders.id', '=', 'refund.logistics_order_id')
@@ -1326,7 +1405,11 @@ class LogisticsProductStatisticsService
             $paypalRows->pluck('logistics_order_id')->map(static fn ($id): int => (int) $id)->all(),
             $creditCardRows->pluck('logistics_order_id')->map(static fn ($id): int => (int) $id)->all(),
         )));
-        $orders = LogisticsOrder::query()->whereIn('id', $orderIds)->get()->keyBy('id');
+        $orders = LogisticsOrder::query()->whereIn('id', $orderIds)
+            ->when(!empty($filters['use_payment_type']), fn ($query) => $query->select([
+                'id', 'store_name', 'shopify_order_number', 'bill_number', 'subscription_type', 'paid_amount_usd', 'payment_status',
+            ]))
+            ->get()->keyBy('id');
         $rows = [];
         foreach ($page['rows'] as $row) {
             $refund = $row->payment_method === 'paypal' ? $paypalRows->get((int) $row->record_id) : $creditCardRows->get((int) $row->record_id);
@@ -1430,6 +1513,7 @@ class LogisticsProductStatisticsService
         $values = $this->database()->query()
             ->fromSub(
                 tap($this->database()->table('logistics_paypal_refunds as refund')->whereIn('refund.logistics_order_id', $paypalIds), function (Builder $query) use ($filters): void {
+                    $this->applyStoredPaymentEventScope($query, $filters, 'refund', 'paypal');
                     $this->applyPayPalEventDateFilters($query, $filters, 'refund.refunded_at');
                 })->select('refund.status as value')
                     ->unionAll($this->database()->table('logistics_credit_card_refunds as refund')->whereIn('refund.logistics_order_id', $creditIds)->selectRaw("'credit_card' as value")),
@@ -1462,6 +1546,7 @@ class LogisticsProductStatisticsService
             ->whereIn('logistics_paypal_disputes.logistics_order_id', $orderIds)
             ->select('logistics_paypal_disputes.*')
             ->selectRaw($this->disputeTypeKeyExpression().' as display_type_key');
+        $this->applyStoredPaymentEventScope($query, $filters, 'logistics_paypal_disputes', 'paypal');
         $this->applyPayPalEventDateFilters($query, $filters, 'logistics_paypal_disputes.dispute_created_at');
         $this->applyDetailTextFilter($query, $options, [
             'logistics_paypal_disputes.dispute_id', 'logistics_paypal_disputes.reason', 'orders.shopify_order_number', 'orders.store_name', 'orders.bill_number',
@@ -1483,7 +1568,8 @@ class LogisticsProductStatisticsService
         $ids = $page['rows']
             ->map(static fn (object $row): int => (int) $row->id)
             ->all();
-        $details = LogisticsPayPalDispute::query()->with(['order', 'refundLinks.refund'])->whereIn('id', $ids)->get()->keyBy('id');
+        $orderRelation = !empty($filters['use_payment_type']) ? 'order:id,store_name,shopify_order_number,bill_number' : 'order';
+        $details = LogisticsPayPalDispute::query()->with([$orderRelation, 'refundLinks.refund'])->whereIn('id', $ids)->get()->keyBy('id');
         $rows = array_values(array_filter(array_map(function (int $id) use ($details): ?array {
             $dispute = $details->get($id);
             return $dispute instanceof LogisticsPayPalDispute && $dispute->order instanceof LogisticsOrder
@@ -1504,6 +1590,7 @@ class LogisticsProductStatisticsService
         $options = ['keyword' => '', 'logistics_status' => ''];
         $orderIds = $this->detailOrderIdsQuery($filters, $key, $options, 'paypal');
         $base = $this->database()->table('logistics_paypal_disputes as dispute')->whereIn('dispute.logistics_order_id', $orderIds);
+        $this->applyStoredPaymentEventScope($base, $filters, 'dispute', 'paypal');
         $this->applyPayPalEventDateFilters($base, $filters, 'dispute.dispute_created_at');
         $values = static function (Builder $query, string $column): array {
             return $query->whereNotNull($column)->where($column, '<>', '')->distinct()->orderBy($column)->pluck($column)
@@ -1781,6 +1868,25 @@ class LogisticsProductStatisticsService
         return $query->orderBy('logistics_order_items.id')->get();
     }
 
+    private function fillPagePaymentStatistics(Collection $candidates, array $filters, array $productKeys): Collection
+    {
+        if ($candidates->isEmpty()) {
+            return $candidates;
+        }
+
+        $orders = $this->productOrderStatisticsQuery($filters, false, $productKeys);
+        $statistics = $this->withPaymentRates($orders)->get()->keyBy('product_key');
+
+        return $candidates
+            ->map(static function (object $candidate) use ($statistics): ?object {
+                $payment = $statistics->get($candidate->product_key);
+
+                return $payment === null ? null : (object) [...(array) $candidate, ...(array) $payment];
+            })
+            ->filter()
+            ->values();
+    }
+
     /** @param array<string,mixed> $filters */
     private function productStatisticsQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null): Builder
     {
@@ -1820,11 +1926,11 @@ class LogisticsProductStatisticsService
             ->selectRaw('COALESCE(order_statistics.credit_card_refund_order_count, 0) as credit_card_refund_order_count')
             ->selectRaw('COALESCE(order_statistics.credit_card_order_count, 0) as credit_card_order_count')
             ->selectRaw('COALESCE(order_statistics.combined_refund_order_count, 0) as combined_refund_order_count')
-            ->selectRaw('COALESCE(order_statistics.paid_order_count, 0) as paid_order_count');
+            ->selectRaw('COALESCE(order_statistics.paid_order_count, 0) as paid_order_count')
+            ->selectRaw('COALESCE(order_statistics.order_count, 0) as order_count');
 
         if ($withOverviewModules) {
             $query
-                ->selectRaw('COALESCE(order_statistics.order_count, 0) as order_count')
                 ->selectRaw('COALESCE(order_statistics.shipped_order_count, 0) as shipped_order_count')
                 ->selectRaw('COALESCE(order_statistics.delivered_order_count, 0) as delivered_order_count')
                 ->selectRaw('COALESCE(order_statistics.paypal_module_unit_count, 0) as paypal_module_unit_count')
@@ -1853,17 +1959,7 @@ class LogisticsProductStatisticsService
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_delivered_order_count, 0) as credit_card_module_delivered_order_count');
         }
 
-        $refunds = '(product_data.paypal_refund_amount + product_data.credit_card_refund_amount)';
-        $statistics = $this->database()->query()
-            ->fromSub($query, 'product_data')
-            ->select('product_data.*')
-            ->selectRaw("{$refunds} as actual_refunds")
-            ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_refund_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_refund_rate')
-            ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_dispute_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_dispute_rate')
-            ->selectRaw('CASE WHEN product_data.credit_card_order_count > 0 THEN product_data.credit_card_refund_order_count / product_data.credit_card_order_count * 100 ELSE 0 END as credit_card_refund_rate')
-            ->selectRaw('CASE WHEN product_data.paid_order_count > 0 THEN product_data.combined_refund_order_count / product_data.paid_order_count * 100 ELSE 0 END as combined_refund_rate');
-
-        $result = $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
+        $result = $this->database()->query()->fromSub($this->withPaymentRates($query), 'product_statistics')->select('product_statistics.*');
         if (!empty($filters['require_tongtu_match'])) {
             $result->where('product_statistics.product_key', 'like', 'tongtu-product-code:%');
         }
@@ -1877,6 +1973,18 @@ class LogisticsProductStatisticsService
         return $result;
     }
 
+    private function withPaymentRates(Builder $query): Builder
+    {
+        return $this->database()->query()
+            ->fromSub($query, 'product_data')
+            ->select('product_data.*')
+            ->selectRaw('(product_data.paypal_refund_amount + product_data.credit_card_refund_amount) as actual_refunds')
+            ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_refund_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_refund_rate')
+            ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_dispute_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_dispute_rate')
+            ->selectRaw('CASE WHEN product_data.credit_card_order_count > 0 THEN product_data.credit_card_refund_order_count / product_data.credit_card_order_count * 100 ELSE 0 END as credit_card_refund_rate')
+            ->selectRaw('CASE WHEN product_data.paid_order_count > 0 THEN product_data.combined_refund_order_count / product_data.paid_order_count * 100 ELSE 0 END as combined_refund_rate');
+    }
+
     /**
      * The primary list selector deliberately only uses item-level data. It is
      * enough to find and order a page of products, while the payment-heavy
@@ -1884,9 +1992,9 @@ class LogisticsProductStatisticsService
      *
      * @param array<string,mixed> $filters
      */
-    private function lightweightProductCandidateQuery(array $filters): Builder
+    private function lightweightProductCandidateQuery(array $filters, bool $omitVariantDetails = false): Builder
     {
-        $itemStatistics = $this->itemAggregateQuery($filters);
+        $itemStatistics = $this->itemAggregateQuery($filters, omitVariantDetails: $omitVariantDetails);
 
         return $this->database()->query()
             ->fromSub($itemStatistics, 'item_statistics')
@@ -1896,11 +2004,8 @@ class LogisticsProductStatisticsService
                 'item_statistics.product_key',
                 'item_statistics.first_item_id',
                 'item_statistics.latest_order_at',
-                'item_statistics.latest_order_id',
                 'item_statistics.store_names',
                 'item_statistics.shop_count',
-                'item_statistics.tongtu_skus',
-                'item_statistics.tongtu_variant_count',
                 'item_statistics.sales',
                 'item_statistics.revenue',
                 'first_item.product_title',
@@ -1909,6 +2014,9 @@ class LogisticsProductStatisticsService
                 'first_item.tongtu_sku',
                 'first_item.shopify_sku',
             ])
+            ->when(!$omitVariantDetails, fn (Builder $query) => $query->addSelect([
+                'item_statistics.latest_order_id', 'item_statistics.tongtu_skus', 'item_statistics.tongtu_variant_count',
+            ]))
             ->selectRaw("COALESCE(NULLIF(TRIM(first_item.product_image_url), ''), NULLIF(TRIM(image_item.product_image_url), '')) as product_image_url");
     }
 
@@ -1931,7 +2039,9 @@ class LogisticsProductStatisticsService
             ->selectRaw("{$key} as product_key")
             ->selectRaw('MIN(items.id) as first_item_id')
             ->selectRaw('MAX(COALESCE(orders.order_created_at, orders.paid_at, orders.created_at)) as latest_order_at')
-            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
+            ->when(!empty($filters['skip_product_store_aggregates']),
+                fn (Builder $query) => $query->selectRaw('0 as shop_count'),
+                fn (Builder $query) => $query->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count"))
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->groupByRaw($key);
@@ -1945,7 +2055,7 @@ class LogisticsProductStatisticsService
      * @param array<string,mixed> $filters
      * @param list<string>|null $productKeys
      */
-    private function itemAggregateQuery(array $filters, ?array $productKeys = null): Builder
+    private function itemAggregateQuery(array $filters, ?array $productKeys = null, bool $omitVariantDetails = false): Builder
     {
         $key = $this->productKeyExpression('items', 'sku_mappings');
         $query = $this->baseItemQuery($filters);
@@ -1953,19 +2063,32 @@ class LogisticsProductStatisticsService
             $query->whereIn(DB::raw($key), $productKeys);
         }
 
-        return $query
+        $query
             ->selectRaw("{$key} as product_key")
             ->selectRaw('MIN(items.id) as first_item_id')
             ->selectRaw('MAX(COALESCE(orders.order_created_at, orders.paid_at, orders.created_at)) as latest_order_at')
-            ->selectRaw('SUBSTRING_INDEX(GROUP_CONCAT(orders.id ORDER BY COALESCE(orders.order_created_at, orders.paid_at, orders.created_at) DESC, orders.id DESC SEPARATOR 0x1F), 0x1F, 1) as latest_order_id')
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
-            ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
-            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU'), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU') SEPARATOR 0x1F) as tongtu_skus")
-            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->groupByRaw($key);
+
+        if (!empty($filters['skip_product_store_aggregates'])) {
+            $query->selectRaw('NULL as store_names, 0 as shop_count');
+        } else {
+            $store = "COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')";
+            $query->selectRaw("GROUP_CONCAT(DISTINCT {$store} ORDER BY {$store} SEPARATOR 0x1F) as store_names")
+                ->selectRaw("COUNT(DISTINCT {$store}) as shop_count");
+        }
+
+        if (!$omitVariantDetails) {
+            $variantSku = "COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU')";
+            $query
+                ->selectRaw('SUBSTRING_INDEX(GROUP_CONCAT(orders.id ORDER BY COALESCE(orders.order_created_at, orders.paid_at, orders.created_at) DESC, orders.id DESC SEPARATOR 0x1F), 0x1F, 1) as latest_order_id')
+                ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT({$variantSku}, '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY {$variantSku} SEPARATOR 0x1F) as tongtu_skus")
+                ->selectRaw("COUNT(DISTINCT {$variantSku}) as tongtu_variant_count");
+        }
+
+        return $query;
     }
 
     /**
@@ -2128,20 +2251,26 @@ class LogisticsProductStatisticsService
 
     private function productOrderStatisticsQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null, bool $acrossProducts = false): Builder
     {
+        $usePaymentType = !empty($filters['use_payment_type']);
         $useStoredCardMethod = !$withOverviewModules && ($filters['date_mode'] ?? '') === 'placed';
-        $orders = $this->productOrderQuery($filters, $withOverviewModules, $productKeys, includeShopifyPayload: !$useStoredCardMethod, acrossProducts: $acrossProducts);
+        $orders = $this->productOrderQuery($filters, $withOverviewModules, $productKeys, includeShopifyPayload: !$usePaymentType && !$useStoredCardMethod, acrossProducts: $acrossProducts);
         $paypalRefunds = $this->paypalRefundAggregateQuery($filters);
         $paypalDisputes = $this->paypalDisputeAggregateQuery($withOverviewModules, $filters);
         $creditCardRefunds = $this->creditCardRefundAggregateQuery();
         $paid = '(product_orders.paid_at IS NOT NULL OR COALESCE(product_orders.paid_amount_usd, 0) > 0)';
         $actualPaypal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
-        // Use the UTF-8 bytes for “信用卡” to prevent a collation conflict between
-        // database fields (for example utf8mb4_0900_ai_ci) and the connection default.
-        // The English gateway values remain normal case-insensitive LIKE comparisons.
-        // The Shopify tag is the stable source of truth for the independent
-        // credit-card platform. Presentation gateway fields are not reliable.
         $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
-        $creditCard = $useStoredCardMethod ? "(product_orders.payment_method = 'cc')" : $creditCardTag;
+        $creditCard = $usePaymentType
+            ? "(product_orders.payment_type = 'credit_card')"
+            : ($useStoredCardMethod ? "(product_orders.payment_method = 'cc')" : $creditCardTag);
+        $paypal = $usePaymentType ? "(product_orders.payment_type = 'paypal')" : $actualPaypal;
+        $paypalEvents = $usePaymentType ? "({$paypal} AND {$actualPaypal})" : $actualPaypal;
+        $paidChannels = $usePaymentType ? "({$paid} AND ({$paypal} OR {$creditCard}))" : $paid;
+        $combinedRefund = $usePaymentType
+            ? "(({$paypalEvents} AND COALESCE(paypal_refunds.refund_count, 0) > 0) OR ({$creditCard} AND COALESCE(credit_card_refunds.refund_count, 0) > 0))"
+            : '(COALESCE(paypal_refunds.refund_count, 0) > 0 OR COALESCE(credit_card_refunds.refund_count, 0) > 0)';
+        $cardRefundAmount = $usePaymentType ? "CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_amount, 0) ELSE 0 END" : 'COALESCE(credit_card_refunds.refund_amount, 0)';
+        $cardRefundCount = $usePaymentType ? "CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_count, 0) ELSE 0 END" : 'COALESCE(credit_card_refunds.refund_count, 0)';
         $query = $this->database()->query()
             ->fromSub($orders, 'product_orders')
             ->leftJoinSub($paypalRefunds, 'paypal_refunds', function ($join): void {
@@ -2178,7 +2307,9 @@ class LogisticsProductStatisticsService
                 'product_orders.order_id',
             );
 
-            $paypalModule = "({$actualPaypal} AND NOT {$creditCardTag})";
+            $paypalModule = $usePaymentType ? "({$paid} AND {$paypal})" : "({$actualPaypal} AND NOT {$creditCardTag})";
+            $paypalModuleEvents = $usePaymentType ? "({$paid} AND {$paypalEvents})" : $paypalModule;
+            $cardModule = $usePaymentType ? "({$paid} AND {$creditCard})" : $creditCard;
             $quote = fn (string $value): string => $this->database()->getPdo()->quote($value);
             $shipped = 'product_orders.logistics_status IN ('.implode(', ', array_map($quote, [
                 LogisticsOrder::LOGISTICS_IN_TRANSIT,
@@ -2188,51 +2319,49 @@ class LogisticsProductStatisticsService
             $delivered = 'product_orders.logistics_status = '.$quote(LogisticsOrder::LOGISTICS_DELIVERED);
 
             $query
-                ->selectRaw('COUNT(*) as order_count')
                 ->selectRaw("SUM(CASE WHEN {$shipped} THEN 1 ELSE 0 END) as shipped_order_count")
                 ->selectRaw("SUM(CASE WHEN {$delivered} THEN 1 ELSE 0 END) as delivered_order_count")
                 ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(product_orders.unit_count, 0) ELSE 0 END) as paypal_module_unit_count")
                 ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(product_orders.revenue, 0) ELSE 0 END) as paypal_module_revenue")
                 ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN 1 ELSE 0 END) as paypal_module_order_count")
-                ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_module_refund_amount")
-                ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_module_refund_count")
-                ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_module_dispute_count")
-                ->selectRaw("SUM(CASE WHEN {$paypalModule} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_module_dispute_order_count")
-                ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_module_dispute_amount")
+                ->selectRaw("SUM(CASE WHEN {$paypalModuleEvents} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_module_refund_amount")
+                ->selectRaw("SUM(CASE WHEN {$paypalModuleEvents} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_module_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$paypalModuleEvents} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_module_dispute_count")
+                ->selectRaw("SUM(CASE WHEN {$paypalModuleEvents} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_module_dispute_order_count")
+                ->selectRaw("SUM(CASE WHEN {$paypalModuleEvents} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_module_dispute_amount")
                 ->selectRaw("SUM(CASE WHEN {$paypalModule} AND {$shipped} THEN 1 ELSE 0 END) as paypal_module_shipped_order_count")
                 ->selectRaw("SUM(CASE WHEN {$paypalModule} AND {$delivered} THEN 1 ELSE 0 END) as paypal_module_delivered_order_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(product_orders.unit_count, 0) ELSE 0 END) as credit_card_module_unit_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(product_orders.revenue, 0) ELSE 0 END) as credit_card_module_revenue")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as credit_card_module_order_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_amount, 0) ELSE 0 END) as credit_card_module_refund_amount")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_count, 0) ELSE 0 END) as credit_card_module_refund_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_count, 0) ELSE 0 END) as credit_card_module_chargeback_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} AND COALESCE(credit_card_chargebacks.chargeback_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_module_chargeback_order_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_amount, 0) ELSE 0 END) as credit_card_module_chargeback_amount")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_customer_service_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_customer_service_refund_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_customer_service_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_customer_service_refund_amount")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_dispute_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_dispute_refund_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_dispute_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_dispute_refund_amount")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$shipped} THEN 1 ELSE 0 END) as credit_card_module_shipped_order_count")
-                ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$delivered} THEN 1 ELSE 0 END) as credit_card_module_delivered_order_count");
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(product_orders.unit_count, 0) ELSE 0 END) as credit_card_module_unit_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(product_orders.revenue, 0) ELSE 0 END) as credit_card_module_revenue")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN 1 ELSE 0 END) as credit_card_module_order_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_refunds.refund_amount, 0) ELSE 0 END) as credit_card_module_refund_amount")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_refunds.refund_count, 0) ELSE 0 END) as credit_card_module_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_chargebacks.chargeback_count, 0) ELSE 0 END) as credit_card_module_chargeback_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} AND COALESCE(credit_card_chargebacks.chargeback_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_module_chargeback_order_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_chargebacks.chargeback_amount, 0) ELSE 0 END) as credit_card_module_chargeback_amount")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_customer_service_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_customer_service_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_customer_service_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_customer_service_refund_amount")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_dispute_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_dispute_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} THEN COALESCE(credit_card_dispute_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_dispute_refund_amount")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} AND {$shipped} THEN 1 ELSE 0 END) as credit_card_module_shipped_order_count")
+                ->selectRaw("SUM(CASE WHEN {$cardModule} AND {$delivered} THEN 1 ELSE 0 END) as credit_card_module_delivered_order_count");
         }
 
         return $query
-            ->when($acrossProducts, fn (Builder $query) => $query
-                ->selectRaw('COUNT(*) as order_count')
-                ->selectRaw('SUM(product_orders.matched_revenue) as revenue'))
-            ->selectRaw("SUM(CASE WHEN {$paid} THEN 1 ELSE 0 END) as paid_order_count")
-            ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} THEN 1 ELSE 0 END) as paypal_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
-            ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
-            ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_dispute_count")
-            ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
+            ->selectRaw('COUNT(*) as order_count')
+            ->when($acrossProducts, fn (Builder $query) => $query->selectRaw('SUM(product_orders.matched_revenue) as revenue'))
+            ->selectRaw("SUM(CASE WHEN {$paidChannels} THEN 1 ELSE 0 END) as paid_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paid} AND {$paypal} THEN 1 ELSE 0 END) as paypal_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$paid} AND {$paypalEvents} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_dispute_count")
+            ->selectRaw("SUM(CASE WHEN {$paid} AND {$paypalEvents} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$creditCard} THEN 1 ELSE 0 END) as credit_card_order_count")
-            ->selectRaw('SUM(COALESCE(credit_card_refunds.refund_amount, 0)) as credit_card_refund_amount')
-            ->selectRaw('SUM(COALESCE(credit_card_refunds.refund_count, 0)) as credit_card_refund_count')
+            ->selectRaw("SUM({$cardRefundAmount}) as credit_card_refund_amount")
+            ->selectRaw("SUM({$cardRefundCount}) as credit_card_refund_count")
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$creditCard} AND COALESCE(credit_card_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_refund_order_count")
-            ->selectRaw("SUM(CASE WHEN {$paid} AND (COALESCE(paypal_refunds.refund_count, 0) > 0 OR COALESCE(credit_card_refunds.refund_count, 0) > 0) THEN 1 ELSE 0 END) as combined_refund_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paid} AND {$combinedRefund} THEN 1 ELSE 0 END) as combined_refund_order_count")
             ->groupBy('product_orders.product_key');
     }
 
@@ -2251,10 +2380,14 @@ class LogisticsProductStatisticsService
             ->selectRaw('MAX(orders.paid_at) as paid_at')
             ->selectRaw('MAX(COALESCE(orders.paid_amount_usd, 0)) as paid_amount_usd')
             ->selectRaw('MAX(orders.paypal_account_id) as paypal_account_id')
-            ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
-            ->selectRaw('MAX(orders.payment_method) as payment_method')
-            ->selectRaw('MAX(orders.payment_gateway) as payment_gateway');
+            ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source');
 
+        if (!empty($filters['use_payment_type'])) {
+            $query->selectRaw('MAX(orders.payment_type) as payment_type');
+        } else {
+            $query->selectRaw('MAX(orders.payment_method) as payment_method')
+                ->selectRaw('MAX(orders.payment_gateway) as payment_gateway');
+        }
         if ($includeShopifyPayload) {
             $query->selectRaw('MAX(orders.shopify_payload) as shopify_payload');
         }
@@ -2522,6 +2655,7 @@ class LogisticsProductStatisticsService
             'credit_card_refund_rate' => round((float) $row->credit_card_refund_rate, 2),
             'combined_refund_order_count' => (int) $row->combined_refund_order_count,
             'paid_order_count' => (int) $row->paid_order_count,
+            'order_count' => (int) $row->order_count,
             'combined_refund_rate' => round((float) $row->combined_refund_rate, 2),
             'refund_rate' => round((float) $row->combined_refund_rate, 2),
         ];
@@ -3094,14 +3228,14 @@ class LogisticsProductStatisticsService
      * @param Collection<int,LogisticsOrder> $orders
      * @return array{paypal_refund_amount:float,credit_card_refund_amount:float,paypal_refund_order_ids:list<int>,credit_card_refund_order_ids:list<int>,paypal_dispute_order_ids:list<int>,refund_details:list<array<string,mixed>>,paypal_refund_details:list<array<string,mixed>>,credit_card_refund_details:list<array<string,mixed>>,credit_card_actual_refund_details:list<array<string,mixed>>,dispute_details:list<array<string,mixed>>}
      */
-    private function realPaymentSummary(Collection $orders): array
+    private function realPaymentSummary(Collection $orders, bool $usePaymentType = false): array
     {
         $paypalRefunds = [];
         $creditCardRefunds = [];
         $disputes = [];
         foreach ($orders as $order) {
             $orderId = (int) $order->getKey();
-            if ($this->isPayPalModuleOrder($order)) {
+            if ($usePaymentType ? ($order->payment_type === 'paypal' && $this->isActualPayPalOrder($order)) : $this->isPayPalModuleOrder($order)) {
                 foreach ($order->paypalRefunds as $refund) {
                     if (!$refund instanceof LogisticsPayPalRefund) {
                         continue;
@@ -3123,7 +3257,7 @@ class LogisticsProductStatisticsService
                     $disputes[$key] ??= $this->paypalDisputeDetail($dispute, $order);
                 }
             }
-            if ($this->isCreditCardOrder($order)) {
+            if ($usePaymentType ? $order->payment_type === 'credit_card' : $this->isCreditCardOrder($order)) {
                 foreach ($order->creditCardRefunds as $refund) {
                     $key = 'credit_card:'.(int) $refund->getKey();
                     $creditCardRefunds[$key] ??= $this->creditCardRefundDetail($refund, $order);
@@ -3259,7 +3393,7 @@ class LogisticsProductStatisticsService
      * @param array<string,mixed> $payment
      * @return list<array<string,mixed>>
      */
-    private function relatedOrders(array $items, array $payment): array
+    private function relatedOrders(array $items, array $payment, bool $usePaymentType = false): array
     {
         $orders = [];
         foreach ($items as $item) {
@@ -3268,6 +3402,9 @@ class LogisticsProductStatisticsService
                 continue;
             }
             $id = (int) $order->getKey();
+            $kind = $usePaymentType
+                ? (in_array($order->payment_type, ['paypal', 'credit_card'], true) ? $order->payment_type : 'unknown')
+                : ($this->isPayPalModuleOrder($order) ? 'paypal' : ($this->isCreditCardOrder($order) ? 'credit_card' : 'unknown'));
             $orders[$id] ??= [
                 'order_id' => $id,
                 'detail_url' => route('logistics.orders.detail', ['order' => $id]),
@@ -3285,14 +3422,10 @@ class LogisticsProductStatisticsService
                 'paypal_dispute_count' => 0,
                 'tracking_number' => (string) ($order->tracking_number ?: __('logistics.common.not_available')),
                 'logistics_status' => (string) ($order->logistics_status ?: __('logistics.common.not_available')),
-                'payment_method' => $this->isPayPalModuleOrder($order)
-                    ? __('logistics.product_statistics.payment_methods.paypal')
-                    : ($this->isCreditCardOrder($order)
-                        ? __('logistics.product_statistics.payment_methods.credit_card')
-                        : __('logistics.common.not_available')),
-                'payment_kind' => $this->isPayPalModuleOrder($order)
-                    ? 'paypal'
-                    : ($this->isCreditCardOrder($order) ? 'credit_card' : 'unknown'),
+                'payment_method' => $kind === 'unknown'
+                    ? __('logistics.common.not_available')
+                    : __('logistics.product_statistics.payment_methods.'.$kind),
+                'payment_kind' => $kind,
                 'order_created_at' => $this->dateTime($order->paid_at),
                 '_sort_time' => $order->paid_at?->timestamp ?? 0,
             ];

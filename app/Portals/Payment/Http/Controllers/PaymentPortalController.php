@@ -253,9 +253,18 @@ class PaymentPortalController extends Controller
             return $context;
         }
 
+        $dashboard = $this->productRisk->dashboard($this->productRiskFilters($request));
+        if ($request->expectsJson()) {
+            return response()->json([
+                'html' => view('portals.payment.partials.product-risk-list', ['dashboard' => $dashboard])->render(),
+                'filters' => $dashboard['filters'],
+                'pagination' => $dashboard['pagination'],
+            ]);
+        }
+
         return response()->view('portals.payment.product-risk-profit', [
             ...$this->viewContext($context),
-            'dashboard' => $this->productRisk->dashboard($this->productRiskFilters($request)),
+            'dashboard' => $dashboard,
         ]);
     }
 
@@ -287,7 +296,6 @@ class PaymentPortalController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
-            'store' => ['nullable', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
             'detail_tab' => ['nullable', Rule::in(['overview', 'first_renewal', 'orders', 'variants', 'refunds', 'disputes'])],
@@ -464,9 +472,18 @@ class PaymentPortalController extends Controller
             return $context;
         }
 
+        $section = $request->validate(['section' => ['sometimes', Rule::in(['initial', 'renewal'])]])['section'] ?? null;
+        $filters = $this->renewalAnalysisFilters($request);
+        if ($section !== null) {
+            return response()->view('portals.payment.partials.renewal-analysis-section', [
+                'dashboard' => $this->renewalAnalysis->dashboard($filters, $section),
+                'module' => $section,
+            ])->header('Cache-Control', 'private, no-store');
+        }
+
         return response()->view('portals.payment.renewal-analysis', [
             ...$this->viewContext($context),
-            'dashboard' => $this->renewalAnalysis->dashboard($this->renewalAnalysisFilters($request)),
+            'dashboard' => $this->renewalAnalysis->dashboard($filters, $request->boolean('load_renewal') ? null : 'initial'),
         ]);
     }
 
@@ -709,7 +726,6 @@ class PaymentPortalController extends Controller
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'timezone' => ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))],
-            'store' => ['nullable', 'string', 'max:191'],
             'stage' => ['nullable', 'regex:/^(initial|renewal_[1-9]\d*)?$/'],
             'stage_page' => ['nullable', 'integer', 'min:1'],
         ];
@@ -717,7 +733,6 @@ class PaymentPortalController extends Controller
             $rules[$module.'_date_from'] = ['nullable', 'date_format:Y-m-d'];
             $rules[$module.'_date_to'] = ['nullable', 'date_format:Y-m-d', 'after_or_equal:'.$module.'_date_from'];
             $rules[$module.'_timezone'] = ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))];
-            $rules[$module.'_store'] = ['nullable', 'string', 'max:191'];
         }
         $attributes = [];
         foreach (['initial', 'renewal'] as $module) {
@@ -725,7 +740,6 @@ class PaymentPortalController extends Controller
             $attributes[$module.'_date_from'] = $label.' '.__('payment.renewal_two_sections.start_date');
             $attributes[$module.'_date_to'] = $label.' '.__('payment.renewal_two_sections.end_date');
             $attributes[$module.'_timezone'] = $label.' '.__('payment.renewal_analysis.filters.timezone');
-            $attributes[$module.'_store'] = $label.' '.__('payment.renewal_analysis.filters.store');
         }
         $validated = $request->validate($rules, [], $attributes);
         $filters = ['risk_date_mode' => 'payment',
@@ -737,7 +751,6 @@ class PaymentPortalController extends Controller
             $filters[$module.'_timezone'] = $timezone;
             $filters[$module.'_date_from'] = (string) ($validated[$module.'_date_from'] ?? $validated['date_from'] ?? $today->copy()->subDays(6)->format('Y-m-d'));
             $filters[$module.'_date_to'] = (string) ($validated[$module.'_date_to'] ?? $validated['date_to'] ?? $today->format('Y-m-d'));
-            $filters[$module.'_store'] = trim((string) ($validated[$module.'_store'] ?? $validated['store'] ?? ''));
             if ($filters[$module.'_date_to'] < $filters[$module.'_date_from']) {
                 throw \Illuminate\Validation\ValidationException::withMessages([$module.'_date_to' => __('payment.renewal_two_sections.date_range_error')]);
             }
@@ -752,7 +765,6 @@ class PaymentPortalController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
-            'store' => ['nullable', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
             'only_abnormal' => ['nullable', Rule::in(['', '1'])],
@@ -808,7 +820,6 @@ class PaymentPortalController extends Controller
             'date_from' => (string) ($input['date_from'] ?? ''),
             'date_to' => (string) ($input['date_to'] ?? ''),
             'date_mode' => 'placed',
-            'store' => trim((string) ($input['store'] ?? '')),
             'name' => trim((string) ($input['name'] ?? '')),
             'keyword' => trim((string) ($input['keyword'] ?? '')),
             'match_status' => '',

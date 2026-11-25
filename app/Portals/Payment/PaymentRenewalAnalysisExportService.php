@@ -79,7 +79,7 @@ class PaymentRenewalAnalysisExportService
             [__('payment.renewal_analysis.export.utc_period'), $data['initial_calculation']['utc_period_from'].' ~ '.$data['initial_calculation']['utc_period_to']],
             [__('payment.renewal_analysis.export.utc_comparison'), $data['initial_calculation']['utc_comparison_from'].' ~ '.$data['initial_calculation']['utc_comparison_to']],
             [$text('first_scope')],
-            [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? ''],
+            [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? __('payment.renewal_analysis.filters.all_stores')],
         ];
         $firstRows = function () use ($data,$text,$groups,$methodLabel,$firstMetadata): \Generator {
             foreach (array_slice($firstMetadata,1) as $values) yield $this->row($values, [], [1]);
@@ -91,7 +91,7 @@ class PaymentRenewalAnalysisExportService
         };
         $refundRows = function () use ($data,$text,$groups,$methodLabel,$filters): \Generator {
             yield $this->row([__('payment.renewal_analysis.export.period'),$data['initial_calculation']['period_from'].' ~ '.$data['initial_calculation']['period_to']], [], [1]);
-            yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['initial_store'] ?? $filters['store'] ?? '']);
+            yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['initial_store'] ?? $filters['store'] ?? __('payment.renewal_analysis.filters.all_stores')]);
             $note=$this->row([$text('delivery_note')],[],[0]);
             $note['mergeAcross']=[0=>17];
             $note['height']=34;
@@ -113,7 +113,7 @@ class PaymentRenewalAnalysisExportService
         $renewalRows = function () use ($data,$text,$groups,$methodLabel,$filters): \Generator {
             yield $this->row([__('payment.renewal_analysis.export.period'),$data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']], [], [1]);
             yield $this->row([__('payment.renewal_analysis.export.comparison_period'),$data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']], [], [1]);
-            yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['renewal_store'] ?? $filters['store'] ?? '']);
+            yield $this->row([__('payment.renewal_analysis.filters.store'),$filters['renewal_store'] ?? $filters['store'] ?? __('payment.renewal_analysis.filters.all_stores')]);
             yield $this->row([]);
             yield $this->row([$text('renewal_stage'),$text('payment_method'),$text('previous_orders'),$text('current_renewal_orders'),
                 __('payment.renewal_analysis.funnel.renewal_rate'),$text('revenue'),$text('refund_orders'),$text('refund_amount'),$text('refund_count_rate'),$text('refund_amount_rate')], [], [], true);

@@ -18,9 +18,13 @@ class PaymentRenewalAnalysisService
     // Avoid loading large Shopify/Tongtu payloads when reconstructing historical stages.
     private const ORDER_FIELDS = [
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
-        'is_add_on', 'operator_name', 'store_name', 'tongtu_order_number', 'transaction_id', 'shopify_order_id',
+        'operator_name', 'store_name', 'tongtu_order_number', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
         'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status',
+    ];
+
+    private const SUBSCRIPTION_REFERENCE_FIELDS = [
+        'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
     ];
 
     /** Ordered groups shared by the page and Excel export. */
@@ -61,11 +65,12 @@ class PaymentRenewalAnalysisService
         return $options;
     }
 
-    public function dashboard(array $filters): array
+    public function dashboard(array $filters, ?string $section = null): array
     {
         unset($filters['channel']);
         if (($filters['stage'] ?? '') === 'initial') $filters['stage']='';
-        $data=$this->combinedData($filters);
+        if ($section === 'initial') return [...$this->initialData($filters), 'filters'=>$filters];
+        $data=$section === 'renewal' ? $this->renewalData($filters) : $this->combinedData($filters);
         $total=count($data['stages']);
         $last=max(1,(int)ceil($total/10));
         $page=min($last,max(1,(int)($filters['stage_page'] ?? 1)));
@@ -180,7 +185,22 @@ class PaymentRenewalAnalysisService
 
     private function combinedData(array $filters): array
     {
+        $initial=$this->initialData($filters);
+        $renewal=$this->renewalData($filters);
+        return [...$initial,...$renewal,'summary'=>[...$renewal['summary'],...$initial['summary']]];
+    }
+
+    private function initialData(array $filters): array
+    {
         $initial=$this->dataset($this->moduleFilters($filters,'initial'));
+        return ['summary'=>['subscription_rate'=>$initial['subscription_rate']],
+            'initial_refunds'=>$initial['initial_refunds'],'initial_refunds_by_type'=>$initial['initial_refunds_by_type'],
+            'initial_delivery_by_type'=>$initial['initial_delivery_by_type'],
+            'initial_calculation'=>$initial['calculation']];
+    }
+
+    private function renewalData(array $filters): array
+    {
         $renewal=$this->dataset($this->moduleFilters($filters,'renewal'));
         $stageFilter=($filters['stage'] ?? '')==='initial' ? '' : ($filters['stage'] ?? '');
         $stages=array_values(array_filter($renewal['stages'],static fn ($stage)=>$stage['number']>0 && ($stageFilter==='' || $stage['key']===$stageFilter)));
@@ -194,20 +214,17 @@ class PaymentRenewalAnalysisService
         unset($stage);
         foreach ($channels as &$value) $value=$this->finishTotal($value);
         unset($value);
-        return ['summary'=>[...$this->finishTotal($summary),'subscription_rate'=>$initial['subscription_rate']],
+        return ['summary'=>$this->finishTotal($summary),
             'stages'=>$stages,'stage_options'=>array_column(array_filter($renewal['stages'],static fn ($s)=>$s['number']>0),'key'),
-            'initial_refunds'=>$initial['initial_refunds'],'initial_refunds_by_type'=>$initial['initial_refunds_by_type'],
-            'initial_delivery_by_type'=>$initial['initial_delivery_by_type'],
-            'calculation'=>$renewal['calculation'],'initial_calculation'=>$initial['calculation'],
-            'initial_stores'=>$initial['stores'],'renewal_stores'=>$renewal['stores'],'stores'=>$renewal['stores'],
-            'risk_by_channel'=>$channels,'upsell'=>$renewal['upsell']];
+            'calculation'=>$renewal['calculation'],
+            'risk_by_channel'=>$channels];
     }
 
     private function dataset(array $filters): array
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
-        return Cache::remember('payment:renewal-summary:v23:'.sha1(json_encode($cache)),now()->addMinutes(5),
+        return Cache::remember('payment:renewal-summary:v25:'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
 
@@ -281,42 +298,38 @@ class PaymentRenewalAnalysisService
     /** Only scalar reference => root IDs survive the discovery pass, never all Eloquent models. */
     private function rootIndex(array $filters,array $w): array
     {
-        $refs=$stores=[];
+        $refs=[];
         $candidates=LogisticsOrder::query()->where(function ($q) use ($w): void {
             $q->whereBetween('paid_at',[$w['from'],$w['to']])->orWhereBetween('paid_at',[$w['previous_from'],$w['previous_to']]);
-        })->select(['id','subscription_origin_order_id','subscription_type','store_name'])->lazyById(500);
+        })->select(['id','subscription_origin_order_id','subscription_type'])->lazyById(500);
         foreach ($candidates as $order) {
             $origin=trim((string)$order->subscription_origin_order_id);
             if ($origin!=='') $refs[$origin]=true;
             if ($origin==='' && $order->subscription_type==='订阅首次购买') $refs[(string)$order->id]=true;
-            if ($order->store_name) $stores[$order->store_name]=true;
         }
         $keys=array_keys($refs);
         unset($refs);
         $ids=$map=[];
         foreach (array_chunk($keys,300) as $chunk) {
             $numeric=array_values(array_filter($chunk,static fn ($v)=>ctype_digit((string)$v)));
-            $query=LogisticsOrder::query()->select(self::ORDER_FIELDS)->where('subscription_type','订阅首次购买')
+            $query=LogisticsOrder::query()->select(['id', ...self::SUBSCRIPTION_REFERENCE_FIELDS])->where('subscription_type','订阅首次购买')
                 ->whereNotNull('paid_at')->where('paid_at','<=',$w['to'])
                 ->where(function ($q): void {$q->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id','');})
                 ->where(function ($q): void {$q->whereNull('operator_name')->orWhere('operator_name','not like','%刷单%');})
                 ->where(function ($q) use ($chunk,$numeric): void {
-                    foreach (['transaction_id','shopify_order_id','shopify_order_number','payment_gateway_order_id','bill_number'] as $field) $q->orWhereIn($field,$chunk);
+                    foreach (self::SUBSCRIPTION_REFERENCE_FIELDS as $field) $q->orWhereIn($field,$chunk);
                     if ($numeric) $q->orWhereIn('id',$numeric);
                 });
             if ($filters['store']!=='') $query->where('store_name',$filters['store']);
             foreach ($query->lazyById(500) as $root) {
-                if ($root->store_name) $stores[$root->store_name]=true;
-                if ($filters['first_only']) continue;
                 $id=(int)$root->id;
                 $ids[$id]=true;
                 foreach ($this->chainReferences($root) as $ref) if (!isset($map[$ref]) || $map[$ref]<$id) $map[$ref]=$id;
             }
         }
-        if ($filters['store']!=='') $stores[$filters['store']]=true;
         $rootIds=array_keys($ids);
         sort($rootIds,SORT_NUMERIC);
-        return ['ids'=>$rootIds,'map'=>$map,'stores'=>collect(array_keys($stores))->map(static fn ($name)=>(string)$name)->sort()->values()->all()];
+        return ['ids'=>$rootIds,'map'=>$map];
     }
 
     private function lifecycleBatches(array $filters,array $index,array $w): \Generator
@@ -389,7 +402,6 @@ class PaymentRenewalAnalysisService
     private function buildSummary(array $filters): array
     {
         $w=$this->window($filters);
-        $index=$this->rootIndex($filters,$w);
         $groups=array_keys(self::breakdownGroups());
         $first=[];
         foreach ($groups as $key) $first[$key]=array_fill_keys(['all','subscription','non_subscription'],$this->emptyRiskTotal());
@@ -407,9 +419,7 @@ class PaymentRenewalAnalysisService
             }
         }
         $current=$previous=[];
-        $upsell=['reference_orders'=>0,'scope_orders'=>0,'linked_orders'=>0,'references'=>0,'unmeasured'=>0,
-            'measured_orders'=>0,'revenue'=>0.0,'refund_count'=>0,'refund_amount'=>0.0,'dispute_count'=>0,'dispute_amount'=>0.0];
-        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$index,$w) as $entries) {
+        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w) as $entries) {
             $now=[];
             foreach ($entries as $entry) {
                 $order=$entry['order'];
@@ -423,7 +433,6 @@ class PaymentRenewalAnalysisService
             if (!$now) continue;
             $ids=array_map(static fn ($e)=>(int)$e['order']->id,$now);
             $risk=$this->riskMaps($ids,['timezone'=>$filters['timezone']],$w['from'],$w['to'],false);
-            $renewalIds=[];
             foreach ($now as $entry) {
                 $order=$entry['order'];
                 $number=$entry['number'];
@@ -438,26 +447,8 @@ class PaymentRenewalAnalysisService
                 $this->addTotal($s['channels'][$row['actual_channel']],$row,false);
                 $s['from']=min($s['from'],$row['paid_at']);$s['to']=max($s['to'],$row['paid_at']);
                 unset($s);
-                if ($number>0) {
-                    $renewalIds[]=(int)$order->id;
-                    $upsell['scope_orders']++;
-                    if ($order->is_add_on==='已加购') {
-                        $upsell['measured_orders']++;
-                        $upsell['revenue']+=(float)$order->paid_amount_usd;
-                        foreach (['refund_count','refund_amount','dispute_count','dispute_amount'] as $field) {
-                            $upsell[$field]+=$row[match ($field) {'refund_amount'=>'raw_refund_amount','dispute_amount'=>'raw_dispute_amount',default=>$field}];
-                        }
-                    }
-                }
-            }
-            if ($renewalIds) {
-                $stats=LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id',$renewalIds)->where('reference_type',LogisticsOrderPaymentReference::TYPE_UPSELL)
-                    ->selectRaw('COUNT(*) as records, COUNT(DISTINCT logistics_order_id) as orders, SUM(CASE WHEN gateway_order_id IS NULL THEN 1 ELSE 0 END) as missing')->first();
-                $upsell['references']+=(int)$stats->records;$upsell['reference_orders']+=(int)$stats->orders;$upsell['unmeasured']+=(int)$stats->missing;
             }
         }
-        $upsell['linked_orders']=max($upsell['measured_orders'],$upsell['reference_orders']);
-        foreach (['revenue','refund_amount','dispute_amount'] as $field) $upsell[$field]=round($upsell[$field],2);
         $numbers=[0=>true];
         foreach (array_keys($current) as $number) $numbers[$number]=true;
         foreach (array_keys($previous) as $number) $numbers[$number+1]=true;
@@ -497,7 +488,7 @@ class PaymentRenewalAnalysisService
         }
         unset($types);
         return ['calculation'=>$w['calculation'],'subscription_rate'=>$filters['first_only'] ? $this->subscriptionRate($w['from'],$w['to'],$filters) : [],
-            'initial_refunds'=>$initial,'initial_refunds_by_type'=>$first,'initial_delivery_by_type'=>$firstDelivery,'stages'=>$stages,'stores'=>$index['stores'],'upsell'=>$upsell];
+            'initial_refunds'=>$initial,'initial_refunds_by_type'=>$first,'initial_delivery_by_type'=>$firstDelivery,'stages'=>$stages];
     }
 
     /** @return array<string,mixed> */

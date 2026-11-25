@@ -196,6 +196,30 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame(2, $service->exportData($filters)['initial_refunds']['total']['orders']);
     }
 
+    public function test_renewal_number_and_comparison_count_include_history_before_both_periods(): void
+    {
+        $this->order(450, '2026-09-02 12:00:00', '订阅首次购买', 'credit_card', '', 'Historical', [
+            'shopify_order_number' => 'ROOT-450',
+            'payment_gateway_order_id' => 'GATEWAY-450',
+            'bill_number' => 'BILL-450',
+        ]);
+        $this->order(451, '2026-09-15 12:00:00', '订阅复购', 'credit_card', 'ROOT-450', 'Historical');
+        $this->order(452, '2026-10-02 12:00:00', '订阅复购', 'credit_card', 'GATEWAY-450', 'Historical');
+        $this->order(453, '2026-11-01 12:00:00', '订阅复购', 'credit_card', 'BILL-450', 'Historical');
+
+        $filters = $this->filters(['renewal_store' => 'Historical']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $data = $service->dashboard($filters, 'renewal');
+        self::assertSame(['renewal_3'], array_column($data['stages'], 'key'));
+        $stage = $data['stages'][0];
+        self::assertSame(1, $stage['orders']);
+        self::assertSame(1, $stage['previous_orders']);
+        self::assertEquals(100, $stage['rate']);
+        $rows = $service->exportData($filters)['rows']->all();
+        self::assertSame([453], array_column($rows, 'erp_order_id'));
+        self::assertSame([3], array_column($rows, 'stage_number'));
+    }
+
     public function test_card_refunds_include_every_positive_record_once_regardless_of_reason(): void
     {
         $this->order(600,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');
@@ -254,6 +278,7 @@ class PaymentRenewalAnalysisTest extends TestCase
             'logistics_order_id'=>5,'reference_type'=>$type,'reference_number'=>$bill,'gateway_order_id'=>$gateway,
         ]);
         DB::table('logistics_order_payment_references')->insert(['logistics_order_id'=>6,'reference_type'=>'upsell','reference_number'=>'OTHER-ORDER-BILL']);
+        DB::table('logistics_order_payment_references')->insert(['logistics_order_id'=>3,'reference_type'=>'upsell','reference_number'=>'RENEWAL-ADDON-BILL']);
         foreach ([
             ['TX-5','T0006','S',5], ['EXTRA-TRANSACTION-5','T0006','S',5],
             ['EXTRA-TRANSACTION-5','T0006','V',5], ['FAILED-TRANSACTION','T0006','D',5],
@@ -296,6 +321,10 @@ class PaymentRenewalAnalysisTest extends TestCase
             try {
                 file_put_contents($path,$bytes);$book=IOFactory::load($path);
                 $sheet=$book->getSheet($kind==='main' ? 3 : 0);
+                if ($kind === 'main') {
+                    $renewalBills = array_column($sheet->rangeToArray('E2:J'.$sheet->getHighestRow()), 5, 0);
+                    self::assertSame('RENEWAL-ADDON-BILL', $renewalBills[3] ?? null);
+                }
                 $target=null;
                 for($r=2;$r<=$sheet->getHighestRow();$r++) {
                     if((string) $this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='5') {$target=$r;break;}
@@ -860,12 +889,15 @@ PHP;
         }
     }
 
-    public function test_controller_ignores_legacy_channel_and_rejects_reversed_module_dates(): void
+    public function test_controller_ignores_legacy_channel_and_stores_and_rejects_reversed_module_dates(): void
     {
         $method = new \ReflectionMethod(PaymentPortalController::class, 'renewalAnalysisFilters');
         $controller = (new \ReflectionClass(PaymentPortalController::class))->newInstanceWithoutConstructor();
-        $filters = $method->invoke($controller, Request::create('/', 'GET', $this->filters()));
+        $filters = $method->invoke($controller, Request::create('/', 'GET', $this->filters(['store' => 'Other'])));
         self::assertArrayNotHasKey('channel', $filters);
+        self::assertArrayNotHasKey('store', $filters);
+        self::assertArrayNotHasKey('initial_store', $filters);
+        self::assertArrayNotHasKey('renewal_store', $filters);
         $this->expectException(\Illuminate\Validation\ValidationException::class);
         $method->invoke($controller, Request::create('/', 'GET', $this->filters(['initial_date_to' => '2026-10-01'])));
     }
@@ -884,7 +916,7 @@ PHP;
         self::assertSame($pageOne['initial_refunds_by_type'], $pageTwo['initial_refunds_by_type']);
     }
 
-    public function test_timezone_changes_only_own_module_at_day_boundary_and_store_options_remain_available(): void
+    public function test_timezone_changes_only_own_module_at_day_boundary(): void
     {
         $this->order(20, '2026-11-01 18:30:00', '无订阅', 'credit_card');
         $service = app(PaymentRenewalAnalysisService::class);
@@ -893,13 +925,13 @@ PHP;
         self::assertSame(3, $china['initial_refunds']['total']['orders']);
         self::assertSame(4, $western['initial_refunds']['total']['orders']);
         self::assertSame($china['stages'], $western['stages']);
-        self::assertContains('Other', $china['initial_stores']);
-        self::assertContains('Test', $service->dashboard($this->filters(['initial_store' => 'Other']))['initial_stores']);
     }
 
-    public function test_page_renders_two_independent_forms_and_refund_types_without_channel_filter(): void
+    public function test_page_renders_two_independent_forms_and_refund_types_without_channel_or_store_filters(): void
     {
-        $dashboard = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters());
+        $dashboard = app(PaymentRenewalAnalysisService::class)->dashboard(array_diff_key($this->filters(), [
+            'initial_store' => true, 'renewal_store' => true,
+        ]));
         $source = str_replace("@extends('portal.layout')", '', file_get_contents(resource_path('views/portals/payment/renewal-analysis.blade.php')));
         $html = \Illuminate\Support\Facades\Blade::render($source.'@yield("content") @stack("scripts")', ['dashboard' => $dashboard, 'errors' => new \Illuminate\Support\ViewErrorBag()]);
         self::assertSame(2,substr_count($html,'data-renewal-export-url='));
@@ -927,8 +959,55 @@ PHP;
         self::assertStringNotContainsString('>信用卡</', $html);
         self::assertStringNotContainsString('payment.renewal_two_sections.', $html);
         self::assertStringContainsString('2 ÷ 2 × 100%', $html);
-        self::assertStringContainsString('name="initial_store" value="Test"', $html);
-        self::assertStringContainsString('name="renewal_store" value="Test"', $html);
+        self::assertStringNotContainsString('name="initial_store"', $html);
+        self::assertStringNotContainsString('name="renewal_store"', $html);
+    }
+
+    public function test_first_request_and_fragments_only_query_the_requested_section(): void
+    {
+        config(['app.key' => 'base64:'.base64_encode(str_repeat('a', 32))]);
+        $portal = new \App\Models\Portal(['code' => 'ppay', 'name' => 'Payment']);
+        $portal->setRelation('menus', collect());
+        $user = \Mockery::mock(\App\Models\AdminUser::class)->makePartial();
+        $user->name = 'Payment tester';
+        $user->shouldReceive('isAdministrator')->andReturn(true);
+        $this->mock(\App\Portal\Http\Controllers\PortalEntryController::class)
+            ->shouldReceive('portalContext')->andReturn(['portal' => $portal, 'user' => $user]);
+        $this->mock(\App\Services\AdminWatermarkService::class)->shouldReceive('scriptForAdministrator')->andReturnNull();
+        $this->mock(\App\Services\SystemSettingService::class)->shouldReceive('footer')
+            ->andReturn(['copyright_text' => '', 'contact_information' => '']);
+        $url = static fn (array $params = []) => route('payment.renewal-analysis.index', array_merge([
+            'initial_date_from' => '2026-11-01', 'initial_date_to' => '2026-11-01',
+            'renewal_date_from' => '2026-11-01', 'renewal_date_to' => '2026-11-01',
+        ], $params));
+
+        DB::enableQueryLog();
+        $this->get($url(['initial_store' => 'Test', 'renewal_store' => 'Test']))->assertOk()
+            ->assertViewHas('dashboard', fn (array $data) => $data['initial_refunds']['total']['orders'] === 4)
+            ->assertSee('data-renewal-section="initial"', false)
+            ->assertSee('data-renewal-placeholder', false)
+            ->assertDontSee('data-renewal-section="renewal"', false);
+        $queries = array_column(DB::getQueryLog(), 'query');
+        self::assertStringNotContainsString('logistics_order_payment_references', implode("\n", $queries));
+        self::assertStringNotContainsString('"transaction_id" in (', implode("\n", $queries));
+        DB::flushQueryLog();
+
+        $this->get($url(['section' => 'renewal', 'renewal_store' => 'Other']))->assertOk()
+            ->assertSee('data-renewal-section="renewal"', false)
+            ->assertDontSee('data-renewal-section="initial"', false)
+            ->assertSee('2 ÷ 2 × 100%');
+        $queries = json_encode(DB::getQueryLog(), JSON_UNESCAPED_UNICODE);
+        self::assertStringNotContainsString('logistics_order_payment_references', $queries);
+        self::assertStringNotContainsString('无订阅', $queries);
+        DB::disableQueryLog();
+
+        $this->get($url(['section' => 'initial']))->assertOk()
+            ->assertSee('data-renewal-section="initial"', false)
+            ->assertDontSee('data-renewal-placeholder', false)
+            ->assertDontSee('data-renewal-section="renewal"', false);
+        $this->get($url(['load_renewal' => 1]))->assertOk()
+            ->assertSee('data-renewal-section="initial"', false)
+            ->assertSee('data-renewal-section="renewal"', false);
     }
 
     public function test_bill_and_email_are_searchable_and_export_covers_all_filtered_rows_as_literal_text(): void

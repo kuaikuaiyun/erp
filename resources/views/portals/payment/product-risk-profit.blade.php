@@ -22,7 +22,7 @@
         $metricFields[] = $metric.'_max';
     }
     $metricErrors = collect($metricFields)->flatMap(fn ($field) => $errors->get($field));
-    $exportFilters = array_intersect_key($filters, array_flip(['date_from', 'date_to', 'store', 'name', 'keyword', 'only_abnormal', 'sort', 'direction']));
+    $exportFilters = array_intersect_key($filters, array_flip(['date_from', 'date_to', 'name', 'keyword', 'only_abnormal', 'sort', 'direction']));
     foreach ($filters['metric_ranges'] ?? [] as $metric => $bounds) {
         foreach ($bounds as $bound => $value) {
             $exportFilters[$metric.'_'.$bound] = $value;
@@ -34,7 +34,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261124-21">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261124-risk-summary14">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261125-risk-list-height">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261106-2">
 @endpush
@@ -45,24 +45,17 @@
 </section>
 <section class="content payment-portal-page payment-product-risk-page">
     <div class="box box-solid payment-filter-box payment-risk-filter-panel"><div class="box-body">
-        <form class="payment-risk-filter-form flt" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter
+        <form class="payment-risk-filter-form flt" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter data-loading="off"
             data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
             data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}">
             <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
+            <input type="hidden" name="name" value="{{ $filters['name'] }}">
             <input type="hidden" name="sort" value="{{ $filters['sort'] }}"><input type="hidden" name="direction" value="{{ $filters['direction'] }}">
             <div class="flt-filter-grid payment-risk-filter-grid">
                 <div><label class="flt-field-label" for="payment-risk-date-from">{{ __($translationPrefix.'.layout.order_date') }}</label><div class="flt-time-range">
                     <input id="payment-risk-date-from" class="form-control" type="date" name="date_from" aria-label="{{ __($translationPrefix.'.layout.date_from') }}" value="{{ $filters['date_from'] }}">
                     <input class="form-control" type="date" name="date_to" aria-label="{{ __($translationPrefix.'.layout.date_to') }}" value="{{ $filters['date_to'] }}">
                 </div></div>
-                <div><label class="flt-field-label" for="payment-risk-store">{{ __($translationPrefix.'.filters.store') }}</label>
-                    <select id="payment-risk-store" class="form-control" name="store" data-filter-searchable>
-                        <option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>
-                        @foreach(array_unique(array_filter([$filters['store'], ...$dashboard['stores']])) as $store)
-                            <option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>
-                        @endforeach
-                    </select>
-                </div>
                 <div><label class="flt-field-label" for="payment-risk-keyword">{{ __($translationPrefix.'.filters.product') }}</label>
                     <input id="payment-risk-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}">
                 </div>
@@ -71,17 +64,15 @@
                 </div>
             </div>
             <p class="payment-risk-refund-scope">{{ __($translationPrefix.'.layout.refund_scope') }}</p>
+            <ul class="text-danger" role="alert" data-payment-risk-filter-errors @if($metricErrors->isEmpty()) hidden @endif>
+                @foreach($metricErrors as $message)
+                    <li>{{ $message }}</li>
+                @endforeach
+            </ul>
             <details class="payment-product-metric-filters" @if(!empty($filters['metric_ranges']) || $metricErrors->isNotEmpty()) open @endif>
                 <summary>{{ __($metricFilterText.'.title') }}</summary>
                 <div class="payment-product-metric-filter-content">
                     <p>{{ __($metricFilterText.'.hint') }}</p>
-                    @if($metricErrors->isNotEmpty())
-                        <ul class="text-danger" role="alert">
-                            @foreach($metricErrors as $message)
-                                <li>{{ $message }}</li>
-                            @endforeach
-                        </ul>
-                    @endif
                     <div class="payment-product-metric-filter-grid payment-risk-metric-count">
                         <fieldset>
                             <legend>{{ __($metricFilterText.'.metrics.order_count') }}</legend>
@@ -118,17 +109,18 @@
                     @endforeach
                 </div>
             </details>
-            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a></div>
+            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}" data-payment-risk-reset data-loading="off">{{ __('payment.common.reset') }}</a></div>
         </form>
     </div></div>
 
-    <section class="payment-refund-reason-report is-collapsed" data-payment-refund-report data-url="{{ route('payment.product-risk-profit.tab') }}" data-loaded="false">
-        <header><div><h3><i class="fa fa-pie-chart"></i> {{ __($translationPrefix.'.refund_report.title') }}</h3><p>{{ __($translationPrefix.'.refund_report.hint') }}</p></div><div class="payment-refund-report-actions"><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="{{ __($translationPrefix.'.refund_report.expand') }}" data-collapse-text="{{ __($translationPrefix.'.refund_report.collapse') }}"><i class="fa fa-angle-down"></i> <span>{{ __($translationPrefix.'.refund_report.expand') }}</span></button></div></header>
-    </section>
+    <div data-payment-risk-report>
+        <section class="payment-refund-reason-report is-collapsed" data-payment-refund-report data-url="{{ route('payment.product-risk-profit.tab') }}" data-loaded="false">
+            <header><div><h3><i class="fa fa-pie-chart"></i> {{ __($translationPrefix.'.refund_report.title') }}</h3><p>{{ __($translationPrefix.'.refund_report.hint') }}</p></div><div class="payment-refund-report-actions"><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="{{ __($translationPrefix.'.refund_report.expand') }}" data-collapse-text="{{ __($translationPrefix.'.refund_report.collapse') }}"><i class="fa fa-angle-down"></i> <span>{{ __($translationPrefix.'.refund_report.expand') }}</span></button></div></header>
+        </section>
+    </div>
 
     <details class="payment-risk-summary-card" data-payment-risk-summary
-        data-url="{{ route('payment.product-risk-profit.tab', [...$exportFilters, 'tab' => 'all_products_summary']) }}"
-        data-loading="{{ __($translationPrefix.'.layout.summary_loading') }}"
+        data-url="{{ route('payment.product-risk-profit.tab', ['tab' => 'all_products_summary']) }}"
         data-failed="{{ __($translationPrefix.'.layout.summary_failed') }}">
         <summary>
             <span>
@@ -138,26 +130,24 @@
             <span class="btn btn-default btn-sm payment-risk-summary-toggle">
                 <span class="payment-risk-summary-expand"><i class="fa fa-angle-down" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.summary_expand') }}</span>
                 <span class="payment-risk-summary-collapse"><i class="fa fa-angle-up" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.summary_collapse') }}</span>
+                <span class="payment-risk-summary-loading" role="status"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {{ __($translationPrefix.'.layout.summary_loading') }}</span>
             </span>
         </summary>
         <div data-payment-risk-summary-body aria-live="polite"></div>
     </details>
 
-    <div class="payment-tab-panel payment-product-risk-primary-panel">
-        <div class="flt-toolbar payment-risk-list-toolbar">
-            <div class="flt-selection">
-                <span>{{ __('frontend_list_template.records', ['count' => $number($pagination['total'])]) }}</span>
-                <span class="flt-toolbar-divider" aria-hidden="true"></span>
-                <span aria-live="polite" data-payment-risk-selected data-count-label="{{ __('frontend_list_template.selected_records') }}">{{ __('frontend_list_template.selected_records', ['count' => 0]) }}</span>
-                <button type="button" class="flt-btn" data-payment-risk-clear disabled>{{ __('frontend_list_template.clear_selected') }}</button>
-            </div>
-            <div class="flt-toolbar-actions">
-                <button class="flt-btn" type="button" data-payment-product-export aria-haspopup="dialog" aria-controls="payment-risk-export-modal" @disabled($pagination['total'] === 0)>
-                    <i class="fa fa-download" aria-hidden="true"></i> {{ __('frontend_list_template.export') }}
-                </button>
-            </div>
+    <div class="payment-tab-panel payment-product-risk-primary-panel flt-table-region" data-payment-risk-list>
+        <div class="flt-loading payment-risk-list-loading" data-payment-risk-loading role="status" hidden>
+            <span class="flt-spinner" aria-hidden="true"></span>
+            <span>{{ __($translationPrefix.'.main_tabs.loading') }}</span>
         </div>
-        @include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])
+        <div class="payment-risk-list-error" data-payment-risk-list-error hidden>
+            <span role="alert">{{ __($translationPrefix.'.main_tabs.load_failed') }}</span>
+            <button type="button" class="flt-btn" data-payment-risk-list-retry>{{ __($translationPrefix.'.main_tabs.retry') }}</button>
+        </div>
+        <div data-payment-risk-results aria-busy="false">
+            @include('portals.payment.partials.product-risk-list', ['dashboard' => $dashboard])
+        </div>
     </div>
 
     <div class="modal fade" id="payment-risk-formula-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="payment-risk-formula-title">
@@ -179,17 +169,19 @@
         <div class="modal-dialog modal-sm" role="document">
             <form class="modal-content" method="post" action="{{ route('payment.product-risk-profit.export-list') }}" data-payment-risk-export-form>
                 @csrf
-                @foreach($exportFilters as $field => $value)
-                    <input type="hidden" name="{{ $field }}" value="{{ $value }}">
-                @endforeach
-                <input type="hidden" name="page" value="{{ $pagination['current_page'] }}">
-                <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
+                <div data-payment-risk-export-filters>
+                    @foreach($exportFilters as $field => $value)
+                        <input type="hidden" name="{{ $field }}" value="{{ $value }}">
+                    @endforeach
+                    <input type="hidden" name="page" value="{{ $pagination['current_page'] }}">
+                    <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
+                </div>
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button>
                     <h4 id="payment-risk-export-title" class="modal-title">{{ __('frontend_list_template.export_title') }}</h4>
                 </div>
                 <div class="modal-body payment-risk-export-choices">
-                    <label><input type="radio" name="scope" value="filtered" checked> {{ __('frontend_list_template.export_filtered', ['count' => $number($pagination['total'])]) }}</label>
+                    <label><input type="radio" name="scope" value="filtered" checked> <span data-payment-risk-export-filtered data-count-label="{{ __('frontend_list_template.export_filtered') }}">{{ __('frontend_list_template.export_filtered', ['count' => $number($pagination['total'])]) }}</span></label>
                     <label><input type="radio" name="scope" value="selected" disabled> <span data-payment-risk-export-selected data-count-label="{{ __($translationPrefix.'.layout.export_selected') }}">{{ __($translationPrefix.'.layout.export_selected', ['count' => 0]) }}</span></label>
                 </div>
                 <div class="modal-footer">
@@ -202,18 +194,57 @@
 
     <div class="modal fade payment-product-image-modal" id="payment-product-image-modal" tabindex="-1" role="dialog" aria-labelledby="payment-product-image-title"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span>&times;</span></button><h4 id="payment-product-image-title">{{ __($translationPrefix.'.image_preview.title') }}</h4><p data-payment-product-image-name></p></div><div class="modal-body"><img data-payment-product-image-preview src="" alt=""></div></div></div></div>
 
-    <div class="modal fade payment-product-detail-modal" id="payment-product-detail-modal" tabindex="-1" role="dialog" aria-labelledby="payment-product-detail-title"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span>&times;</span></button><h4 id="payment-product-detail-title">{{ __($translationPrefix.'.detail.title') }}</h4><p data-payment-product-detail-subtitle></p></div><div class="modal-body">
-        <div class="payment-detail-tabs" role="tablist">@foreach(['overview','first_renewal','orders','variants','refunds','disputes'] as $tab)<button type="button" class="{{ $loop->first ? 'active' : '' }}" data-payment-product-detail-tab="{{ $tab }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
-        <form class="payment-detail-filter payment-risk-style-filter product-statistics-detail-filter-form" data-payment-product-detail-filter hidden><label class="payment-detail-filter-keyword is-keyword"><span>{{ __($translationPrefix.'.detail.filters.keyword') }}</span><input class="form-control" name="detail_keyword" type="search" placeholder="{{ __($translationPrefix.'.detail.search_placeholder') }}"></label><div class="payment-detail-filter-selects" data-payment-product-extra-filters></div><div class="payment-detail-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><button class="btn btn-default" type="reset">{{ __('payment.common.reset') }}</button></div></form>
-        <div class="payment-detail-state" data-payment-product-loading><i class="fa fa-spinner fa-spin"></i> {{ __($translationPrefix.'.detail.loading') }}</div><div class="payment-detail-state payment-detail-error" data-payment-product-error hidden></div><div data-payment-product-detail-body></div><div class="payment-detail-pagination" data-payment-product-detail-pagination></div>
-    </div><div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">{{ __($translationPrefix.'.detail.close') }}</button></div></div></div></div>
+    <div class="modal fade payment-product-detail-modal" id="payment-product-detail-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="payment-product-detail-title">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title" id="payment-product-detail-title">{{ __($translationPrefix.'.detail.title') }}</h4>
+                    <p data-payment-product-detail-subtitle></p>
+                </div>
+                <div class="modal-body">
+                    <div class="payment-detail-tabs" role="tablist" aria-labelledby="payment-product-detail-title">
+                        @foreach(['overview', 'first_renewal', 'orders', 'variants', 'refunds', 'disputes'] as $tab)
+                            <button type="button" id="payment-risk-detail-tab-{{ $tab }}" role="tab" @class(['active' => $loop->first])
+                                aria-selected="{{ $loop->first ? 'true' : 'false' }}" tabindex="{{ $loop->first ? '0' : '-1' }}"
+                                aria-controls="payment-risk-detail-content" data-payment-product-detail-tab="{{ $tab }}">
+                                {{ __($translationPrefix.'.detail.tabs.'.$tab) }}
+                            </button>
+                        @endforeach
+                    </div>
+                    <div class="payment-risk-detail-scroll" id="payment-risk-detail-content" role="tabpanel" tabindex="0" aria-labelledby="payment-risk-detail-tab-overview" data-payment-risk-detail-scroll>
+                        <form class="flt flt-card flt-filters payment-risk-detail-filters" data-payment-product-detail-filter data-loading="off" hidden>
+                            <div class="flt-filter-grid">
+                                <div>
+                                    <label class="flt-field-label" for="payment-risk-detail-keyword">{{ __($translationPrefix.'.detail.filters.keyword') }}</label>
+                                    <input id="payment-risk-detail-keyword" name="detail_keyword" type="search" maxlength="191" placeholder="{{ __($translationPrefix.'.detail.search_placeholder') }}">
+                                </div>
+                                <div class="payment-risk-detail-filter-selects" data-payment-product-extra-filters data-logistics-filters
+                                    data-search-options="{{ __('frontend_list_template.search_options') }}"
+                                    data-no-options="{{ __('frontend_list_template.no_options') }}"
+                                    data-clear-choice="{{ __('frontend_list_template.clear_choice') }}"></div>
+                            </div>
+                            <div class="flt-filter-actions">
+                                <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __('payment.common.query') }}</button>
+                                <button class="flt-btn" type="reset">{{ __('payment.common.reset') }}</button>
+                            </div>
+                        </form>
+                        <div class="payment-detail-state" role="status" data-payment-product-loading hidden><span class="flt-spinner" aria-hidden="true"></span> {{ __($translationPrefix.'.detail.loading') }}</div>
+                        <div class="payment-detail-state payment-detail-error" role="alert" data-payment-product-error hidden></div>
+                        <div data-payment-product-detail-body></div>
+                    </div>
+                </div>
+                <div class="modal-footer"><button class="flt-btn" type="button" data-dismiss="modal">{{ __($translationPrefix.'.detail.close') }}</button></div>
+            </div>
+        </div>
+    </div>
     @include('portals.logistics.partials.order-detail-modal')
 </section>
 @endsection
 
 @push('scripts')
-<script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')) };</script>
+<script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')), locale: @json(str_replace('_', '-', app()->getLocale())) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=5" defer></script>
-<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261124-risk-summary12"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261125-risk-filters"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

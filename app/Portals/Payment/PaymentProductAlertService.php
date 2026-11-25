@@ -128,7 +128,7 @@ class PaymentProductAlertService
     /** @return list<array<string,mixed>> */
     public function exportRows(): array
     {
-        $metricRows = $this->cachedMetricRows(false);
+        $metricRows = $this->cachedMetricRows(false, usePaymentType: true);
         $productKeys = $metricRows->pluck('product_key')->filter()->unique()->values()->all();
         $latestPaidTimes = collect();
         if ($productKeys !== []) {
@@ -181,15 +181,15 @@ class PaymentProductAlertService
     }
 
     /** @return array<string,array<string,mixed>> */
-    public function metricsByProductKey(array $productKeys = [], array $filters = []): array
+    public function metricsByProductKey(array $productKeys = [], array $filters = [], bool $usePaymentType = false): array
     {
-        return $this->cachedMetricRows(false, $productKeys, $filters)->groupBy('product_key')->map(
+        return $this->cachedMetricRows(false, $productKeys, $filters, $usePaymentType)->groupBy('product_key')->map(
             fn (Collection $rows): array => $rows->keyBy('channel_type')->all()
         )->all();
     }
 
     /** @param list<string> $metrics */
-    public function listRatesQuery(array $metrics, Builder $candidateKeys): Builder
+    public function listRatesQuery(array $metrics, Builder $candidateKeys, bool $usePaymentType = false): Builder
     {
         $database = $this->database();
         $key = $this->productKeyExpression('items');
@@ -204,14 +204,18 @@ class PaymentProductAlertService
             ->groupBy('product_orders.product_key');
 
         $delivered = $database->getPdo()->quote(\App\Models\LogisticsOrder::LOGISTICS_DELIVERED);
+        $actualPayPal = "(orders.paypal_account_id IS NOT NULL AND orders.paypal_association_source = 'actual_transaction')";
+        $paypal = $usePaymentType ? "(orders.payment_type = 'paypal')" : $actualPayPal;
+        $paypalEvents = $usePaymentType ? "{$paypal} AND {$actualPayPal}" : $actualPayPal;
+        $card = $this->creditCardPaymentExpression('orders', $usePaymentType);
         if (in_array('paypal_delivered_dispute_rate', $metrics, true)) {
             $disputes = $this->paypalDisputesByOrder();
             $query->leftJoinSub($disputes, 'paypal_disputes', function ($join): void {
                 $join->on('paypal_disputes.logistics_order_id', '=', 'orders.id')
                     ->on('paypal_disputes.logistics_paypal_account_id', '=', 'orders.paypal_account_id');
             });
-            $eligible = "orders.paypal_account_id IS NOT NULL AND orders.paypal_association_source = 'actual_transaction' AND orders.logistics_status = {$delivered}";
-            $this->selectDisputeRate($query, 'paypal_delivered_dispute_rate', $eligible, 'COALESCE(paypal_disputes.dispute_count, 0) > 0', true);
+            $eligible = "{$paypal} AND orders.logistics_status = {$delivered}";
+            $this->selectDisputeRate($query, 'paypal_delivered_dispute_rate', $eligible, "{$actualPayPal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0", true);
         }
 
         $cardMetrics = array_intersect(['credit_card_dispute_rate', 'credit_card_delivered_dispute_rate'], $metrics);
@@ -222,7 +226,7 @@ class PaymentProductAlertService
                 ->selectRaw('COUNT(*) as dispute_count')
                 ->groupBy('refund.logistics_order_id');
             $query->leftJoinSub($cardDisputes, 'card_risk', 'card_risk.logistics_order_id', '=', 'orders.id');
-            $eligible = $this->creditCardPaymentExpression('orders');
+            $eligible = $card;
             if (in_array('credit_card_dispute_rate', $cardMetrics, true)) {
                 $this->selectDisputeRate($query, 'credit_card_dispute_rate', $eligible, 'COALESCE(card_risk.dispute_count, 0)');
             }
@@ -247,9 +251,7 @@ class PaymentProductAlertService
                     ->on('paypal_refunds.logistics_paypal_account_id', '=', 'orders.paypal_account_id');
             })->leftJoinSub($cardRefunds, 'card_refunds', 'card_refunds.logistics_order_id', '=', 'orders.id');
 
-            $paypal = "orders.paypal_account_id IS NOT NULL AND orders.paypal_association_source = 'actual_transaction'";
-            $card = $this->creditCardPaymentExpression('orders');
-            $refunded = "ROUND(SUM(CASE WHEN {$paypal} THEN COALESCE(paypal_refunds.amount, 0) ELSE 0 END), 4)"
+            $refunded = "ROUND(SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_refunds.amount, 0) ELSE 0 END), 4)"
                 ." + ROUND(SUM(CASE WHEN {$card} THEN COALESCE(card_refunds.amount, 0) ELSE 0 END), 4)";
             $received = "ROUND(SUM(CASE WHEN {$paypal} THEN COALESCE(orders.paid_amount_usd, 0) ELSE 0 END), 4)"
                 ." + ROUND(SUM(CASE WHEN {$card} THEN COALESCE(orders.paid_amount_usd, 0) ELSE 0 END), 4)";
@@ -285,9 +287,9 @@ class PaymentProductAlertService
             ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
     }
 
-    private function creditCardPaymentExpression(string $alias): string
+    private function creditCardPaymentExpression(string $alias, bool $usePaymentType = false): string
     {
-        return "({$alias}.payment_method = 'cc')";
+        return $usePaymentType ? "({$alias}.payment_type = 'credit_card')" : "({$alias}.payment_method = 'cc')";
     }
 
     private function creditCardReasonExpression(): string
@@ -483,12 +485,12 @@ class PaymentProductAlertService
     }
 
     /** @return Collection<int,array<string,mixed>> */
-    public function initialOrderTotals(array $productKeys): object
+    public function initialOrderTotals(array $productKeys, bool $usePaymentType = false): object
     {
-        return $productKeys === [] ? (object) [] : ($this->metricRows(false, $productKeys, acrossProducts: true)->first() ?? (object) []);
+        return $productKeys === [] ? (object) [] : ($this->metricRows(false, $productKeys, acrossProducts: true, usePaymentType: $usePaymentType)->first() ?? (object) []);
     }
 
-    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $acrossProducts = false): Collection
+    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $acrossProducts = false, bool $usePaymentType = false): Collection
     {
         $database = $this->database();
         $productKey = $this->productKeyExpression('items');
@@ -504,7 +506,9 @@ class PaymentProductAlertService
             ->selectRaw('MAX(COALESCE(orders.paid_amount_usd, 0)) as paid_amount_usd')
             ->selectRaw('MAX(orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
-            ->selectRaw('MAX(orders.payment_method) as payment_method')
+            ->when($usePaymentType,
+                fn (Builder $query) => $query->selectRaw('MAX(orders.payment_type) as payment_type'),
+                fn (Builder $query) => $query->selectRaw('MAX(orders.payment_method) as payment_method'))
             ->selectRaw('MAX(orders.logistics_status) as logistics_status')
             ->selectRaw('MAX(orders.paid_at) as paid_at')
             ->groupByRaw($acrossProducts ? 'orders.id' : "{$productKey}, orders.id");
@@ -542,7 +546,9 @@ class PaymentProductAlertService
             ->groupBy('refund.logistics_order_id');
 
         $actualPayPal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
-        $creditCard = $this->creditCardPaymentExpression('product_orders');
+        $paypal = $usePaymentType ? "(product_orders.payment_type = 'paypal')" : $actualPayPal;
+        $paypalEvents = $usePaymentType ? "{$paypal} AND {$actualPayPal}" : $actualPayPal;
+        $creditCard = $this->creditCardPaymentExpression('product_orders', $usePaymentType);
 
         $delivered = $database->getPdo()->quote(\App\Models\LogisticsOrder::LOGISTICS_DELIVERED);
 
@@ -566,19 +572,19 @@ class PaymentProductAlertService
             ->selectRaw('MIN(first_item.tongtu_sku) as tongtu_sku')
             ->selectRaw('SUM(product_orders.unit_count) as total_sales')
             ->selectRaw('COUNT(*) as total_order_count')
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN 1 ELSE 0 END) as paypal_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN product_orders.paid_amount_usd ELSE 0 END) as paypal_received_amount")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_dispute_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND product_orders.logistics_status = {$delivered} THEN 1 ELSE 0 END) as paypal_delivered_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND product_orders.logistics_status = {$delivered} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_delivered_dispute_order_count")
-            ->selectRaw("MIN(CASE WHEN {$actualPayPal} THEN product_orders.paid_at ELSE NULL END) as paypal_first_paid_at")
-            ->selectRaw("MAX(CASE WHEN {$actualPayPal} THEN product_orders.paid_at ELSE NULL END) as paypal_latest_paid_at")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_dispute_amount")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.description_mismatch_amount, 0) ELSE 0 END) as description_mismatch_amount")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
-            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypal} THEN 1 ELSE 0 END) as paypal_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypal} THEN product_orders.paid_amount_usd ELSE 0 END) as paypal_received_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_dispute_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypal} AND product_orders.logistics_status = {$delivered} THEN 1 ELSE 0 END) as paypal_delivered_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} AND product_orders.logistics_status = {$delivered} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_delivered_dispute_order_count")
+            ->selectRaw("MIN(CASE WHEN {$paypal} THEN product_orders.paid_at ELSE NULL END) as paypal_first_paid_at")
+            ->selectRaw("MAX(CASE WHEN {$paypal} THEN product_orders.paid_at ELSE NULL END) as paypal_latest_paid_at")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_dispute_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_disputes.description_mismatch_amount, 0) ELSE 0 END) as description_mismatch_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalEvents} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as card_order_count")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN product_orders.paid_amount_usd ELSE 0 END) as card_received_amount")
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as card_complaint_count")
@@ -598,7 +604,7 @@ class PaymentProductAlertService
             return $rows;
         }
 
-        $globalDisputeAmount = $this->globalInitialPayPalDisputeAmount($disputes);
+        $globalDisputeAmount = $this->globalInitialPayPalDisputeAmount($disputes, $usePaymentType);
 
         return $rows->flatMap(function (object $row) use ($globalDisputeAmount, $onlyQualified): array {
             $eligibleOrders = (int) $row->paypal_order_count;
@@ -713,7 +719,7 @@ class PaymentProductAlertService
     }
 
     /** @param \Illuminate\Database\Query\Builder $disputes */
-    private function globalInitialPayPalDisputeAmount($disputes): float
+    private function globalInitialPayPalDisputeAmount($disputes, bool $usePaymentType): float
     {
         $database = $this->database();
 
@@ -731,6 +737,7 @@ class PaymentProductAlertService
             })
             ->whereNotNull('orders.paypal_account_id')
             ->where('orders.paypal_association_source', 'actual_transaction')
+            ->when($usePaymentType, fn (Builder $query) => $query->where('orders.payment_type', 'paypal'))
             ->sum(DB::raw('COALESCE(paypal_disputes.dispute_amount, 0)')), 4);
     }
 
@@ -788,7 +795,7 @@ class PaymentProductAlertService
     }
 
     /** @return Collection<int,array<string,mixed>> */
-    private function cachedMetricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = []): Collection
+    private function cachedMetricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $usePaymentType = false): Collection
     {
         $productKeys = array_values(array_unique(array_filter(array_map(
             static fn (mixed $value): string => trim((string) $value),
@@ -802,7 +809,7 @@ class PaymentProductAlertService
             'date_mode' => (string) ($filters['date_mode'] ?? 'order'),
             'store' => (string) ($filters['store'] ?? ''),
         ];
-        $cacheKey = 'payment:product-alert-metrics:v4:'.sha1((string) json_encode([
+        $cacheKey = ($usePaymentType ? 'payment:product-risk-initial-metrics:v1:' : 'payment:product-alert-metrics:v4:').sha1((string) json_encode([
             'qualified' => $onlyQualified,
             'products' => $productKeys,
             'filters' => $metricFilters,
@@ -811,7 +818,7 @@ class PaymentProductAlertService
         $rows = Cache::flexible(
             $cacheKey,
             [self::METRIC_CACHE_SECONDS, self::METRIC_CACHE_STALE_SECONDS],
-            fn (): array => $this->metricRows($onlyQualified, $productKeys, $metricFilters)->values()->all(),
+            fn (): array => $this->metricRows($onlyQualified, $productKeys, $metricFilters, usePaymentType: $usePaymentType)->values()->all(),
         );
 
         return collect($rows);

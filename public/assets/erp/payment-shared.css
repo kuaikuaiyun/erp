@@ -1237,8 +1237,8 @@
 }
 
 /* Local presentation only: compact filters and one card per renewal stage. */
-.payment-renewal-two-sections .payment-renewal-filter { display: grid; grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) minmax(150px,1fr) auto; gap: 12px; align-items: end; }
-.payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) minmax(145px,1fr) minmax(135px,1fr) auto; }
+.payment-renewal-two-sections .payment-renewal-filter { display: grid; grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) auto; gap: 12px; align-items: end; }
+.payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(310px,2fr) minmax(135px,1fr) minmax(145px,1fr) auto; }
 .payment-renewal-two-sections .payment-renewal-filter > label,
 .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-cohort,
 .payment-renewal-two-sections .payment-renewal-filter > .payment-renewal-filter-actions { grid-column: auto; min-width: 0; margin: 0; }
@@ -1284,7 +1284,9 @@
     .payment-renewal-two-sections .payment-renewal-stage-heading { padding: 12px; }
 }
 
-.payment-renewal-two-sections > .payment-panel { container-type: inline-size; }
+.payment-renewal-two-sections [data-renewal-region] > .payment-panel { container-type: inline-size; }
+.payment-renewal-two-sections [data-renewal-placeholder] > .btn { margin: 12px 18px; }
+.payment-renewal-two-sections [data-renewal-section-status] { margin: 0 0 8px; }
 @container (max-width: 1050px) {
     .payment-renewal-two-sections .payment-renewal-filter,
     .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: repeat(2,minmax(0,1fr)); }
