@@ -457,6 +457,7 @@ GRAPHQL, [
             'payment_status' => $this->paymentStatus((string) ($payload['displayFinancialStatus'] ?? '')),
             'payment_method' => $this->incoming($paymentMethod, $current->payment_method),
             'payment_gateway' => $this->incoming($paymentGateway, $current->payment_gateway),
+            'payment_type' => LogisticsOrder::paymentTypeFromTags($payload['tags'] ?? []),
             'paid_amount_usd' => $this->money($payload, 'currentTotalPriceSet'),
             'total_shipping_usd' => $this->money($payload, 'currentShippingPriceSet'),
             'paid_at' => $this->dateTime($paidTransaction['processedAt'] ?? $payload['processedAt'] ?? null),

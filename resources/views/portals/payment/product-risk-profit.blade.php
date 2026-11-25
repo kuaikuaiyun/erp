@@ -8,7 +8,7 @@
     $number = static fn ($value) => number_format((float) $value, ((float) $value == (int) $value) ? 0 : 2);
     $metricFilterText = $translationPrefix.'.metric_filters';
     $rateFilterGroups = [
-        'refund_filters' => ['paypal_refund_rate', 'credit_card_refund_rate', 'combined_refund_rate'],
+        'refund_filters' => ['paypal_refund_rate', 'credit_card_refund_rate', 'combined_refund_rate', 'combined_initial_refund_amount_rate'],
         'dispute_filters' => ['paypal_dispute_rate', 'credit_card_dispute_rate', 'paypal_delivered_dispute_rate', 'credit_card_delivered_dispute_rate'],
     ];
     $metricValue = static function (string $metric, string $bound) use ($filters): string {

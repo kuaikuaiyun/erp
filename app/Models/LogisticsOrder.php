@@ -60,7 +60,7 @@ class LogisticsOrder extends Model
         'owner_assignment_effective_from', 'owner_assignment_resolved_at', 'group_names', 'staff_status', 'media_source',
         'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'subscription_type',
         'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_code', 'tongtu_product_name',
-        'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd',
+        'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'payment_type', 'paid_amount_usd',
         'paid_at', 'total_shipping_usd',
         'channel_refund_amount_usd', 'shopify_refund_amount_usd', 'refunded_at', 'refund_reason',
         'collection_account',
@@ -83,6 +83,26 @@ class LogisticsOrder extends Model
         $this->setConnection(config('admin.database.connection') ?: config('database.default'));
 
         parent::__construct($attributes);
+    }
+
+    public static function paymentTypeFromTags(mixed $tags): ?string
+    {
+        $tags = is_string($tags) ? explode(',', $tags) : (array) $tags;
+        $hasPayPal = false;
+
+        foreach ($tags as $tag) {
+            if (!is_string($tag)) {
+                continue;
+            }
+
+            $tag = strtolower($tag);
+            if (str_contains($tag, 'credit_card') || str_contains($tag, 'creditcardby')) {
+                return 'credit_card';
+            }
+            $hasPayPal = $hasPayPal || str_contains($tag, 'paypal');
+        }
+
+        return $hasPayPal ? 'paypal' : null;
     }
 
     public static function mediaSourceFromTags(mixed $tags): string

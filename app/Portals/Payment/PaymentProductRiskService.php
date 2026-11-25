@@ -19,13 +19,15 @@ class PaymentProductRiskService
         'paypal_refund_rate',
         'credit_card_refund_rate',
         'combined_refund_rate',
+        'combined_initial_refund_amount_rate',
         'paypal_delivered_dispute_rate',
         'credit_card_delivered_dispute_rate',
     ];
 
     public const LIST_METRICS = ['order_count', ...self::RATE_METRICS];
 
-    private const SUPPLEMENTARY_DISPUTE_RATES = [
+    private const SUPPLEMENTARY_RATES = [
+        'combined_initial_refund_amount_rate',
         'credit_card_dispute_rate',
         'paypal_delivered_dispute_rate',
         'credit_card_delivered_dispute_rate',
@@ -204,7 +206,7 @@ class PaymentProductRiskService
         $ranges = (array) ($filters['metric_ranges'] ?? []);
         $sort = (string) ($filters['sort'] ?? '');
         $extraMetrics = array_values(array_intersect(
-            ['order_count', ...self::SUPPLEMENTARY_DISPUTE_RATES],
+            ['order_count', ...self::SUPPLEMENTARY_RATES],
             [...array_keys($ranges), $sort],
         ));
         if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
@@ -218,11 +220,11 @@ class PaymentProductRiskService
                 $query->leftJoinSub($this->statistics->relatedOrderCountsQuery($filters, clone $candidateKeys), 'related_orders', 'related_orders.product_key', '=', 'base.product_key')
                     ->selectRaw('COALESCE(related_orders.order_count, 0) as order_count');
             }
-            $rates = array_values(array_intersect(self::SUPPLEMENTARY_DISPUTE_RATES, $extraMetrics));
+            $rates = array_values(array_intersect(self::SUPPLEMENTARY_RATES, $extraMetrics));
             if ($rates !== []) {
-                $query->leftJoinSub($this->alerts->listDisputeRatesQuery($rates, $candidateKeys), 'payment_dispute_rates', 'payment_dispute_rates.product_key', '=', 'base.product_key');
+                $query->leftJoinSub($this->alerts->listRatesQuery($rates, $candidateKeys), 'payment_rates', 'payment_rates.product_key', '=', 'base.product_key');
                 foreach ($rates as $rate) {
-                    $query->selectRaw("COALESCE(payment_dispute_rates.{$rate}, 0) as {$rate}");
+                    $query->selectRaw("COALESCE(payment_rates.{$rate}, 0) as {$rate}");
                 }
             }
         }, $keysOnly);

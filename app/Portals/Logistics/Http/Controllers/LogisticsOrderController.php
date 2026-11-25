@@ -983,6 +983,8 @@ class LogisticsOrderController extends Controller
         }
 
         $subscriptionTypes = $request->input('subscription_type', []);
+        $paymentType = $request->input('payment_type', '');
+        $filters['payment_type'] = in_array($paymentType, ['paypal', 'credit_card', 'unidentified'], true) ? $paymentType : '';
         $filters['subscription_type'] = array_values(array_unique(array_filter(
             array_map(static fn ($value): string => is_scalar($value) ? trim((string) $value) : '', (array) $subscriptionTypes),
             static fn (string $value): bool => $value !== '',
@@ -1033,6 +1035,12 @@ class LogisticsOrderController extends Controller
                     $types->orWhere('subscription_type', 'like', $this->contains($type));
                 }
             });
+        }
+
+        if ($filters['payment_type'] === 'unidentified') {
+            $query->whereNull('payment_type');
+        } elseif ($filters['payment_type'] !== '') {
+            $query->where('payment_type', $filters['payment_type']);
         }
 
         if ($filters['collection_account'] !== '') {

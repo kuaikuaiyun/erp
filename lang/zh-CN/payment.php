@@ -171,6 +171,7 @@ $translations = [
                 'paypal_refund_rate' => 'PayPal 退款率',
                 'credit_card_refund_rate' => '信用卡退款率',
                 'combined_refund_rate' => '综合退款率',
+                'combined_initial_refund_amount_rate' => '综合首次付款金额退款率',
                 'paypal_delivered_dispute_rate' => 'PayPal 首次付款已签收纠纷率',
                 'credit_card_delivered_dispute_rate' => '信用卡首次付款已签收纠纷率',
             ],

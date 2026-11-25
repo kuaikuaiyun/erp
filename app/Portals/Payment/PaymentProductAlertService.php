@@ -189,7 +189,7 @@ class PaymentProductAlertService
     }
 
     /** @param list<string> $metrics */
-    public function listDisputeRatesQuery(array $metrics, Builder $candidateKeys): Builder
+    public function listRatesQuery(array $metrics, Builder $candidateKeys): Builder
     {
         $database = $this->database();
         $key = $this->productKeyExpression('items');
@@ -229,6 +229,31 @@ class PaymentProductAlertService
             if (in_array('credit_card_delivered_dispute_rate', $cardMetrics, true)) {
                 $this->selectDisputeRate($query, 'credit_card_delivered_dispute_rate', "{$eligible} AND orders.logistics_status = {$delivered}", 'COALESCE(card_risk.dispute_count, 0) > 0', true);
             }
+        }
+
+        if (in_array('combined_initial_refund_amount_rate', $metrics, true)) {
+            $paypalRefunds = $database->table('logistics_paypal_refunds as refund')
+                ->whereNotNull('refund.logistics_order_id')
+                ->select(['refund.logistics_order_id', 'refund.logistics_paypal_account_id'])
+                ->selectRaw("SUM(COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END)) as amount")
+                ->groupBy('refund.logistics_order_id', 'refund.logistics_paypal_account_id');
+            $cardRefunds = $database->table('logistics_credit_card_refunds as refund')
+                ->whereRaw($this->creditCardReasonExpression().' IN ('.$this->creditCardReasonList(LogisticsCreditCardRefundReason::CUSTOMER_SERVICE).')')
+                ->select('refund.logistics_order_id')
+                ->selectRaw('SUM(refund.refund_amount_usd) as amount')
+                ->groupBy('refund.logistics_order_id');
+            $query->leftJoinSub($paypalRefunds, 'paypal_refunds', function ($join): void {
+                $join->on('paypal_refunds.logistics_order_id', '=', 'orders.id')
+                    ->on('paypal_refunds.logistics_paypal_account_id', '=', 'orders.paypal_account_id');
+            })->leftJoinSub($cardRefunds, 'card_refunds', 'card_refunds.logistics_order_id', '=', 'orders.id');
+
+            $paypal = "orders.paypal_account_id IS NOT NULL AND orders.paypal_association_source = 'actual_transaction'";
+            $card = $this->creditCardPaymentExpression('orders');
+            $refunded = "ROUND(SUM(CASE WHEN {$paypal} THEN COALESCE(paypal_refunds.amount, 0) ELSE 0 END), 4)"
+                ." + ROUND(SUM(CASE WHEN {$card} THEN COALESCE(card_refunds.amount, 0) ELSE 0 END), 4)";
+            $received = "ROUND(SUM(CASE WHEN {$paypal} THEN COALESCE(orders.paid_amount_usd, 0) ELSE 0 END), 4)"
+                ." + ROUND(SUM(CASE WHEN {$card} THEN COALESCE(orders.paid_amount_usd, 0) ELSE 0 END), 4)";
+            $query->selectRaw("CASE WHEN ({$received}) > 0 THEN ROUND(100.0000 * ({$refunded}) / ({$received}), 2) ELSE 0 END as combined_initial_refund_amount_rate");
         }
 
         return $query;
