@@ -328,13 +328,27 @@
                         <thead><tr><th>店铺</th><th>域名</th><th>域名到期日</th><th>剩余天数</th><th>归属人</th>@if ($canManage)<th>操作</th>@endif</tr></thead>
                         <tbody>
                         @foreach ($domainRenewalReminderStores as $reminderStore)
-                            @php($remainingDays = (int) now('Asia/Shanghai')->startOfDay()->diffInDays($reminderStore->domain_expires_at->copy()->startOfDay(), false))
+                            @php
+                                $remainingDays = (int) now('Asia/Shanghai')->startOfDay()->diffInDays($reminderStore->domain_expires_at->copy()->startOfDay(), false);
+                                $ownerHistoryName = trim((string) ($reminderStore->ownerHistories->first()?->owner_name_snapshot ?? ''));
+                                $ownerAccountName = trim((string) ($reminderStore->ownerUser?->name ?? ''));
+                                $legacyOwnerName = trim((string) ($reminderStore->user_name ?? ''));
+                                $isResignedOwner = $reminderStore->ownerUser?->employment_status === 'resigned'
+                                    || in_array($ownerAccountName, ['离职', '已离职'], true)
+                                    || in_array($legacyOwnerName, ['离职', '已离职'], true);
+                                $displayOwnerName = collect([$ownerAccountName, $ownerHistoryName, $legacyOwnerName, $reminderStore->ownerUser?->username])
+                                    ->map(fn ($name) => trim((string) $name))
+                                    ->first(fn ($name) => $name !== '' && !in_array($name, ['离职', '已离职'], true)) ?: '—';
+                            @endphp
                             <tr>
                                 <td>{{ $reminderStore->shop_name ?: '—' }}</td>
                                 <td>{{ $reminderStore->domain ?: '—' }}</td>
                                 <td>{{ $reminderStore->domain_expires_at?->format('Y-m-d') ?: '—' }}</td>
                                 <td><span class="assistant-domain-renewal-days">{{ $remainingDays }} 天</span></td>
-                                <td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '—' }}</td>
+                                <td>
+                                    {{ $displayOwnerName }}
+                                    @if ($isResignedOwner)<span class="label label-default">已离职</span>@endif
+                                </td>
                                 @if ($canManage)
                                     <td>
                                         <form method="post" action="{{ route('assistant.domain-stores.domain-renewal-reminder.update', $reminderStore) }}" class="assistant-domain-renewal-form" data-domain-renewal-form data-domain="{{ $reminderStore->domain ?: $reminderStore->shop_name }}" data-exempt="1">

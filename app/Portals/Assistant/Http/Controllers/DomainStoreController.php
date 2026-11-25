@@ -76,7 +76,13 @@ class DomainStoreController extends Controller
         $canConfigureStoreOwnership = $this->authorization->canManageAllDomainStores($context['user']);
         $today = now('Asia/Shanghai')->toDateString();
         $domainRenewalReminderStores = $this->scopedStoreQuery($context['user'])
-            ->with('ownerUser:id,name,username')
+            ->with([
+                'ownerUser:id,name,username,employment_status,resigned_at',
+                'ownerHistories' => fn ($query) => $query
+                    ->select(['id', 'assistant_domain_store_id', 'owner_name_snapshot', 'effective_from', 'effective_to'])
+                    ->whereNull('effective_to')
+                    ->orderByDesc('effective_from'),
+            ])
             ->whereNotNull('domain_expires_at')
             ->whereBetween('domain_expires_at', [$today, now('Asia/Shanghai')->addDays(30)->toDateString()])
             ->where('domain_renewal_reminder_exempt', false)
