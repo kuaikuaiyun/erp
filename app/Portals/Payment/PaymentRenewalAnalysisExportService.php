@@ -125,14 +125,14 @@ class PaymentRenewalAnalysisExportService
                 $linked ? __('payment-renewal.linked_previous_orders') : $text('previous_orders'),
                 $linked ? __('payment-renewal.linked_current_orders') : $text('current_renewal_orders'),
                 __('payment.renewal_analysis.funnel.renewal_rate'),$text('revenue'),$text('refund_orders'),$text('refund_amount'),$text('refund_count_rate'),$text('refund_amount_rate'),
-                ...($linked ? [__('payment-renewal.linked_pending_column')] : [])], [], [], true);
+                ...($linked ? [__('payment-renewal.linked_pending_column'),__('payment-renewal.linked_missing_previous_column')] : [])], [], [], true);
             foreach ($data['stages'] as $stage) {
                 foreach ($groups as $key=>$group) {
                     $values=$key==='total' ? $stage : $stage['by_channel'][$key];
                     yield $this->row([__('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]),$methodLabel($group),
                         $values['previous_orders'],$values['rate_orders'] ?? $values['orders'],$values['rate']===null ? __('payment.renewal_analysis.funnel.not_applicable') : $values['rate'].'%',
                         $values['revenue'],$values['refund_order_count'],$values['refund_amount'],$values['refund_count_rate'].'%',$values['refund_amount_rate'].'%',
-                        ...($linked ? [$values['pending_orders']] : [])], [5,7]);
+                        ...($linked ? [$values['pending_orders'],$values['missing_previous_orders']] : [])], [5,7]);
                 }
             }
         };
@@ -140,8 +140,10 @@ class PaymentRenewalAnalysisExportService
             // Iterate the two existing populations without copying them into a merged array.
             foreach (['initial_rows','rows'] as $population) {
                 foreach ($data[$population] as $row) {
+                    $stageLabel=$row['stage_number']===0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]);
+                    if ($row['missing_previous'] ?? false) $stageLabel.='（'.__('payment-renewal.linked_missing_previous_detail').'）';
                     yield $this->row([
-                        $row['stage_number']===0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
+                        $stageLabel,
                         $channels[$row['initial_channel']],$channels[$row['actual_channel']],(string)$row['initial_order'],(string)$row['renewal_order'],
                         $row['tongtu_order_number'],$row['store_name'],$row['transaction_id'],implode("\n",$row['primary_bill_numbers']),
                         implode("\n",$row['upsell_bill_numbers']),implode("\n",$row['transaction_ids']),implode("\n",$row['collection_accounts']),$row['buyer_email'],
@@ -157,7 +159,7 @@ class PaymentRenewalAnalysisExportService
         return $this->response(__('payment.renewal_analysis.export.filename',['time'=>now()->format('Ymd_His')]), [
             [$text('first_sheet'),$this->columns([...$firstMetadata[0],'',''],[32,48,24,24]),$firstRows],
             [$text('refund_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['initial_calculation']['timezone']],17,''),[22,48,24,20,18,20,20,20,18,18,18,18,22,22,22,22,22]),$refundRows],
-            [$text('renewal_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['calculation']['timezone']],$linked ? 11 : 10,''),[22,48,28,28,22,20,20,20,20,20,...($linked ? [20] : [])]),$renewalRows],
+            [$text('renewal_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['calculation']['timezone']],$linked ? 12 : 10,''),[22,48,28,28,22,20,20,20,20,20,...($linked ? [20,30] : [])]),$renewalRows],
             [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone'),__('payment.renewal_details.delivery_state')],[24,18,18,24,24,26,24,30,32,32,32,32,30,24,18,16,18,24,16,18,24,20,20,18]),$detailRows],
         ]);
     }

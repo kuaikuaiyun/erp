@@ -237,7 +237,7 @@ class PaymentRenewalAnalysisService
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
         if ($cache['linked'] ?? false) $cache['as_of']=now($cache['timezone'])->toDateString();
-        $version=isset($cache['as_of']) ? 'v29' : ($cache['first_only'] ? 'v26' : 'v25');
+        $version=$cache['first_only'] ? 'v26' : 'v30';
         return Cache::remember('payment:renewal-summary:'.$version.':'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
@@ -386,7 +386,7 @@ class PaymentRenewalAnalysisService
         // Linked mode already narrows roots to the selected period. Group more roots per lookup.
         foreach (array_chunk($index['ids'],$linked ? 250 : 100) as $rootIds) {
             $roots=LogisticsOrder::query()->select($fields)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
-            $entries=$refs=$seen=[];
+            $entries=$refs=$highestStage=$paidStages=[];
             foreach ($roots as $root) {
                 $entries[]=['order'=>$root,'initial'=>$root,'number'=>0];
                 foreach ($this->chainReferences($root) as $ref) if (($index['map'][$ref] ?? null)===(int)$root->id) $refs[$ref]=true;
@@ -407,8 +407,17 @@ class PaymentRenewalAnalysisService
                     $rootId=$index['map'][trim((string)$order->subscription_origin_order_id)] ?? null;
                     if ($rootId===null || !$roots->has($rootId)) continue;
                     if ($linked && $order->paid_at->lt($roots->get($rootId)->paid_at)) continue;
-                    $seen[$rootId]=($seen[$rootId] ?? 0)+1;
-                    $entries[]=['order'=>$order,'initial'=>$roots->get($rootId),'number'=>$seen[$rootId]];
+                    $highest=$highestStage[$rootId] ?? 0;
+                    $number=preg_match('/^订阅复购\s*([1-9][0-9]*)\s*次$/u',trim((string)$order->subscription_type),$matches)
+                        ? (int)$matches[1] : $highest+1;
+                    $highestStage[$rootId]=max($highest,$number);
+                    $entry=['order'=>$order,'initial'=>$roots->get($rootId),'number'=>$number];
+                    if ($linked) {
+                        $entry['missing_previous']=$number>1 && !isset($paidStages[$rootId][$number-1]);
+                        $entry['duplicate_stage']=isset($paidStages[$rootId][$number]);
+                        $paidStages[$rootId][$number]=true;
+                    }
+                    $entries[]=$entry;
                 }
                 if ($entries) yield $entries;
             }
@@ -428,8 +437,12 @@ class PaymentRenewalAnalysisService
             $ids=array_map(static fn ($e)=>(int)$e['order']->id,$current);
             $risk=$this->riskMaps($ids,['timezone'=>$filters['timezone']],$w['from'],$w['to']);
             $refs=$this->paymentIdentifiers($ids);
-            foreach ($current as $entry) yield $this->paymentRow($entry['order'],$entry['initial'],$entry['number'],$filters['timezone'],$risk,
-                'subscription',$refs[(int)$entry['order']->id] ?? []);
+            foreach ($current as $entry) {
+                $row=$this->paymentRow($entry['order'],$entry['initial'],$entry['number'],$filters['timezone'],$risk,
+                    'subscription',$refs[(int)$entry['order']->id] ?? []);
+                if ($entry['missing_previous'] ?? false) $row['missing_previous']=true;
+                yield $row;
+            }
         }
     }
 
@@ -487,16 +500,17 @@ class PaymentRenewalAnalysisService
                 }
             }
         }
-        $current=$previous=$pending=$renewedWhenDue=$lastRateOrder=$lastBaseOrder=$dueNumbers=[];
+        $current=$previous=$pending=$renewedWhenDue=$lastRateOrder=$lastBaseOrder=$dueNumbers=$missingPrevious=[];
         if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w,includeOrderDate:$linked) as $entries) {
             $now=[];
             foreach ($entries as $entry) {
                 $order=$entry['order'];
                 $number=$entry['number'];
-                if ($asOf && $order->paid_at->lte($asOf)) {
+                if ($asOf && $order->paid_at->lte($asOf) && !($entry['duplicate_stage'] ?? false)) {
                     $root=$entry['initial'];
                     $dueNumber=$dueNumbers[$root->id] ??= $this->dueRenewalNumber($root->paid_at,$asOf);
-                    $includedInRate=$number>0 && $dueNumber>=$number;
+                    $missingStage=$entry['missing_previous'] ?? false;
+                    $includedInRate=$number>0 && $dueNumber>=$number && !$missingStage;
                     $eligibleForNextStage=$dueNumber>$number;
                     $placedAt=$eligibleForNextStage || $includedInRate
                         ? $order->order_created_at?->copy()->setTimezone($filters['timezone'])->format('Y-m-d H:i:s')
@@ -504,6 +518,7 @@ class PaymentRenewalAnalysisService
                     $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
                     foreach ($groups as $key) {
                         if (!$this->matchesGroup($stub,$key)) continue;
+                        if ($missingStage) $missingPrevious[$number][$key]=($missingPrevious[$number][$key] ?? 0)+1;
                         if ($eligibleForNextStage) {
                             $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
                             if ($placedAt!==null) $lastBaseOrder[$number][$key]=max($lastBaseOrder[$number][$key] ?? '',$placedAt);
@@ -556,6 +571,7 @@ class PaymentRenewalAnalysisService
                 $by[$key]=[...$this->finishTotal($totals[$key]),'previous_orders'=>$partBase,
                     'rate'=>$partBase>0 ? $this->rate($rateOrders,$partBase) : null,
                     ...($linked ? ['pending_orders'=>$pending[$number-1][$key] ?? 0,'rate_orders'=>$rateOrders,
+                        'missing_previous_orders'=>$missingPrevious[$number][$key] ?? 0,
                         'rate_order_created_to'=>$lastRateOrder[$number][$key] ?? null,
                         'base_order_created_to'=>$lastBaseOrder[$number-1][$key] ?? null] : [])];
             }

@@ -276,6 +276,9 @@
                             @if($part['rate_orders']>0)
                                 <small>@if($part['rate_order_created_to'] === null){{ $renewalText('linked_no_order_time') }}@else{{ $renewalText('linked_last_order_label') }}<strong>{{ $part['rate_order_created_to'] }}</strong>@endif</small>
                             @endif
+                            @if($part['missing_previous_orders']>0)
+                                <small>{{ $renewalText('linked_missing_previous',['count'=>number_format($part['missing_previous_orders'])]) }}</small>
+                            @endif
                         @else
                             {{ number_format($part['orders']) }}
                         @endif

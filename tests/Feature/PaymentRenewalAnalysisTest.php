@@ -356,6 +356,55 @@ class PaymentRenewalAnalysisTest extends TestCase
         }
     }
 
+    public function test_recorded_renewal_stage_is_preserved_when_an_earlier_payment_is_missing(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-25 12:00:00 UTC'));
+        $this->order(670, '2026-09-11 13:21:54', '订阅首次购买', 'credit_card', '', 'RecordedStage');
+        $this->order(671, '2026-11-11 08:12:08', '订阅复购2次', 'credit_card', '670', 'RecordedStage');
+        $service = app(PaymentRenewalAnalysisService::class);
+        $filters = $this->filters(['renewal_store'=>'RecordedStage','renewal_mode'=>'linked',
+            'renewal_date_from'=>'2026-09-01','renewal_date_to'=>'2026-09-30']);
+
+        $dashboard = $service->dashboard($filters, 'renewal');
+        $stages = array_column($dashboard['stages'], null, 'number');
+        self::assertSame([1, 0], [$stages[1]['previous_orders'], $stages[1]['rate_orders']]);
+        self::assertEquals(0, $stages[1]['rate']);
+        self::assertSame([1, 0, 0, 1], [
+            $stages[2]['orders'], $stages[2]['previous_orders'], $stages[2]['rate_orders'], $stages[2]['missing_previous_orders'],
+        ]);
+        self::assertNull($stages[2]['rate']);
+        $html = view('portals.payment.partials.renewal-analysis-section', [
+            'module'=>'renewal','dashboard'=>$dashboard,'errors'=>new \Illuminate\Support\ViewErrorBag(),
+        ])->render();
+        self::assertStringContainsString('1 单缺上一阶段付款，待核对。', $html);
+
+        $linkedRows = $service->exportData($filters)['rows']->all();
+        self::assertSame([2], array_column($linkedRows, 'stage_number'));
+        self::assertTrue($linkedRows[0]['missing_previous']);
+        $normal = $service->dashboard([...$filters,'renewal_mode'=>'normal',
+            'renewal_date_from'=>'2026-11-11','renewal_date_to'=>'2026-11-11'], 'renewal');
+        self::assertSame([2], array_column($normal['stages'], 'number'));
+        self::assertSame(1, $normal['stages'][0]['orders']);
+    }
+
+    public function test_unmarked_renewals_continue_after_the_highest_recorded_stage(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-12-25 12:00:00 UTC'));
+        $this->order(675, '2026-09-11 12:00:00', '订阅首次购买', 'credit_card', '', 'MixedStage', ['bill_number'=>'BILL-675']);
+        $this->order(676, '2026-10-11 12:00:00', '订阅复购', 'credit_card', '675', 'MixedStage');
+        $this->order(677, '2026-11-11 12:00:00', '订阅复购2次', 'credit_card', 'TX-675', 'MixedStage');
+        $this->order(678, '2026-11-12 12:00:00', '订阅复购2次', 'credit_card', 'TX-675', 'MixedStage');
+        $this->order(679, '2026-12-11 12:00:00', '订阅复购', 'credit_card', 'BILL-675', 'MixedStage');
+        $service = app(PaymentRenewalAnalysisService::class);
+        $filters = $this->filters(['renewal_store'=>'MixedStage','renewal_mode'=>'linked',
+            'renewal_date_from'=>'2026-09-01','renewal_date_to'=>'2026-09-30']);
+        $rows = $service->exportData($filters)['rows']->all();
+        self::assertSame([1, 2, 2, 3], array_column($rows, 'stage_number'));
+        $stages = array_column($service->dashboard($filters, 'renewal')['stages'], null, 'number');
+        self::assertSame([2, 1], [$stages[2]['orders'], $stages[2]['rate_orders']]);
+        self::assertSame([1, 1], [$stages[3]['previous_orders'], $stages[3]['rate_orders']]);
+    }
+
     public function test_card_refunds_include_every_positive_record_once_regardless_of_reason(): void
     {
         $this->order(600,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');

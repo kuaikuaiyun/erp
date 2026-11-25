@@ -35,8 +35,11 @@ return [
     'linked_pending_prefix' => '不含',
     'linked_pending_suffix' => '单未到期订单',
     'linked_pending_column' => '未到期订单数',
+    'linked_missing_previous' => ':count 单缺上一阶段付款，待核对。',
+    'linked_missing_previous_column' => '待核对订单数（缺上一阶段付款）',
+    'linked_missing_previous_detail' => '缺上一阶段付款，待核对',
     'linked_base' => '分母为同一批订阅中已完成 :previous 且已到本次应续费日的订单数，共 :count 单。',
-    'linked_count' => '分子为已到本次应续费日且已完成第 :number 次续费的订单数，共 :count 单。',
+    'linked_count' => '分子为已到本次应续费日、具备上一阶段付款记录且已完成第 :number 次续费的订单数，共 :count 单。',
     'linked_risk' => '实收、退款和纠纷按本阶段的全部关联续费统计。按支付方式查看时，续费率的分子和分母各用对应阶段的实际支付方式。',
     'first_source_scope' => '首购退款按所选时区和付款区间统计全部店铺的订阅首次购买及无订阅订单。订单须无订阅来源号，排除运营名含「刷单」的订单。加购状态不影响统计。',
 ];
