@@ -173,12 +173,16 @@
         .assistant-domain-stores-table.table-hover tbody tr.assistant-shop-status-abandoned:hover > td {
             background-color: #f9e7ad !important;
         }
-        .assistant-domain-renewal-box { border: 1px solid #f2cf84; border-left: 4px solid #f39c12; box-shadow: none; }
-        .assistant-domain-renewal-box .box-header { background: #fff9eb; border-bottom: 1px solid #f5dfae; }
-        .assistant-domain-renewal-box .box-title { color: #8a5b00; font-size: 15px; font-weight: 600; }
-        .assistant-domain-renewal-table-wrap { max-height: 310px; overflow: auto; }
+        .assistant-domain-renewal-box { background:#fff8e5; border:1px solid #f2cf79; border-left:4px solid #e6a51f; border-radius:7px; color:#74520d; margin-bottom:14px; padding:11px 14px; }
+        .assistant-domain-renewal-box summary { align-items:center; cursor:pointer; display:flex; gap:10px; list-style:none; }
+        .assistant-domain-renewal-box summary::-webkit-details-marker { display:none; }
+        .assistant-domain-renewal-box summary strong { font-size:15px; }
+        .assistant-domain-renewal-box summary .fa-angle-down { margin-left:auto; transition:transform .2s; }
+        .assistant-domain-renewal-box[open] summary .fa-angle-down { transform:rotate(180deg); }
+        .assistant-domain-renewal-table-wrap { background:#fff; border:1px solid #efdda9; border-radius:6px; margin-top:11px; max-height:360px; overflow:auto; }
         .assistant-domain-renewal-table { margin-bottom: 0; }
-        .assistant-domain-renewal-table th, .assistant-domain-renewal-table td { vertical-align: middle !important; white-space: nowrap; }
+        .assistant-domain-renewal-table th { background:#fffaf0; color:#725514; position:sticky; top:0; z-index:1; }
+        .assistant-domain-renewal-table th, .assistant-domain-renewal-table td { padding:8px 10px !important; vertical-align:middle !important; white-space:nowrap; }
         .assistant-domain-renewal-days { color: #d35400; font-weight: 600; }
         .assistant-domain-renewal-form { display: inline-block; margin: 0; }
         .assistant-domain-expiry-meta { display: block; margin-top: 4px; }
@@ -223,43 +227,6 @@
                 @if ($importErrors->count() > 20)
                     <span>{{ $t('import.remaining_errors', ['count' => $importErrors->count() - 20]) }}</span>
                 @endif
-            </div>
-        @endif
-
-        @if ($domainRenewalReminderStores->isNotEmpty())
-            <div class="box box-solid assistant-domain-renewal-box">
-                <div class="box-header with-border">
-                    <h3 class="box-title"><i class="fa fa-bell"></i> 域名即将到期提醒（30天内）</h3>
-                    <span class="label label-warning pull-right">{{ $domainRenewalReminderStores->count() }} 家</span>
-                </div>
-                <div class="box-body no-padding assistant-domain-renewal-table-wrap">
-                    <table class="table table-hover assistant-domain-renewal-table">
-                        <thead><tr><th>店铺</th><th>域名</th><th>域名到期日</th><th>剩余天数</th><th>归属人</th>@if ($canManage)<th>操作</th>@endif</tr></thead>
-                        <tbody>
-                        @foreach ($domainRenewalReminderStores as $reminderStore)
-                            @php($remainingDays = now('Asia/Shanghai')->startOfDay()->diffInDays($reminderStore->domain_expires_at->copy()->startOfDay(), false))
-                            <tr>
-                                <td>{{ $reminderStore->shop_name ?: '—' }}</td>
-                                <td>{{ $reminderStore->domain ?: '—' }}</td>
-                                <td>{{ $reminderStore->domain_expires_at?->format('Y-m-d') ?: '—' }}</td>
-                                <td><span class="assistant-domain-renewal-days">{{ $remainingDays }} 天</span></td>
-                                <td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '—' }}</td>
-                                @if ($canManage)
-                                    <td>
-                                        <form method="post" action="{{ route('assistant.domain-stores.domain-renewal-reminder.update', $reminderStore) }}" class="assistant-domain-renewal-form" data-domain-renewal-form data-domain="{{ $reminderStore->domain ?: $reminderStore->shop_name }}" data-exempt="1">
-                                            @csrf
-                                            @method('PATCH')
-                                            <input type="hidden" name="exempt" value="1">
-                                            <input type="hidden" name="reason" value="">
-                                            <button type="submit" class="btn btn-warning btn-xs"><i class="fa fa-bell-slash"></i> 无需续费</button>
-                                        </form>
-                                    </td>
-                                @endif
-                            </tr>
-                        @endforeach
-                        </tbody>
-                    </table>
-                </div>
             </div>
         @endif
 
@@ -348,6 +315,44 @@
                 </form>
             </div>
         </div>
+
+        @if ($domainRenewalReminderStores->isNotEmpty())
+            <details class="assistant-domain-renewal-box">
+                <summary>
+                    <i class="fa fa-bell-o fa-lg"></i>
+                    <div><strong>{{ number_format($domainRenewalReminderStores->count()) }} 家店铺域名将在30天内到期</strong><div>点击查看具体店铺；确认无需续费的店铺可直接关闭提醒。</div></div>
+                    <i class="fa fa-angle-down"></i>
+                </summary>
+                <div class="assistant-domain-renewal-table-wrap table-responsive">
+                    <table class="table table-hover assistant-domain-renewal-table">
+                        <thead><tr><th>店铺</th><th>域名</th><th>域名到期日</th><th>剩余天数</th><th>归属人</th>@if ($canManage)<th>操作</th>@endif</tr></thead>
+                        <tbody>
+                        @foreach ($domainRenewalReminderStores as $reminderStore)
+                            @php($remainingDays = (int) now('Asia/Shanghai')->startOfDay()->diffInDays($reminderStore->domain_expires_at->copy()->startOfDay(), false))
+                            <tr>
+                                <td>{{ $reminderStore->shop_name ?: '—' }}</td>
+                                <td>{{ $reminderStore->domain ?: '—' }}</td>
+                                <td>{{ $reminderStore->domain_expires_at?->format('Y-m-d') ?: '—' }}</td>
+                                <td><span class="assistant-domain-renewal-days">{{ $remainingDays }} 天</span></td>
+                                <td>{{ $reminderStore->ownerUser?->name ?: $reminderStore->ownerUser?->username ?: '—' }}</td>
+                                @if ($canManage)
+                                    <td>
+                                        <form method="post" action="{{ route('assistant.domain-stores.domain-renewal-reminder.update', $reminderStore) }}" class="assistant-domain-renewal-form" data-domain-renewal-form data-domain="{{ $reminderStore->domain ?: $reminderStore->shop_name }}" data-exempt="1">
+                                            @csrf
+                                            @method('PATCH')
+                                            <input type="hidden" name="exempt" value="1">
+                                            <input type="hidden" name="reason" value="">
+                                            <button type="submit" class="btn btn-warning btn-xs"><i class="fa fa-bell-slash"></i> 无需续费</button>
+                                        </form>
+                                    </td>
+                                @endif
+                            </tr>
+                        @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        @endif
 
         @if ($canSyncEmailPurchases)
             <form id="assistant-email-purchase-sync-form" method="post" action="{{ route('assistant.domain-stores.email-purchases.sync') }}" data-loading="button">
