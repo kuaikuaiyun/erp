@@ -237,7 +237,7 @@ class PaymentRenewalAnalysisService
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
         if ($cache['linked'] ?? false) $cache['as_of']=now($cache['timezone'])->toDateString();
-        $version=$cache['first_only'] ? 'v26' : 'v25';
+        $version=isset($cache['as_of']) ? 'v29' : ($cache['first_only'] ? 'v26' : 'v25');
         return Cache::remember('payment:renewal-summary:'.$version.':'.sha1(json_encode($cache)),now()->addMinutes(5),
             fn ()=>$this->buildSummary($cache));
     }
@@ -256,7 +256,8 @@ class PaymentRenewalAnalysisService
                 'utc_period_from'=>$localFrom->copy()->utc()->format('Y-m-d H:i:s'),'utc_period_to'=>$localTo->copy()->utc()->format('Y-m-d H:i:s'),
                 'utc_comparison_from'=>$comparisonFrom->copy()->utc()->format('Y-m-d H:i:s'),'utc_comparison_to'=>$comparisonTo->copy()->utc()->format('Y-m-d H:i:s'),
                 'timezone'=>'UTC'.$zone,'generated_at'=>now($zone)->format('Y-m-d H:i:s'),
-                'expires_at'=>now($zone)->addMinutes(5)->format('Y-m-d H:i:s')]];
+                'expires_at'=>now($zone)->addMinutes(5)->format('Y-m-d H:i:s'),
+                ... (isset($filters['as_of']) ? ['as_of'=>$filters['as_of']] : [])]];
     }
 
     private function paidOrdersInWindow(array $filters,array $window): Builder
@@ -378,12 +379,13 @@ class PaymentRenewalAnalysisService
         return ['ids'=>$rootIds,'map'=>$map];
     }
 
-    private function lifecycleBatches(array $filters,array $index,array $w): \Generator
+    private function lifecycleBatches(array $filters,array $index,array $w,bool $includeOrderDate=false): \Generator
     {
         $linked=$filters['linked'] ?? false;
+        $fields=$includeOrderDate ? [...self::ORDER_FIELDS,'order_created_at'] : self::ORDER_FIELDS;
         // Linked mode already narrows roots to the selected period. Group more roots per lookup.
         foreach (array_chunk($index['ids'],$linked ? 250 : 100) as $rootIds) {
-            $roots=LogisticsOrder::query()->select(self::ORDER_FIELDS)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
+            $roots=LogisticsOrder::query()->select($fields)->whereIn('id',$rootIds)->orderBy('id')->get()->keyBy('id');
             $entries=$refs=$seen=[];
             foreach ($roots as $root) {
                 $entries[]=['order'=>$root,'initial'=>$root,'number'=>0];
@@ -399,7 +401,7 @@ class PaymentRenewalAnalysisService
             } else {
                 $query->where('paid_at','<=',$w['to']);
             }
-            foreach ($this->orderedBatches($query) as $orders) {
+            foreach ($this->orderedBatches($query,fields:$fields) as $orders) {
                 $entries=[];
                 foreach ($orders as $order) {
                     $rootId=$index['map'][trim((string)$order->subscription_origin_order_id)] ?? null;
@@ -485,8 +487,8 @@ class PaymentRenewalAnalysisService
                 }
             }
         }
-        $current=$previous=$pending=$renewedWhenDue=$dueNumbers=[];
-        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w) as $entries) {
+        $current=$previous=$pending=$renewedWhenDue=$lastRateOrder=$lastBaseOrder=$dueNumbers=[];
+        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w,includeOrderDate:$linked) as $entries) {
             $now=[];
             foreach ($entries as $entry) {
                 $order=$entry['order'];
@@ -494,12 +496,24 @@ class PaymentRenewalAnalysisService
                 if ($asOf && $order->paid_at->lte($asOf)) {
                     $root=$entry['initial'];
                     $dueNumber=$dueNumbers[$root->id] ??= $this->dueRenewalNumber($root->paid_at,$asOf);
+                    $includedInRate=$number>0 && $dueNumber>=$number;
+                    $eligibleForNextStage=$dueNumber>$number;
+                    $placedAt=$eligibleForNextStage || $includedInRate
+                        ? $order->order_created_at?->copy()->setTimezone($filters['timezone'])->format('Y-m-d H:i:s')
+                        : null;
                     $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
                     foreach ($groups as $key) {
                         if (!$this->matchesGroup($stub,$key)) continue;
-                        if ($dueNumber>$number) $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
-                        else $pending[$number][$key]=($pending[$number][$key] ?? 0)+1;
-                        if ($number>0 && $dueNumber>=$number) $renewedWhenDue[$number][$key]=($renewedWhenDue[$number][$key] ?? 0)+1;
+                        if ($eligibleForNextStage) {
+                            $previous[$number][$key]=($previous[$number][$key] ?? 0)+1;
+                            if ($placedAt!==null) $lastBaseOrder[$number][$key]=max($lastBaseOrder[$number][$key] ?? '',$placedAt);
+                        } else {
+                            $pending[$number][$key]=($pending[$number][$key] ?? 0)+1;
+                        }
+                        if ($includedInRate) {
+                            $renewedWhenDue[$number][$key]=($renewedWhenDue[$number][$key] ?? 0)+1;
+                            if ($placedAt!==null) $lastRateOrder[$number][$key]=max($lastRateOrder[$number][$key] ?? '',$placedAt);
+                        }
                     }
                 } elseif (!$linked && $order->paid_at->betweenIncluded($w['previous_from'],$w['previous_to'])) {
                     $stub=['actual_channel'=>$this->channelFor($order),'payment_method'=>$this->methodFor($order)];
@@ -541,7 +555,9 @@ class PaymentRenewalAnalysisService
                 $rateOrders=$linked ? ($renewedWhenDue[$number][$key] ?? 0) : $totals[$key]['orders'];
                 $by[$key]=[...$this->finishTotal($totals[$key]),'previous_orders'=>$partBase,
                     'rate'=>$partBase>0 ? $this->rate($rateOrders,$partBase) : null,
-                    ...($linked ? ['pending_orders'=>$pending[$number-1][$key] ?? 0,'rate_orders'=>$rateOrders] : [])];
+                    ...($linked ? ['pending_orders'=>$pending[$number-1][$key] ?? 0,'rate_orders'=>$rateOrders,
+                        'rate_order_created_to'=>$lastRateOrder[$number][$key] ?? null,
+                        'base_order_created_to'=>$lastBaseOrder[$number-1][$key] ?? null] : [])];
             }
             $stages[]=[...$by['total'],'key'=>$number===0 ? 'initial' : 'renewal_'.$number,'number'=>$number,
                 'paid_from'=>$current[$number]['from'] ?? null,'paid_to'=>$current[$number]['to'] ?? null,'by_channel'=>$by,

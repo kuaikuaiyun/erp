@@ -11,7 +11,7 @@
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-13">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-16">
 @endpush
 
 @section('content')

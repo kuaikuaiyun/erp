@@ -161,6 +161,10 @@
         $mode = $filters['renewal_mode'] ?? 'normal';
         $linked = $mode === 'linked';
         $renewalText = static fn (string $key, array $values = []) => __('payment-renewal.'.$key, $values);
+        $dueThrough = $linked ? $renewalText(
+            substr($calc['generated_at'], 0, 10) === $calc['as_of'] ? 'linked_due_through' : 'linked_due_through_date',
+            ['datetime'=>$calc['generated_at'], 'date'=>$calc['as_of']]
+        ) : null;
         $period = $linked ? $renewalText('linked_period',['from'=>$calc['period_from'],'to'=>$calc['period_to']]) : $audit('first_period',['from'=>$calc['period_from'],'to'=>$calc['period_to']]);
         $comparison = $audit('cohort_period',['from'=>$calc['comparison_from'],'to'=>$calc['comparison_to']]);
         $utcPeriod = $audit('utc_period',['from'=>$calc['utc_period_from'],'to'=>$calc['utc_period_to']]);
@@ -222,9 +226,15 @@
         <div class="payment-renewal-section-results">
         @include('portals.payment.partials.renewal-table-skeleton')
         <div class="payment-renewal-section-data">
-        <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}</p>
+        <p class="payment-renewal-compact-context">
+            @if($linked)
+                {{ $renewalText('linked_context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}
+            @else
+                {{ $text('context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}
+            @endif
+        </p>
 
-        <p class="payment-renewal-scope-note">{{ $linked ? $renewalText('linked_risk') : $text('stage_note') }}</p>
+        <p class="payment-renewal-scope-note">{{ $linked ? $renewalText('linked_cutoff_note').' '.$renewalText('linked_risk') : $text('stage_note') }}</p>
         <div class="payment-renewal-stage-list">
         @forelse($dashboard['stages'] as $stage)
             @php
@@ -237,22 +247,39 @@
                     <div class="payment-renewal-stage-periods">
                         <span>{{ $linked ? $renewalText('linked_period',['from'=>substr($calc['period_from'],0,10),'to'=>substr($calc['period_to'],0,10)]) : $text('stage_current_period',['from'=>substr($calc['period_from'],0,10),'to'=>substr($calc['period_to'],0,10)]) }}</span>
                         <span>{{ $linked ? $renewalText('linked_previous',['previous'=>$previousName]) : $text('stage_comparison_period',['from'=>substr($calc['comparison_from'],0,10),'to'=>substr($calc['comparison_to'],0,10),'previous'=>$previousName]) }}</span>
+                        @if($linked)<span>{{ $dueThrough }}</span>@endif
                     </div>
                 </header>
-                <div class="table-responsive"><table class="table payment-data-table payment-renewal-stage-table">
+                <div class="table-responsive"><table @class(['table payment-data-table payment-renewal-stage-table', 'payment-renewal-stage-table-linked'=>$linked])>
                     <thead><tr><th>{{ $text('payment_method') }}</th><th>{{ $baseLabel }}</th><th>{{ $linked ? $renewalText('linked_current_orders') : $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th></tr></thead>
                     <tbody>
             @foreach($groups as $key=>$group)
                 @php $part = $key === 'total' ? $stage : $stage['by_channel'][$key]; @endphp
                 <tr class="payment-level-{{ $group['level'] }} {{ $key === 'total' ? 'payment-stage-start' : '' }}" @if($key === 'total') data-payment-renewal-number="{{ $stage['number'] }}" @endif data-payment-method="{{ $group['method'] }}">
                     <td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td>
-                    <td class="payment-renewal-base-count">
-                        {{ number_format($part['previous_orders']) }}
-                        @if($linked && $part['pending_orders']>0)
-                            <small>{{ $renewalText('linked_pending',['count'=>number_format($part['pending_orders'])]) }}</small>
+                    <td class="payment-renewal-stage-count">
+                        @if($linked)
+                            <strong>{{ number_format($part['previous_orders']) }}</strong>
+                            @if($part['previous_orders']>0)
+                                <small>@if($part['base_order_created_to'] === null){{ $renewalText('linked_no_order_time') }}@else{{ $renewalText('linked_last_order_label') }}<strong>{{ $part['base_order_created_to'] }}</strong>@endif</small>
+                            @endif
+                            @if($part['pending_orders']>0)
+                                <small>{{ $renewalText('linked_pending_prefix') }} <strong>{{ number_format($part['pending_orders']) }}</strong> {{ $renewalText('linked_pending_suffix') }}</small>
+                            @endif
+                        @else
+                            {{ number_format($part['previous_orders']) }}
                         @endif
                     </td>
-                    <td>{{ number_format($part['rate_orders'] ?? $part['orders']) }}</td>
+                    <td class="payment-renewal-stage-count">
+                        @if($linked)
+                            <strong>{{ number_format($part['rate_orders']) }}</strong>
+                            @if($part['rate_orders']>0)
+                                <small>@if($part['rate_order_created_to'] === null){{ $renewalText('linked_no_order_time') }}@else{{ $renewalText('linked_last_order_label') }}<strong>{{ $part['rate_order_created_to'] }}</strong>@endif</small>
+                            @endif
+                        @else
+                            {{ number_format($part['orders']) }}
+                        @endif
+                    </td>
                     <td class="payment-rate-cell"><strong>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['rate_orders'] ?? $part['orders'],$part['previous_orders']) }}</small></td>
                     <td>{{ $money($part['revenue']) }}</td><td>{{ number_format($part['refund_order_count']) }}</td><td>{{ $money($part['refund_amount']) }}</td>
                     <td class="payment-refund-rate">{{ number_format($part['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_order_count'],$part['orders']) }}</small></td>

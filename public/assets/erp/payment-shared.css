@@ -1313,9 +1313,14 @@
 .payment-renewal-two-sections .payment-renewal-stage-table th:nth-child(7) { width: 10%; }
 .payment-renewal-two-sections .payment-renewal-stage-table th:nth-child(8) { width: 11%; }
 .payment-renewal-two-sections .payment-renewal-stage-table th:nth-child(9) { width: 12%; }
+.payment-renewal-two-sections .payment-renewal-funnel .payment-renewal-stage-table-linked { min-width: 1450px; }
+.payment-renewal-two-sections .payment-renewal-stage-table-linked th:nth-child(2),
+.payment-renewal-two-sections .payment-renewal-stage-table-linked th:nth-child(3) { width: 205px; }
 .payment-renewal-two-sections .payment-renewal-stage-table tbody td { padding: 13px 12px; }
-.payment-renewal-two-sections .payment-renewal-stage-table td.payment-renewal-base-count { white-space: normal; }
-.payment-renewal-stage-table .payment-renewal-base-count small { display: inline; font-weight: 400; }
+.payment-renewal-two-sections .payment-renewal-stage-table td.payment-renewal-stage-count { white-space: normal; }
+.payment-renewal-stage-table-linked .payment-renewal-stage-count > strong { font-size: 16px; }
+.payment-renewal-stage-table .payment-renewal-stage-count small { display: block; font-weight: 400; white-space: nowrap; }
+.payment-renewal-stage-table .payment-renewal-stage-count small strong { color: #244d6d; }
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(6),
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(7) { border-left: 0 !important; }
 .payment-renewal-two-sections .payment-renewal-stage-table tr > :nth-child(5),

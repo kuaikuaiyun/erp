@@ -22,7 +22,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         app()->setLocale('zh-CN');
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->increments('id');
-            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status'] as $field) $table->string($field)->nullable();
+            foreach (['paid_at', 'order_created_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email', 'logistics_status'] as $field) $table->string($field)->nullable();
             $table->decimal('paid_amount_usd', 16, 4)->default(0);
             $table->text('shopify_payload')->nullable();
             $table->unsignedInteger('paypal_account_id')->nullable();
@@ -285,14 +285,14 @@ class PaymentRenewalAnalysisTest extends TestCase
 
     public function test_linked_maturity_changes_with_the_cohort_stage_and_local_query_date(): void
     {
-        $this->order(501, '2026-10-25 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
-        $this->order(502, '2026-10-26 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
-        $this->order(503, '2026-10-31 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
-        $this->order(504, '2026-11-24 12:00:00', '订阅复购', 'credit_card', '502', 'Maturity');
-        $this->order(505, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '503', 'Maturity');
+        $this->order(501, '2026-10-25 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity', ['order_created_at' => '2026-10-25 10:10:00']);
+        $this->order(502, '2026-10-26 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity', ['order_created_at' => '2026-10-26 11:55:00']);
+        $this->order(503, '2026-10-31 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity', ['order_created_at' => '2026-10-24 11:20:00']);
+        $this->order(504, '2026-11-24 12:00:00', '订阅复购', 'credit_card', '502', 'Maturity', ['order_created_at' => '2026-11-24 10:05:00']);
+        $this->order(505, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '503', 'Maturity', ['order_created_at' => '2026-11-01 08:45:00']);
         $this->order(506, '2026-09-25 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
         $this->order(507, '2026-09-26 12:00:00', '订阅首次购买', 'credit_card', '', 'Maturity');
-        $this->order(508, '2026-10-25 12:00:00', '订阅复购', 'credit_card', '506', 'Maturity');
+        $this->order(508, '2026-10-25 12:00:00', '订阅复购', 'credit_card', '506', 'Maturity', ['order_created_at' => '2026-10-25 09:15:00']);
         $this->order(509, '2026-10-26 12:00:00', '订阅复购', 'credit_card', '507', 'Maturity');
         $this->order(510, '2026-11-24 12:00:00', '订阅复购', 'credit_card', '507', 'Maturity');
         $this->order(511, '2026-09-25 12:00:00', '订阅首次购买', 'credit_card', '', 'DueWithoutRenewal');
@@ -311,17 +311,29 @@ class PaymentRenewalAnalysisTest extends TestCase
         $html = view('portals.payment.partials.renewal-analysis-section', [
             'module' => 'renewal', 'dashboard' => $dashboard, 'errors' => new \Illuminate\Support\ViewErrorBag(),
         ])->render();
-        self::assertStringContainsString('（不含 1 单未到期订单）', $html);
+        self::assertStringContainsString('<small>不含 <strong>1</strong> 单未到期订单</small>', $html);
+        self::assertSame('2026-11-01 16:45:00', $first['rate_order_created_to']);
+        self::assertSame($first['rate_order_created_to'], $first['by_channel']['method_cc']['rate_order_created_to']);
+        self::assertNull($first['by_channel']['method_pp']['rate_order_created_to']);
+        self::assertSame('2026-10-25 18:10:00', $first['base_order_created_to']);
+        self::assertSame($first['base_order_created_to'], $first['by_channel']['method_cc']['base_order_created_to']);
+        self::assertNull($first['by_channel']['method_pp']['base_order_created_to']);
+        self::assertMatchesRegularExpression('/<td class="payment-renewal-stage-count">\s*<strong>2<\/strong>\s*<small>末次下单：<strong>2026-10-25 18:10:00<\/strong><\/small>/', $html);
+        self::assertMatchesRegularExpression('/<td class="payment-renewal-stage-count">\s*<strong>1<\/strong>\s*<small>末次下单：<strong>2026-11-01 16:45:00<\/strong><\/small>/', $html);
+        self::assertMatchesRegularExpression('/<header class="payment-renewal-stage-heading">.*?<span>截至 2026-11-25 23:59:00（含当天）<\/span>.*?<\/header>/s', $html);
 
         $stages = array_column($service->dashboard($september, 'renewal')['stages'], null, 'number');
         self::assertSame([2, 0, 2], [$stages[1]['previous_orders'], $stages[1]['pending_orders'], $stages[1]['rate_orders']]);
         self::assertSame([1, 1, 0], [$stages[2]['previous_orders'], $stages[2]['pending_orders'], $stages[2]['rate_orders']]);
+        self::assertSame('2026-10-25 17:15:00', $stages[2]['base_order_created_to']);
         $due = $service->dashboard([...$september, 'renewal_store' => 'DueWithoutRenewal', 'stage' => 'renewal_2'], 'renewal')['stages'][0];
         self::assertSame([1, 0], [$due['previous_orders'], $due['rate_orders']]);
         self::assertEquals(0, $due['rate']);
 
         $this->travelTo(\Carbon\Carbon::parse('2026-11-25 16:00:00 UTC'));
-        $second = array_column($service->dashboard($september, 'renewal')['stages'], null, 'number')[2];
+        $afterMidnight = $service->dashboard($september, 'renewal');
+        self::assertSame('2026-11-26', $afterMidnight['calculation']['as_of']);
+        $second = array_column($afterMidnight['stages'], null, 'number')[2];
         self::assertSame([2, 0, 1], [$second['previous_orders'], $second['pending_orders'], $second['rate_orders']]);
     }
 
