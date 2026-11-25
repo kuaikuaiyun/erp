@@ -295,7 +295,9 @@
         async function refresh(region, params, updateUrl) {
             var module = region.dataset.renewalRegion;
             var article = region.querySelector('article');
-            var status = region.querySelector('[data-renewal-section-status]');
+            var status = article.querySelector('[data-renewal-section-status]');
+            var message = status.querySelector('[data-renewal-status-message]');
+            var retry = status.querySelector('[data-renewal-section-retry]');
             var previous = pending.get(module);
             if (previous && article.hasAttribute('data-renewal-placeholder')) return;
             if (previous) previous.abort();
@@ -305,10 +307,10 @@
             var url = new URL(page.dataset.renewalUrl, window.location.href);
             url.search = params;
             url.searchParams.set('section', module);
-            status.textContent = sectionMessages.loading;
-            status.classList.remove('text-danger');
+            article.dataset.renewalState = 'loading';
+            retry.hidden = true;
             status.hidden = false;
-            article.setAttribute('aria-busy', 'true');
+            message.textContent = sectionMessages.loading;
             try {
                 var response = await fetch(url, {
                     credentials: 'same-origin',
@@ -338,15 +340,17 @@
                     if (nextUrl.href !== window.location.href) window.history.pushState(null, '', nextUrl);
                     if (refreshLink) refreshLink.href = nextUrl.href;
                 }
-                status.hidden = true;
             } catch (error) {
                 if (request.signal.aborted || pending.get(module) !== request) return;
-                status.textContent = error instanceof TypeError ? sectionMessages.error : (error.message || sectionMessages.error);
-                status.classList.add('text-danger');
+                article.dataset.renewalState = 'error';
+                message.textContent = error instanceof TypeError ? sectionMessages.error : (error.message || sectionMessages.error);
+                retry.onclick = function () {
+                    refresh(region, withSection(module, params), updateUrl);
+                };
+                retry.hidden = false;
             } finally {
                 if (pending.get(module) === request) {
                     pending.delete(module);
-                    article.removeAttribute('aria-busy');
                 }
             }
         }

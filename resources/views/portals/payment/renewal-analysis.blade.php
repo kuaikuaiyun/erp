@@ -10,7 +10,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-2">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261125-3">
 @endpush
 
 @section('content')
@@ -22,17 +22,21 @@
     <header class="payment-page-heading"><div><h1>{{ __($t.'.page_title') }}</h1><p>{{ $text('subtitle') }}</p></div></header>
     <p data-renewal-export-feedback role="status" aria-live="polite" hidden></p>
     <div data-renewal-region="initial">
-        <p data-renewal-section-status role="status" hidden></p>
         @include('portals.payment.partials.renewal-analysis-section', ['module' => 'initial'])
     </div>
     <div id="renewal-analysis-renewal" data-renewal-region="renewal">
-        <p data-renewal-section-status role="status" hidden></p>
         @if (isset($dashboard['stages']))
             @include('portals.payment.partials.renewal-analysis-section', ['module' => 'renewal'])
         @else
             <article class="payment-panel payment-renewal-funnel" data-renewal-placeholder>
                 <h2><span class="payment-section-number">02</span>{{ $text('renewal_title') }}</h2>
                 <p class="payment-section-hint">{{ $text('renewal_hint') }}</p>
+                @include('portals.payment.partials.renewal-section-status')
+                <div class="payment-renewal-skeleton" aria-hidden="true">
+                    @for ($row = 0; $row < 3; $row++)
+                        <div><span></span><span></span><span></span><span></span></div>
+                    @endfor
+                </div>
                 <a class="btn btn-default" data-renewal-navigation href="{{ route('payment.renewal-analysis.index', [...array_diff_key($filters, ['risk_date_mode'=>true]), 'load_renewal'=>1]) }}#renewal-analysis-renewal">{{ __('payment-renewal.load_section') }}</a>
             </article>
         @endif
@@ -52,6 +56,6 @@
 @endsection
 
 @push('scripts')
-<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-1"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261125-2"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 @endpush

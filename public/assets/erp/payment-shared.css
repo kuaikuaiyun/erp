@@ -1286,7 +1286,32 @@
 
 .payment-renewal-two-sections [data-renewal-region] > .payment-panel { container-type: inline-size; }
 .payment-renewal-two-sections [data-renewal-placeholder] > .btn { margin: 12px 18px; }
-.payment-renewal-two-sections [data-renewal-section-status] { margin: 0 0 8px; }
+.payment-renewal-two-sections [data-renewal-placeholder][data-renewal-state] > .btn { display: none; }
+.payment-renewal-section-status:not([hidden]) {
+    display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px;
+    margin: 14px 18px 10px; padding: 10px 12px; border: 1px solid #d4e4f2;
+    border-radius: 8px; background: #f4f9fd; color: #244c6b; font-size: 13px;
+}
+.payment-renewal-section-status [hidden] { display: none; }
+.payment-renewal-status-message { display: flex; align-items: center; flex: 1 1 15rem; min-width: 0; gap: 9px; }
+.payment-renewal-status-icon {
+    flex: 0 0 15px; height: 15px; border-radius: 50%; border: 2px solid #c5dced;
+    border-top-color: #256fa5; animation: payment-renewal-status-spin .75s linear infinite;
+}
+[data-renewal-state="error"] .payment-renewal-section-status { margin-bottom: 14px; color: #8a3b32; border-color: #f0d4ce; background: #fdf5f3; }
+[data-renewal-state="error"] .payment-renewal-status-icon {
+    display: grid; place-items: center; background: #9f493e; color: #fff; border: 0;
+    font-size: 11px; font-weight: 700; line-height: 1; animation: none;
+}
+[data-renewal-state="error"] .payment-renewal-status-icon::before { content: "!"; }
+.payment-renewal-skeleton { display: none; margin: 0 18px 16px; border: 1px solid #e4edf4; border-radius: 8px; overflow: hidden; }
+[data-renewal-state="loading"] .payment-renewal-skeleton { display: grid; }
+.payment-renewal-skeleton > div { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 10px; padding: 12px; }
+.payment-renewal-skeleton > div:first-child { background: #eef5fa; }
+.payment-renewal-skeleton > div + div { border-top: 1px solid #edf2f6; }
+.payment-renewal-skeleton span { width: 66%; height: 8px; background: #e1ebf3; border-radius: 4px; }
+@keyframes payment-renewal-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .payment-renewal-status-icon { animation: none; } }
 @container (max-width: 1050px) {
     .payment-renewal-two-sections .payment-renewal-filter,
     .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: repeat(2,minmax(0,1fr)); }

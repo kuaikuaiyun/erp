@@ -37,6 +37,7 @@
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription" data-renewal-section="initial" data-renewal-applied="{{ $appliedFilters }}">
         <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
         <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
+        @include('portals.payment.partials.renewal-section-status')
         @php $moduleReset = array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone'])); @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="payment-renewal-filter" data-renewal-module="initial">
             @foreach($filters as $name=>$value)
@@ -131,6 +132,7 @@
     <article class="payment-panel payment-renewal-funnel" data-payment-analysis-section="renewals" data-renewal-section="renewal" data-renewal-applied="{{ $appliedFilters }}">
         <h2><span class="payment-section-number">02</span>{{ $text('renewal_title') }}</h2>
         <p class="payment-section-hint">{{ $text('renewal_hint') }}</p>
+        @include('portals.payment.partials.renewal-section-status')
         @php $moduleReset = array_diff_key($filters, array_flip(['renewal_date_from','renewal_date_to','renewal_timezone','stage','stage_page'])); @endphp
         <form method="get" action="{{ route('payment.renewal-analysis.index') }}#renewal-analysis-renewal" class="payment-renewal-filter" data-renewal-module="renewal">
             <input type="hidden" name="load_renewal" value="1">
