@@ -1014,7 +1014,7 @@ PHP;
         self::assertStringContainsString('退款订单明细', $html);
         self::assertStringNotContainsString('data-payment-method="unknown"', $html);
         preg_match_all('/class="payment-method-rate" data-payment-method="([^"]+)"/', $html, $methods);
-        self::assertSame(['pp','cc','gp','ap'], $methods[1]);
+        self::assertSame(['all','pp','cc','gp','ap'], $methods[1]);
         foreach (['苹果支付','谷歌支付','PayPal支付','信用卡支付'] as $name) self::assertStringContainsString($name, $html);
         self::assertStringNotContainsString('<th>渠道</th>', $html);
         self::assertStringNotContainsString('>PayPal</', $html);

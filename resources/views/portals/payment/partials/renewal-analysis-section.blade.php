@@ -74,27 +74,17 @@
         <div class="payment-renewal-section-data">
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['initial_date_from'],'to'=>$filters['initial_date_to'],'timezone'=>$firstCalc['timezone'],'generated'=>$firstCalc['generated_at']]) }}</p>
 
-        <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
-            @foreach(['total'=>$text('total')] as $channel=>$label)
-            @php
-                $rate = $summary['subscription_rate'][$channel];
-            @endphp
-            <div class="payment-kpi-card payment-renewal-kpi"><div><p>{{ $label }}</p><strong>{{ number_format($rate['rate'],2) }}%</strong><small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small><small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small></div></div>
-            @endforeach
-        </div>
         <div class="payment-method-rates">
             <h3>{{ $text('method_subscription') }}</h3>
             <div class="payment-method-rate-grid">
             @foreach($groups as $key=>$group)
-                @if($group['level'] === 'method')
-                    @php $rate = $summary['subscription_rate'][$key]; @endphp
-                    <div class="payment-method-rate" data-payment-method="{{ $group['method'] }}">
-                        <span><b>{{ $methodLabel($group) }}</b></span>
-                        <strong>{{ number_format($rate['rate'],2) }}%</strong>
-                        <small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small>
-                        <small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small>
-                    </div>
-                @endif
+                @php $rate = $summary['subscription_rate'][$key]; @endphp
+                <div class="payment-method-rate" data-payment-method="{{ $group['method'] }}">
+                    <span><b>{{ $methodLabel($group) }}</b></span>
+                    <strong>{{ number_format($rate['rate'],2) }}%</strong>
+                    <small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small>
+                    <small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small>
+                </div>
             @endforeach
             </div>
         </div>
