@@ -302,6 +302,7 @@
             if (previous && article.hasAttribute('data-renewal-placeholder')) return;
             if (previous) previous.abort();
             if (observer && module === 'renewal') observer.disconnect();
+            if (observer && module === 'initial') observer.unobserve(placeholder);
             var request = new AbortController();
             pending.set(module, request);
             var url = new URL(page.dataset.renewalUrl, window.location.href);
@@ -351,6 +352,9 @@
             } finally {
                 if (pending.get(module) === request) {
                     pending.delete(module);
+                    if (observer && module === 'initial' && placeholder.isConnected && !placeholder.dataset.renewalState) {
+                        observer.observe(placeholder);
+                    }
                 }
             }
         }
@@ -377,6 +381,7 @@
         window.addEventListener('popstate', function () { window.location.reload(); });
         if (placeholder && 'IntersectionObserver' in window) {
             observer = new IntersectionObserver(function (entries) {
+                if (pending.has('initial')) return;
                 if (entries.some(function (entry) { return entry.isIntersecting; })) {
                     refresh(placeholder.closest('[data-renewal-region]'), applied, false);
                 }
