@@ -115,7 +115,7 @@ class PortalEntryController extends Controller
         $portal->loadMissing('menus');
         if (!$requiresSystemAdministrator) {
             $requestedMenu = $this->menuAuthorization->menuForRequest($portal, $request->path());
-            if ($requestedMenu && !$this->menuAuthorization->canAccess($user, $requestedMenu)) {
+            if ($requestedMenu && !$this->menuAuthorization->canAccess($user, $requestedMenu, $portal)) {
                 abort(403, '您没有访问该页面的权限。');
             }
         }

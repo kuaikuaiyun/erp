@@ -17,7 +17,7 @@ class PortalMenuAuthorizationService
     {
     }
 
-    public function canAccess(AdminUser $user, PortalMenu $menu): bool
+    public function canAccess(AdminUser $user, PortalMenu $menu, ?Portal $portal = null): bool
     {
         if ($this->isBossOnlyMenu($menu)) {
             return $this->isBoss($user);
@@ -27,7 +27,13 @@ class PortalMenuAuthorizationService
             return true;
         }
 
-        return $this->authorization->hasPermission($user, $menu->permission_slug);
+        $portal ??= $menu->relationLoaded('portal')
+            ? $menu->getRelation('portal')
+            : $menu->portal()->first();
+
+        return $portal
+            ? $this->authorization->hasPermissionForPortal($user, $portal, $menu->permission_slug)
+            : $this->authorization->hasPermission($user, $menu->permission_slug);
     }
 
     public function visibleMenus(Portal $portal, AdminUser $user): Collection
@@ -42,20 +48,23 @@ class PortalMenuAuthorizationService
         $byParent = $menus->groupBy(fn (PortalMenu $menu) => (int) ($menu->parent_id ?: 0));
         $visibleIds = collect();
         $permissionSlugs = null;
-        $walk = function (PortalMenu $menu) use (&$walk, $byParent, $user, $visibleIds, &$permissionSlugs): bool {
+        $walk = function (PortalMenu $menu) use (&$walk, $byParent, $portal, $user, $visibleIds, &$permissionSlugs): bool {
             if ($this->isBossOnlyMenu($menu)) {
                 return false;
             }
 
+            $children = $byParent->get((int) $menu->getKey(), collect());
             $hasVisibleChild = false;
-            foreach ($byParent->get((int) $menu->getKey(), collect()) as $child) {
+            foreach ($children as $child) {
                 $hasVisibleChild = $walk($child) || $hasVisibleChild;
             }
-            $visible = $hasVisibleChild || !$menu->permission_slug || $this->authorization->hasPermission(
-                $user,
-                $menu->permission_slug,
-                $permissionSlugs ??= $this->authorization->permissionsFor($user)->pluck('slug'),
-            );
+            $visible = $children->isNotEmpty()
+                ? $hasVisibleChild
+                : (!$menu->permission_slug || $this->authorization->hasPermission(
+                    $user,
+                    $menu->permission_slug,
+                    $permissionSlugs ??= $this->authorization->permissionsForPortal($user, $portal)->pluck('slug'),
+                ));
             if ($visible) {
                 $visibleIds->push((int) $menu->getKey());
             }
