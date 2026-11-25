@@ -105,7 +105,12 @@ class OperationReportDashboardController extends Controller
         }
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
-        $visibleDepartmentIds = $this->visibleDepartmentIds($context);
+        // This controller is the subscription-project report. Dashboard scope can
+        // contain departments from every project, so intersect it with the
+        // subscription operation tree before building filters, operators or data.
+        // Fashion/general project reports perform the same isolation through
+        // OperationProjectCatalog in FashionOperationReportController.
+        $visibleDepartmentIds = $this->visibleSubscriptionDepartmentIds($context);
         $departments = Department::business()->whereIn('id', $visibleDepartmentIds)
             ->orderBy('sort')->orderBy('name')->get();
         $selectedDepartmentIds = collect($validated['operation_department_ids'] ?? [])
@@ -563,7 +568,7 @@ class OperationReportDashboardController extends Controller
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
         ]);
-        $visibleDepartmentIds = $this->visibleDepartmentIds($context);
+        $visibleDepartmentIds = $this->visibleSubscriptionDepartmentIds($context);
         if ($this->isOperationPortal($context)
             && ! $this->isBoss($context['user'])
             && $this->departmentAuthorization->managedDepartmentIds($context['user'])->intersect($visibleDepartmentIds)->isEmpty()) {
@@ -620,6 +625,18 @@ class OperationReportDashboardController extends Controller
     private function isOperationPortal(array $context): bool
     {
         return (string) $context['portal']->code === self::OPERATION_PORTAL_CODE;
+    }
+
+    /** @return list<int> */
+    private function visibleSubscriptionDepartmentIds(array $context): array
+    {
+        $subscriptionDepartmentIds = $this->assistantStoreOwners->operationDepartments()
+            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
+        return array_values(array_intersect(
+            $this->visibleDepartmentIds($context),
+            $subscriptionDepartmentIds,
+        ));
     }
 
     /** @return list<int> */
