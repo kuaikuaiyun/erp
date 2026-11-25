@@ -2050,7 +2050,14 @@ class ProductRequestController extends Controller
             'pclMap' => $pclMap,
             'nameMap' => $nameMap,
             'coverMap' => $coverMap,
-            'filters' => ['keyword' => $keyword, 'source' => $sourceFilter, 'review_status' => $reviewStatusFilter, 'per_page' => $perPage],
+            'filters' => [
+                'keyword' => $keyword,
+                'source' => $sourceFilter,
+                'review_status' => $reviewStatusFilter,
+                'is_runnable' => $runnableFilter,
+                'not_runnable_reason' => $reasonFilter,
+                'per_page' => $perPage,
+            ],
             'canImport' => $this->canImportProductRequests($context['user']),
         ]);
     }
