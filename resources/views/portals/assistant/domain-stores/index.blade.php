@@ -20,6 +20,17 @@
             ->unique()
             ->values();
     };
+    // Keep this filter in sync with the choices maintained in the create/edit form.
+    // Built-in labels are only displayed when their value is enabled as a quick option.
+    $siteBuilderFilterChoices = collect(array_keys($siteBuilderOptions))
+        ->filter(static fn (string $value): bool => in_array($value, $quickOptions['site_builder'] ?? [], true))
+        ->merge(collect($quickOptions['site_builder'] ?? [])->reject(
+            static fn ($value): bool => array_key_exists((string) $value, $siteBuilderOptions)
+        ))
+        ->map(static fn ($value): string => trim((string) $value))
+        ->filter()
+        ->unique()
+        ->values();
     $javascriptTranslations = [
         'clickToCopy' => $t('javascript.click_to_copy'),
         'copied' => $t('javascript.copied'),
@@ -275,7 +286,7 @@
                             @if ($canManageDepartmentAccess)
                                 <div class="assistant-advanced-filter-field form-group"><label for="filter-department">{{ $t('filters.department') }}</label><select id="filter-department" class="form-control" name="department_id" data-filter-multiselect data-placeholder="{{ $t('filters.all_departments') }}" data-search-placeholder="搜索{{ $t('filters.department') }}"><option value="">{{ $t('filters.all_departments') }}</option>@foreach ($assistantChildDepartments as $department)<option value="{{ $department->getKey() }}" @selected($filters['department_id'] === (string) $department->getKey())>{{ $department->name }}</option>@endforeach</select></div>
                             @endif
-                            <div class="assistant-advanced-filter-field form-group"><label id="filter-site-builder-label">{{ $t('fields.site_builder') }}</label><select class="form-control" name="site_builder[]" multiple data-filter-multiselect data-placeholder="全部{{ $t('fields.site_builder') }}" data-search-placeholder="搜索{{ $t('fields.site_builder') }}" data-no-results="没有匹配选项" data-clear-text="清空选择" data-select-all-text="全选"><option value="{{ $unmatchedFilterValue }}" @selected(in_array($unmatchedFilterValue, $filters['site_builder'], true))>未匹配</option>@foreach ($filterChoices('site_builder', $siteBuilderOptions) as $value)<option value="{{ $value }}" @selected(in_array($value, $filters['site_builder'], true))>{{ $siteBuilderOptions[$value] ?? $value }}</option>@endforeach</select></div>
+                            <div class="assistant-advanced-filter-field form-group"><label id="filter-site-builder-label">{{ $t('fields.site_builder') }}</label><select class="form-control" name="site_builder[]" multiple data-filter-multiselect data-placeholder="全部{{ $t('fields.site_builder') }}" data-search-placeholder="搜索{{ $t('fields.site_builder') }}" data-no-results="没有匹配选项" data-clear-text="清空选择" data-select-all-text="全选"><option value="{{ $unmatchedFilterValue }}" @selected(in_array($unmatchedFilterValue, $filters['site_builder'], true))>未匹配</option>@foreach ($siteBuilderFilterChoices as $value)<option value="{{ $value }}" @selected(in_array($value, $filters['site_builder'], true))>{{ $siteBuilderOptions[$value] ?? $value }}</option>@endforeach</select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-shop-name">{{ $t('fields.shop_name') }}</label><input id="filter-shop-name" class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-domain">{{ $t('fields.domain') }}</label><input id="filter-domain" class="form-control" name="domain" value="{{ $filters['domain'] }}"></div>
                             <div class="assistant-advanced-filter-field assistant-advanced-filter-date-range">
