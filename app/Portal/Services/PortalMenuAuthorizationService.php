@@ -88,22 +88,48 @@ class PortalMenuAuthorizationService
         return strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 
-    public function menuForRequest(Portal $portal, string $requestPath): ?PortalMenu
+    /**
+     * Resolve the most specific menu for the current request.
+     *
+     * Some dashboard pages share one route and use a query parameter to select
+     * the project. A menu that declares query parameters must only match when
+     * those parameters are present; otherwise it could borrow another menu's
+     * permission merely because both pages have the same URL path.
+     *
+     * @param array<string, mixed> $requestQuery
+     */
+    public function menuForRequest(Portal $portal, string $requestPath, array $requestQuery = []): ?PortalMenu
     {
         $currentPath = '/'.trim($requestPath, '/');
 
         return $portal->menus
             ->where('is_enabled', true)
-            ->filter(function (PortalMenu $menu) use ($currentPath): bool {
+            ->filter(function (PortalMenu $menu) use ($currentPath, $requestQuery): bool {
                 $path = trim((string) $menu->path);
                 if ($path === '' || $path === '#' || Str::startsWith($path, ['http://', 'https://'])) {
                     return false;
                 }
                 $menuPath = '/'.trim(parse_url($path, PHP_URL_PATH) ?: $path, '/');
-                return $menuPath !== '/'
-                    && ($currentPath === $menuPath || Str::startsWith($currentPath, rtrim($menuPath, '/').'/'));
+                if ($menuPath === '/'
+                    || ($currentPath !== $menuPath && !Str::startsWith($currentPath, rtrim($menuPath, '/').'/'))) {
+                    return false;
+                }
+
+                parse_str((string) parse_url($path, PHP_URL_QUERY), $requiredQuery);
+                foreach ($requiredQuery as $key => $requiredValue) {
+                    $actualValue = $requestQuery[$key] ?? null;
+                    if (is_array($actualValue) || (string) $actualValue !== (string) $requiredValue) {
+                        return false;
+                    }
+                }
+
+                return true;
             })
-            ->sortByDesc(fn (PortalMenu $menu) => strlen((string) $menu->path))
+            ->sortByDesc(function (PortalMenu $menu): string {
+                parse_str((string) parse_url((string) $menu->path, PHP_URL_QUERY), $requiredQuery);
+
+                return sprintf('%05d:%05d', count($requiredQuery), strlen((string) $menu->path));
+            })
             ->first();
     }
 }

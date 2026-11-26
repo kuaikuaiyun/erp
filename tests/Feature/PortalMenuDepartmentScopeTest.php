@@ -218,4 +218,51 @@ class PortalMenuDepartmentScopeTest extends TestCase
             app(PortalMenuAuthorizationService::class)->visibleMenus($portal, $user)->pluck('code')->values()->all(),
         );
     }
+
+    public function test_shared_route_uses_query_specific_menu_permission(): void
+    {
+        $portal = Portal::create([
+            'name' => 'Performance dashboard',
+            'code' => 'dashboard',
+            'status' => Portal::STATUS_ENABLED,
+        ]);
+        $portal->menus()->createMany([
+            [
+                'code' => 'fashion',
+                'path' => '/operation-dashboard/fashion-operation-reports',
+                'permission_slug' => 'portal.dashboard.fashion',
+            ],
+            [
+                'code' => 'general',
+                'path' => '/operation-dashboard/fashion-operation-reports?project_code=danbao-general',
+                'permission_slug' => 'portal.dashboard.general',
+            ],
+        ]);
+        $portal->load('menus');
+        $authorization = app(PortalMenuAuthorizationService::class);
+
+        self::assertSame(
+            'portal.dashboard.fashion',
+            $authorization->menuForRequest(
+                $portal,
+                '/operation-dashboard/fashion-operation-reports',
+            )?->permission_slug,
+        );
+        self::assertSame(
+            'portal.dashboard.general',
+            $authorization->menuForRequest(
+                $portal,
+                '/operation-dashboard/fashion-operation-reports',
+                ['project_code' => 'danbao-general'],
+            )?->permission_slug,
+        );
+        self::assertSame(
+            'portal.dashboard.fashion',
+            $authorization->menuForRequest(
+                $portal,
+                '/operation-dashboard/fashion-operation-reports',
+                ['project_code' => 'fuzhuang'],
+            )?->permission_slug,
+        );
+    }
 }
