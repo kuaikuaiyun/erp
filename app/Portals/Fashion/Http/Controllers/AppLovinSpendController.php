@@ -3,6 +3,7 @@
 namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppLovinAccountRiskNote;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -119,6 +120,31 @@ class AppLovinSpendController extends Controller
         return back()->with('success', '账户礼金图片已上传。');
     }
 
+    public function saveRiskNote(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $validated = $request->validate([
+            'account_key' => ['required', 'string', 'size:64'],
+            'risk_factors' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $account = $this->summarize($this->reportsFor($context['user'], false))
+            ->firstWhere('account_key', $validated['account_key']);
+        abort_unless($account, 403);
+        $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+        abort_if($number === '', 422, '账号编号为空，无法保存账户限额/风控等因素。');
+        $content = trim((string) ($validated['risk_factors'] ?? ''));
+        if ($content === '') {
+            AppLovinAccountRiskNote::query()->where('account_number', $number)->delete();
+        } else {
+            AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], [
+                'risk_factors' => $content, 'updated_by' => $context['user']->getKey(),
+            ]);
+        }
+
+        return back()->with('success', '账户限额/风控等因素已保存。');
+    }
+
     public function pendingCount(Request $request): JsonResponse
     {
         $context = $this->context($request);
@@ -212,9 +238,13 @@ class AppLovinSpendController extends Controller
     private function withScreenshots(Collection $accounts): Collection
     {
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
+        $numbers = $accounts->pluck('account_number')->map(fn ($number) => AppLovinAccountRiskNote::normalizeAccountNumber((string) $number))->filter()->unique();
+        $notes = AppLovinAccountRiskNote::query()->whereIn('account_number', $numbers)->pluck('risk_factors', 'account_number');
 
         return $accounts->map(fn (array $account): array => [
-            ...$account, 'uploaded_screenshot' => $screenshots->get($account['account_key']),
+            ...$account,
+            'uploaded_screenshot' => $screenshots->get($account['account_key']),
+            'risk_factors' => (string) ($notes->get(AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number'])) ?: ''),
         ]);
     }
 

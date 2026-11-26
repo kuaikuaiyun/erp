@@ -71,6 +71,7 @@ Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class
 Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, 'index'])->name('fashion.applovin-spends.index');
 Route::get('/fashion/applovin-spends/pending-count', [FashionAppLovinSpendController::class, 'pendingCount'])->name('fashion.applovin-spends.pending-count');
 Route::post('/fashion/applovin-spends/screenshot', [FashionAppLovinSpendController::class, 'uploadScreenshot'])->name('fashion.applovin-spends.screenshot.upload');
+Route::post('/fashion/applovin-spends/risk-note', [FashionAppLovinSpendController::class, 'saveRiskNote'])->name('fashion.applovin-spends.risk-note.save');
 Route::get('/fashion/applovin-spends/screenshots/{screenshot}', [FashionAppLovinSpendController::class, 'screenshot'])->whereNumber('screenshot')->name('fashion.applovin-spends.screenshot');
 Route::get('/fashion/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('fashion.applovin-account-statistics.index');
 Route::get('/fashion/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])->name('fashion.applovin-account-statistics.spend-band');
@@ -334,6 +335,8 @@ Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLov
     ->name('operation.applovin-spends.pending-count');
 Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])
     ->name('operation.applovin-spends.screenshot.upload');
+Route::post('/operation/daily-submissions/applovin-spends/risk-note', [AppLovinSpendController::class, 'saveRiskNote'])
+    ->name('operation.applovin-spends.risk-note.save');
 Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
 Route::get('/operation/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('operation.applovin-account-statistics.index');
