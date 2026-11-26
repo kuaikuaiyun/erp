@@ -1474,19 +1474,52 @@ class ProductRequestController extends Controller
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
             $selectedSystemSkus = $this->splitSkus((string) ($data['system_skus'] ?? ''));
+            $submittedLinkSkus = $this->splitSkus((string) ($data['link_skus'] ?? ''));
             // 面板左列可临时修正运营 SKU，仅用于本次勾选与链接级 SKU 处理；
             // 需求记录保留运营原始提交的 skus，采购确认值写入 procurement_skus，运营端据此提示 SKU 有变动
             // 右侧系统 SKU 是同一 1688 链接的历史主数据，当前检验只能追加，不能删除或覆盖。
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
             $systemSkuValueMap = $this->parseProcurementSkuValues((string) ($data['system_sku_value_rows'] ?? ''), $selectedSystemSkus);
             unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['system_skus'], $data['link_skus'], $data['sku_value_rows'], $data['system_sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
-            // 链接级 SKU 始终保留系统历史集合，并追加本次勾选的运营 SKU。
+
+            // 先锁定 PCL SKU 管理中的目标记录。除了标准化链接完全一致外，同一个 PCL 商品编号
+            // 也必须视为同一条主数据；链接参数或链接地址变化时，原有系统 SKU 仍然只增不减。
+            $pclNo = trim((string) ($data['pcl_product_no'] ?? $locked->pcl_product_no));
+            $linkSku = ProductRequestLinkSku::query()
+                ->where('supplier_url_hash', $linkHash)
+                ->lockForUpdate()
+                ->first();
+            if (!$linkSku && $pclNo !== '') {
+                $linkSku = ProductRequestLinkSku::query()
+                    ->where('pcl_product_no', $pclNo)
+                    ->orderByDesc('id')
+                    ->lockForUpdate()
+                    ->first();
+            }
+            $storedLinkSkus = $this->splitSkus((string) ($linkSku?->skus ?? ''));
+            $storedLinkSkuValues = collect((array) ($linkSku?->sku_values ?? []))
+                ->filter(fn (mixed $row, mixed $sku): bool => trim((string) $sku) !== '' && is_array($row))
+                ->mapWithKeys(fn (array $row, mixed $sku): array => [trim((string) $sku) => [
+                    'price' => (string) ($row['price'] ?? ''),
+                    'weight' => (string) ($row['weight'] ?? ''),
+                ]])
+                ->all();
+
+            // PCL SKU 管理中的历史 SKU 是主数据基线，取消勾选只影响当前提报记录，不能删除主数据；
+            // 本次勾选的运营 SKU 则追加到主数据中。
             $linkSkus = array_values(array_unique(array_merge(
+                $storedLinkSkus,
                 $this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())),
+                $submittedLinkSkus,
                 $selectedSystemSkus,
                 $checkedSkus,
             )));
-            $linkSkuValueMap = array_replace($skuValueMap, $systemSkuValueMap, $this->linkSkuValues($linkHash));
+            $linkSkuValueMap = array_replace(
+                $storedLinkSkuValues,
+                $this->linkSkuValues($linkHash),
+                $systemSkuValueMap,
+                $skuValueMap,
+            );
             // 当前记录必须完整保存本次勾选的运营 SKU 与系统 SKU；详情、仓库验收等后续流程
             // 均以 procurement_skus 为准，不能在同时勾选时遗漏系统 SKU。
             $recordSkus = array_values(array_unique(array_merge($checkedSkus, $selectedSystemSkus)));
@@ -1513,19 +1546,8 @@ class ProductRequestController extends Controller
                     $linkSkuPayload['product_image'] = $linkCover->path;
                 }
 
-                // 同一 PCL 商品编号只维护一条链接记录：先按链接找，找不到再按 PCL 找历史记录并更新，
-                // 避免同一产品因换了 1688 链接而重复新增记录
-                $pclNo = trim((string) ($linkSkuPayload['pcl_product_no'] ?? ''));
-                $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $linkHash)->first();
-                if (!$linkSku && $pclNo !== '') {
-                    $linkSku = ProductRequestLinkSku::query()
-                        ->where('pcl_product_no', $pclNo)
-                        ->orderByDesc('id')
-                        ->first();
-                }
-
                 if ($linkSku && (string) $linkSku->supplier_url_hash !== $linkHash) {
-                    // 命中同 PCL 的历史记录（不同链接）：直接覆盖为本次结果，旧链接 SKU 不再累计保留
+                    // 命中同 PCL 的历史记录（不同链接）：更新链接，但保留上方已合并的历史 SKU。
                     $linkSkuPayload['supplier_url_hash'] = $linkHash;
                 }
 
@@ -3015,12 +3037,26 @@ class ProductRequestController extends Controller
                 ->unique();
             // 系统 SKU 不作为 selected_skus[] 提交，保存时会由服务端自动保留。
             $supplierUrl = trim((string) $request->input('supplier_url', ''));
-            $systemSkus = $this->splitSkus((string) $request->input('system_skus', ''));
+            $systemSkus = array_values(array_unique(array_merge(
+                $this->splitSkus((string) $request->input('system_skus', '')),
+                $this->splitSkus((string) $request->input('link_skus', '')),
+            )));
             if ($supplierUrl !== '' && $productRequest) {
                 $supplierHash = $this->workflow->supplierUrlHash($this->workflow->normalizeSupplierUrl($supplierUrl));
                 $systemSkus = array_values(array_unique(array_merge(
                     $systemSkus,
                     $this->splitSkus($this->linkSkuSet($supplierHash, $productRequest->getKey())),
+                )));
+            }
+            $pclNo = trim((string) $request->input('pcl_product_no', ''));
+            if ($pclNo !== '') {
+                $pclSkus = ProductRequestLinkSku::query()
+                    ->where('pcl_product_no', $pclNo)
+                    ->orderByDesc('id')
+                    ->value('skus');
+                $systemSkus = array_values(array_unique(array_merge(
+                    $systemSkus,
+                    $this->splitSkus((string) $pclSkus),
                 )));
             }
             if ($checkedSkus->isEmpty() && $systemSkus === []) {
