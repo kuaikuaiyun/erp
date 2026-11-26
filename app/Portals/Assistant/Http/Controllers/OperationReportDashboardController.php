@@ -325,9 +325,12 @@ class OperationReportDashboardController extends Controller
                     ->map(fn ($media) => trim((string) $media) ?: '其他')
                     ->unique()
                     ->filter(function (string $media) use ($dateRows): bool {
-                        return (int) $dateRows
+                        $orderCount = (int) $dateRows
                             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
-                            ->sum('first_total_orders') > 0;
+                            ->sum('first_total_orders');
+
+                        return mb_strtolower($media) !== mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                            || $orderCount > 0;
                     })
                     ->values();
                 $dailySummary = [
@@ -801,7 +804,9 @@ class OperationReportDashboardController extends Controller
             foreach ($mediaRows as $items) {
                 $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
                 $mediaOrderCount = (int) $items->sum('first_total_orders');
-                if ($mediaName === '—' || $mediaOrderCount <= 0) {
+                if ($mediaName === '—'
+                    || (mb_strtolower($mediaName) === mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                        && $mediaOrderCount <= 0)) {
                     continue;
                 }
                 $mediaRevenue = (float) $items->sum('first_total_revenue');
@@ -887,7 +892,9 @@ class OperationReportDashboardController extends Controller
                     foreach ($domainMediaRows as $mediaItems) {
                         $mediaName = trim((string) ($mediaItems->first()['media_source'] ?? '')) ?: '其他';
                         $mediaOrderCount = (int) $mediaItems->sum('first_total_orders');
-                        if ($mediaName === '—' || $mediaOrderCount <= 0) {
+                        if ($mediaName === '—'
+                            || (mb_strtolower($mediaName) === mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                                && $mediaOrderCount <= 0)) {
                             continue;
                         }
                         $mediaRevenue = (float) $mediaItems->sum('first_total_revenue');
