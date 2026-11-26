@@ -1214,6 +1214,7 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewRequestFromPortal($productRequest, $context['user'], $context['portal']), 403);
 
         $productRequest->load(['attachments', 'placementReviews', 'logs']);
+        $this->normalizeProductRequestRichRemarkUrls($productRequest);
 
         $viewData = [
             ...$this->viewContext($context),
@@ -2435,7 +2436,7 @@ class ProductRequestController extends Controller
         );
 
         return response()->json([
-            'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),
+            'url' => route('product-requests.attachments.show', [$productRequest, $attachment], false),
         ]);
     }
 
@@ -2454,7 +2455,39 @@ class ProductRequestController extends Controller
         $html = preg_replace('/\son[a-z]+\s*=\s*[^\s>]+/i', '', $html) ?? $html;
         $html = preg_replace('/(<a\b[^>]*?)\shref\s*=\s*(["\']?)\s*javascript:[^"\'>]*\2/i', '$1', $html) ?? $html;
 
+        $html = $this->normalizeRichRemarkAttachmentUrls($html);
+
         return trim($html) !== '' ? trim($html) : null;
+    }
+
+    /**
+     * 审核备注会在采购、运营和仓库等不同子域名中展示。历史数据中的图片地址
+     * 可能写死为上传时的采购系统域名，导致其他子域名下的登录账号无法携带会话。
+     * 这里只将本系统受保护的附件地址转换为相对路径，外部图片地址保持不变。
+     */
+    private function normalizeRichRemarkAttachmentUrls(?string $html): ?string
+    {
+        if ($html === null || $html === '') {
+            return $html;
+        }
+
+        return preg_replace_callback(
+            '~(<img\b[^>]*\bsrc\s*=\s*)(["\'])(?:https?:)?//[^/"\']+(/product-requests/\d+/attachments/\d+(?:\?[^"\']*)?)\2~i',
+            static fn (array $matches): string => $matches[1].$matches[2].$matches[3].$matches[2],
+            $html,
+        ) ?? $html;
+    }
+
+    private function normalizeProductRequestRichRemarkUrls(ProductRequest $productRequest): void
+    {
+        foreach ($productRequest->placementReviews as $review) {
+            $review->setAttribute('remark', $this->normalizeRichRemarkAttachmentUrls($review->remark));
+        }
+
+        $productRequest->setAttribute(
+            'warehouse_remark',
+            $this->normalizeRichRemarkAttachmentUrls($productRequest->warehouse_remark),
+        );
     }
 
     /** 判断富文本备注是否为空内容（忽略空标签、换行与空白，含图片视为非空） */
@@ -2627,7 +2660,7 @@ class ProductRequestController extends Controller
         );
 
         return response()->json([
-            'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),
+            'url' => route('product-requests.attachments.show', [$productRequest, $attachment], false),
         ]);
     }
 
