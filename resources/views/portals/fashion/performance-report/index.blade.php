@@ -2,9 +2,16 @@
 
 @php
     $operationRoute = ($operationProject['route'] ?? 'fashion').'.performance-report';
+    $usesBaokuanPerformanceTemplate = in_array($operationProject['code'] ?? null, ['baokuan-general', 'danbao-general', 'fuzhuang', 'baokuan-fashion'], true);
 @endphp
-@section('page_title', '业绩报表')
+@section('page_title', $usesBaokuanPerformanceTemplate ? __('baokuan_general_performance_report.title') : '业绩报表')
 
+@if($usesBaokuanPerformanceTemplate)
+    @push('styles')
+        <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261125-1">
+        <link rel="stylesheet" href="{{ asset('css/baokuan-general-performance-report.css') }}?v=20261126-2">
+    @endpush
+@else
 @push('styles')
 <style>
 .performance-filter{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:16px 18px}.performance-filter .form-group{margin:0}.performance-filter label{display:block;margin-bottom:6px;color:#647d90;font-size:12px}.performance-filter .form-control{height:38px;min-width:150px;border:1px solid #d7e3ec;border-radius:6px}.performance-cards{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:12px;margin-bottom:16px}.performance-card{padding:16px 18px;background:#fff;border-radius:10px;border-left:4px solid #2d91c5;box-shadow:0 3px 14px rgba(32,76,105,.08)}.performance-card span{color:#718797;font-size:13px}.performance-card strong{display:block;margin-top:6px;color:#123f60;font-size:24px}.performance-box{border:0;border-radius:11px;overflow:hidden;box-shadow:0 4px 16px rgba(24,61,89,.08)}.performance-table{margin:0}.performance-table th{padding:11px 9px!important;text-align:center;white-space:nowrap;background:#d9eaf5!important;color:#214e6c}.performance-table td{padding:11px 9px!important;vertical-align:middle!important;border-color:#e1eaf0!important}.performance-table tbody tr:nth-child(odd) td{background:#f4f9fc}.performance-table tbody tr:nth-child(even) td{background:#fff8ef}.operator-name{font-weight:700;color:#1f587b}.store-name{font-weight:600;color:#245675}.store-domain{color:#7b8d9a;font-size:12px}.number{text-align:right;font-variant-numeric:tabular-nums}.empty{text-align:center;padding:45px!important;color:#8195a3}.pagination-wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;background:linear-gradient(180deg,#fbfdfe,#f3f8fb);border-top:1px solid #dce7ee}.pagination-info{display:flex;align-items:center;gap:8px;color:#6b8293;font-size:13px}.pagination-info strong{color:#235b7d;font-weight:700}.pagination-links{margin-left:auto}.pagination-wrap .pagination{display:flex;margin:0;gap:5px}.pagination-wrap .pagination>li>a,.pagination-wrap .pagination>li>span{min-width:36px;height:36px;padding:8px 11px;text-align:center;color:#39789e;background:#fff;border:1px solid #d5e3ec;border-radius:7px!important;box-shadow:0 2px 5px rgba(42,91,122,.06);transition:all .18s ease}.pagination-wrap .pagination>li>a:hover{color:#fff;background:#4b9aca;border-color:#4b9aca;transform:translateY(-1px);box-shadow:0 4px 9px rgba(45,145,197,.22)}.pagination-wrap .pagination>.active>span,.pagination-wrap .pagination>.active>span:hover{color:#fff;background:linear-gradient(135deg,#3495c8,#257cac);border-color:#2d89b9;box-shadow:0 4px 10px rgba(45,145,197,.28)}.pagination-wrap .pagination>.disabled>span{color:#adbdc8;background:#f4f7f9;border-color:#e2e9ee;box-shadow:none}@media(max-width:900px){.performance-cards{grid-template-columns:1fr 1fr}.pagination-wrap{align-items:flex-start;flex-direction:column}.pagination-links{width:100%;overflow-x:auto;margin-left:0;padding-bottom:3px}}
@@ -15,8 +22,12 @@
  .performance-cards{grid-template-columns:repeat(6,minmax(145px,1fr))}.performance-table{min-width:{{ $performanceFormula ? '2250px' : '1850px' }}}.performance-table td[rowspan]{vertical-align:middle!important}.department-badge{display:inline-block;padding:4px 8px;border-radius:12px;background:#e7f2f9;color:#28688f;white-space:nowrap}.media-metrics{display:grid;gap:5px;min-width:220px}.media-metric{display:grid;grid-template-columns:minmax(80px,1fr) auto;gap:9px;padding:5px 8px;border:1px solid #dce7ed;border-radius:5px;background:rgba(255,255,255,.65)}.total-roi{font-weight:700;color:#16805c}.performance-profit{font-weight:700}.performance-profit.is-negative{color:#c0392b}.performance-profit.is-positive{color:#16805c}.performance-note{padding:10px 14px;margin-bottom:14px;border-radius:7px;background:#fff7df;color:#765a17}@media(max-width:1100px){.performance-cards{grid-template-columns:repeat(2,1fr)}}
 </style>
 @endpush
+@endif
 
 @section('content')
+@if($usesBaokuanPerformanceTemplate)
+    @include('portals.fashion.performance-report.partials.baokuan-general')
+@else
 <section class="content-header"><h1>业绩报表 <small>按运营绑定店铺的原始付款时间统计已付款订单</small></h1></section>
 <section class="content">
     <div class="box performance-box"><form method="get" action="{{ route($operationRoute.'.index') }}" class="performance-filter">
@@ -85,7 +96,9 @@
     </div></div>
     <div class="modal fade performance-order-modal" id="performanceOrderModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title" id="performanceOrderTitle">订单明细</h4></div><div id="performanceOrderBody"><div class="order-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><br><br>正在加载订单...</div></div><div class="modal-footer"><button class="btn btn-default" data-dismiss="modal">关闭</button></div></div></div></div>
 </section>
+@endif
 @endsection
+@unless($usesBaokuanPerformanceTemplate)
 @push('scripts')
 <script>
 (function($){
@@ -98,3 +111,4 @@
 })(jQuery);
 </script>
 @endpush
+@endunless

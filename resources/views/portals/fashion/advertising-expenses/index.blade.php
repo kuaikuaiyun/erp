@@ -4,6 +4,7 @@
 
 @php
     $operationRoute = ($operationProject['route'] ?? 'fashion').'.advertising-expenses';
+    $usesBaokuanTemplate = in_array($operationProject['code'] ?? null, ['baokuan-general', 'danbao-general', 'fuzhuang', 'baokuan-fashion'], true);
     $editingAdvertisingRows = $editing?->adSpendEntries?->map(fn($item) => [
         'id' => $item->id, 'agency' => $item->agency, 'media' => $item->media, 'account_name' => $item->account_name,
         'account_number' => $item->account_number, 'assistant_domain_store_id' => $item->assistant_domain_store_id, 'store_domain' => $item->store_domain, 'book_spend_usd' => $item->book_spend_usd,
@@ -12,6 +13,7 @@
         'existing_screenshot' => $item->screenshot_path,
     ])->all();
     $advertisingRows = old('advertising', $editingAdvertisingRows ?: ($reusedAdvertisingRows ?: [['agency'=>'','media'=>'','account_name'=>'','account_number'=>'','book_spend_usd'=>'','settlement_coefficient'=>'','actual_spend_usd'=>'','misc_fee_rmb'=>'','remark'=>'']]));
+    $editingScreenshots = $usesBaokuanTemplate ? collect($editingAdvertisingRows)->whereNotNull('existing_screenshot')->keyBy('existing_screenshot') : collect();
 @endphp
 
 @push('styles')
@@ -25,27 +27,94 @@
 .fashion-misc-heading{display:flex;align-items:center;justify-content:center;gap:3px;min-width:120px}
 .fashion-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:15px 18px;background:#fff;border-top:1px solid #e1eaf0}.fashion-pagination-info{color:#778b9a;font-size:13px}.fashion-pagination-info strong{color:#244d69}.fashion-pagination-pages{display:flex;align-items:center;gap:6px;margin:0;padding:0;list-style:none}.fashion-pagination-pages a,.fashion-pagination-pages span{display:flex;align-items:center;justify-content:center;min-width:36px;height:36px;padding:0 11px;border:1px solid #d5e2eb;border-radius:7px;background:#fff;color:#3a6683;font-weight:600;line-height:1;text-decoration:none;transition:.15s}.fashion-pagination-pages a:hover{border-color:#3296c9;background:#edf8fd;color:#167daf;box-shadow:0 2px 7px rgba(38,126,173,.12)}.fashion-pagination-pages .is-current{border-color:#278fc5;background:#278fc5;color:#fff;box-shadow:0 3px 8px rgba(39,143,197,.24)}.fashion-pagination-pages .is-disabled{background:#f5f7f9;color:#b3bec6;cursor:not-allowed}.fashion-pagination-pages .is-ellipsis{min-width:24px;padding:0;border-color:transparent;background:transparent;color:#91a0aa}@media(max-width:600px){.fashion-pagination{justify-content:center}.fashion-pagination-info{width:100%;text-align:center}.fashion-pagination-pages a,.fashion-pagination-pages span{min-width:32px;height:32px;padding:0 8px}.fashion-page-text{display:none}}
 </style>
+@if($usesBaokuanTemplate)
+    <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261125-1">
+    <link rel="stylesheet" href="{{ asset('css/baokuan-general-advertising-expenses.css') }}?v=20261126-10">
+@endif
 @endpush
 
 @section('content')
 <section class="content-header"><h1>广告费填写 <small>填写广告账户消耗，营业额由系统自动统计</small></h1></section>
-<section class="content fashion-page">
-    @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
-    @if($errors->any())<div class="alert alert-danger"><i class="fa fa-warning"></i> {{ $errors->first() }}</div>@endif
+<section class="content fashion-page{{ $usesBaokuanTemplate ? ' baokuan-ad-expenses' : '' }}">
+    @if($usesBaokuanTemplate)
+        @if(session('success') || session('error'))
+            @push('scripts')
+                <script>
+                    window.ErpAdminNotifier?.notify({
+                        type: @json(session('error') ? 'error' : 'success'),
+                        message: @json(session('error') ?: session('success'))
+                    });
+                </script>
+            @endpush
+        @endif
+    @elseif(session('success'))
+        <div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>
+    @endif
+    @if(!$usesBaokuanTemplate && $errors->any())<div class="alert alert-danger"><i class="fa fa-warning"></i> {{ $errors->first() }}</div>@endif
 
+    @if($usesBaokuanTemplate)
+    <div class="modal fade baokuan-ad-modal" id="baokuan-ad-editor-modal" tabindex="-1" role="dialog" aria-labelledby="baokuan-ad-modal-title"
+        data-auto-open="{{ ($editing || request()->filled('reuse') || request()->boolean('fill') || $errors->any()) ? '1' : '0' }}"
+        data-account-labels="{{ json_encode(__('baokuan_general_advertising_expenses.account_fields'), JSON_UNESCAPED_UNICODE) }}"
+        data-shot-upload="{{ __('baokuan_general_advertising_expenses.upload_screenshot') }}"
+        data-shot-preview="{{ __('baokuan_general_advertising_expenses.preview_screenshot') }}"
+        data-shot-remove="{{ __('baokuan_general_advertising_expenses.remove_screenshot') }}">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content baokuan-ad-editor">
+                <header class="modal-header">
+                    <h2 id="baokuan-ad-modal-title">{{ __('baokuan_general_advertising_expenses.'.($editing ? 'edit_report' : 'fill_report')) }}</h2>
+                    <button type="button" class="flt-icon-close" data-dismiss="modal" aria-label="{{ __('frontend_list_template.close') }}">×</button>
+                </header>
+    @else
     <div class="box fashion-card">
         <div class="box-header with-border"><div class="fashion-form-head"><h3 class="box-title"><i class="fa fa-pencil-square-o"></i> {{ $editing ? '编辑日报' : '填写日报' }}</h3>@if($editing)<a class="btn btn-default btn-sm" href="{{ route($operationRoute.'.index') }}">取消编辑</a>@endif</div></div>
+    @endif
         <form id="fashion-report-form" method="post" enctype="multipart/form-data" action="{{ $editing ? route($operationRoute.'.update',$editing) : route($operationRoute.'.store') }}">
             @csrf @if($editing) @method('put') @endif
+            @if($usesBaokuanTemplate)
+                <div class="baokuan-ad-modal-body">
+                @if($errors->any())
+                    <div class="baokuan-ad-form-errors alert alert-danger" role="alert">
+                        {{ $errors->first() }}
+                        @if(old('advertising') || old('report_date'))<p>{{ __('baokuan_general_advertising_expenses.reselect_screenshot') }}</p>@endif
+                    </div>
+                @endif
+                <div class="baokuan-ad-toolbar" data-search-label="{{ __('frontend_list_template.search_options') }}" data-no-options="{{ __('frontend_list_template.no_options') }}">
+                    @if($isBoss)
+                        <div class="baokuan-ad-operator">
+                            <label for="fashion-operator">{{ __('baokuan_general_advertising_expenses.operator') }} <span class="text-red">*</span></label>
+                            <select class="form-control" id="fashion-operator" name="operator_user_id" data-url="{{ route($operationRoute.'.index') }}" required @disabled($editing)>
+                                @foreach($operatorOptions as $operator)
+                                    <option value="{{ $operator->id }}" @selected((int) $selectedOperator->id === (int) $operator->id)>{{ $operator->name ?: $operator->username }}（{{ $operator->username }}）</option>
+                                @endforeach
+                            </select>
+                            @if($editing)
+                                <input type="hidden" name="operator_user_id" value="{{ $editing->submitter_id }}">
+                                <p class="help-block">{{ __('baokuan_general_advertising_expenses.operator_locked') }}</p>
+                            @endif
+                        </div>
+                    @endif
+                    <div class="baokuan-ad-date">
+                        <label for="baokuan-ad-report-date">{{ __('baokuan_general_advertising_expenses.report_date') }} <span class="text-red">*</span></label>
+                        <input type="date" class="form-control" id="baokuan-ad-report-date" name="report_date" value="{{ old('report_date', $editing?->report_date?->format('Y-m-d') ?? now('Asia/Shanghai')->subDay()->format('Y-m-d')) }}" required>
+                    </div>
+                    <button class="flt-btn flt-primary" type="button" data-add-row="advertising"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('baokuan_general_advertising_expenses.add_account') }}</button>
+                </div>
+            @else
             <div class="box-body" style="padding:18px 20px 5px"><div style="display:flex;gap:14px;flex-wrap:wrap">@if($isBoss)<div class="form-group" style="min-width:300px"><label>提交运营账号 <span class="text-red">*</span></label><select class="form-control" id="fashion-operator" name="operator_user_id" data-url="{{route($operationRoute.'.index')}}" required @disabled($editing)>@foreach($operatorOptions as $operator)<option value="{{$operator->id}}" @selected((int)$selectedOperator->id===(int)$operator->id)>{{$operator->name?:$operator->username}}（{{$operator->username}}）</option>@endforeach</select>@if($editing)<input type="hidden" name="operator_user_id" value="{{$editing->submitter_id}}"><p class="help-block">编辑时保持原提交运营不变</p>@endif</div>@endif<div class="form-group" style="max-width:260px"><label>日期 <span class="text-red">*</span></label><input type="date" class="form-control" name="report_date" value="{{ old('report_date',$editing?->report_date?->format('Y-m-d') ?? now('Asia/Shanghai')->subDay()->format('Y-m-d')) }}" required></div></div></div>
 
             <div class="box-header with-border"><div class="fashion-form-head"><h3 class="box-title"><i class="fa fa-bullhorn"></i> 广告费用信息</h3><button class="btn btn-primary btn-sm" type="button" data-add-row="advertising"><i class="fa fa-plus"></i> 添加账户</button></div></div>
+            @endif
             <div class="fashion-table-wrap"><table class="table table-bordered fashion-table"><thead><tr><th>代理</th><th>媒体</th><th>账户编号</th><th>账户名称</th><th><span class="fashion-spend-heading"><span>广告消耗($)</span><span class="fashion-spend-tip">不扣赠金</span></span></th><th>结算系数</th><th>实际广告花费($)</th>@if($supportsMiscFeeRmb)<th><span class="fashion-misc-heading"><span>杂费（RMB）</span>@include('portals.fashion.partials.misc-fee-help-button')</span></th>@endif<th>广告花费截图</th><th>备注</th><th style="width:55px">操作</th></tr></thead><tbody id="advertising-rows">
             @foreach($advertisingRows as $index=>$row)
                 <tr><td><select class="form-control js-agency" name="advertising[{{ $index }}][agency]" required><option value="">请选择代理</option>@foreach($agencyOptions as $agency)<option value="{{ $agency }}" @selected(($row['agency']??'')===$agency)>{{ $agency }}</option>@endforeach @if(($row['agency']??'')!=='' && !in_array($row['agency'],$agencyOptions,true))<option value="{{ $row['agency'] }}" selected>{{ $row['agency'] }}（历史数据）</option>@endif</select></td><td><select class="form-control js-media" name="advertising[{{ $index }}][media]" required @disabled(empty($row['agency']))><option value="">{{ empty($row['agency']) ? '请先选择代理' : '请选择媒体' }}</option>@foreach(($agencyMediaOptions[$row['agency']??'']??[]) as $media)<option value="{{ $media }}" @selected(($row['media']??'')===$media)>{{ $media }}</option>@endforeach @if(($row['media']??'')!=='' && !in_array($row['media'],$agencyMediaOptions[$row['agency']??'']??[],true))<option selected value="{{ $row['media'] }}">{{ $row['media'] }}（历史数据）</option>@endif</select></td><td><input class="form-control field-number" inputmode="numeric" pattern="[0-9]+" title="账户编号只能填写数字" name="advertising[{{ $index }}][account_number]" value="{{ $row['account_number'] ?? '' }}" required></td><td><input class="form-control field-account" name="advertising[{{ $index }}][account_name]" value="{{ $row['account_name'] ?? '' }}" required></td><td><input type="number" step="0.01" min="0" class="form-control js-book-spend" name="advertising[{{ $index }}][book_spend_usd]" value="{{ $row['book_spend_usd'] ?? '' }}" required></td><td><input type="number" step="0.0001" min="0" class="form-control js-settlement-coefficient" name="advertising[{{ $index }}][settlement_coefficient]" value="{{ $row['settlement_coefficient'] ?? '' }}" readonly required></td><td><input type="number" step="0.01" min="0" class="form-control js-actual-spend" name="advertising[{{ $index }}][actual_spend_usd]" value="{{ $row['actual_spend_usd'] ?? '' }}" readonly required></td>@if($supportsMiscFeeRmb)<td><input type="number" step="0.01" min="0" class="form-control field-misc-rmb" name="advertising[{{ $index }}][misc_fee_rmb]" value="{{ $row['misc_fee_rmb'] ?? '' }}" placeholder="0.00"></td>@endif<td class="fashion-image-cell">
                     @php
-                        $existingUrl = !empty($row['existing_screenshot']) && !empty($row['id'])
-                            ? route($operationRoute.'.screenshot', ['type' => 'advertising', 'entry' => $row['id']])
+                        $removeScreenshot = $usesBaokuanTemplate && !empty($row['remove_screenshot']);
+                        $screenshotId = $usesBaokuanTemplate
+                            ? ($editingScreenshots->get($row['existing_screenshot'] ?? '')['id'] ?? null)
+                            : ($row['id'] ?? null);
+                        $existingUrl = !$removeScreenshot && !empty($row['existing_screenshot']) && $screenshotId
+                            ? route($operationRoute.'.screenshot', ['type' => 'advertising', 'entry' => $screenshotId])
                             : '';
                     @endphp
                     <span class="fashion-image-summary">
@@ -55,16 +124,25 @@
                     </span>
                     <input class="fashion-image-input" type="file" accept="image/jpeg,image/png,image/webp" name="advertising[{{ $index }}][screenshot]">
                     @if(!empty($row['existing_screenshot']))<input class="fashion-existing-screenshot" type="hidden" name="advertising[{{ $index }}][existing_screenshot]" value="{{ $row['existing_screenshot'] }}">@endif
-                    <input class="fashion-remove-screenshot" type="hidden" name="advertising[{{ $index }}][remove_screenshot]" value="0">
+                    <input class="fashion-remove-screenshot" type="hidden" name="advertising[{{ $index }}][remove_screenshot]" value="{{ $removeScreenshot ? 1 : 0 }}">
                     <button type="button" class="btn btn-info btn-xs fashion-image-open" data-existing-url="{{ $existingUrl }}"><i class="fa fa-picture-o"></i> {{ $existingUrl ? '更换截图' : '上传截图' }}</button>
                     @if($existingUrl)<button type="button" class="btn btn-danger btn-xs fashion-image-remove"><i class="fa fa-trash"></i> 删除旧图</button>@endif
                 </td><td><textarea class="form-control" rows="2" name="advertising[{{ $index }}][remark]">{{ $row['remark'] ?? '' }}</textarea></td><td><button class="btn btn-danger btn-xs" type="button" data-remove-row><i class="fa fa-trash"></i></button></td></tr>
             @endforeach
             </tbody></table></div>
 
-            <div class="fashion-actions"><button class="btn btn-success" type="submit"><i class="fa fa-save"></i> {{ $editing ? '保存修改' : '提交日报' }}</button></div>
+            @if($usesBaokuanTemplate)
+                </div>
+                <footer class="baokuan-ad-modal-footer">
+                    <button class="flt-btn" type="button" data-dismiss="modal">{{ __('frontend_list_template.cancel') }}</button>
+                    <button class="flt-btn flt-primary" type="submit">{{ $editing ? __('frontend_list_template.save') : __('baokuan_general_advertising_expenses.submit_report') }}</button>
+                </footer>
+            @else
+                <div class="fashion-actions"><button class="btn btn-success" type="submit"><i class="fa fa-save"></i> {{ $editing ? '保存修改' : '提交日报' }}</button></div>
+            @endif
         </form>
     </div>
+    @if($usesBaokuanTemplate)</div></div>@endif
 
     <div class="modal fade" id="fashion-image-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title">上传广告消耗截图</h4></div>
@@ -73,6 +151,9 @@
     </div></div></div>
     @if($supportsMiscFeeRmb)@include('portals.fashion.partials.misc-fee-help-modal')@endif
 
+    @if($usesBaokuanTemplate)
+        @include('portals.fashion.advertising-expenses.partials.baokuan-general-history')
+    @else
     <div class="box fashion-card">
         <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-history"></i> 填写记录</h3></div>
         <div class="box-body"><form method="get" class="fashion-filter"><div class="form-group"><label>开始日期</label><input type="date" name="from" value="{{ $filters['from'] }}" class="form-control"></div><div class="form-group"><label>结束日期</label><input type="date" name="to" value="{{ $filters['to'] }}" class="form-control"></div><button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route($operationRoute.'.index') }}">重置</a></form></div>
@@ -116,30 +197,75 @@
             </nav>
         @endif
     </div>
+    @endif
 </section>
 @endsection
 
 @push('scripts')
 <script src="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.full.min.js') }}"></script>
+@if($usesBaokuanTemplate)
+    <script src="{{ asset('js/baokuan-general-advertising-expenses.js') }}?v=20261126-8" defer></script>
+@endif
 <script>
 (function(){
 var adIndex={{ count($advertisingRows) }},supportsMiscFeeRmb=@json($supportsMiscFeeRmb),agencies=@json($agencyOptions),agencyMedia=@json($agencyMediaOptions),agencyRates=@json($agencyRateOptions),operatorStores=@json($operatorStores),savedAds=@json($advertisingRows),accountBindings=@json($appLovinStoreBindings),operator=document.getElementById('fashion-operator');
 var historyBindings=@json($reports->getCollection()->flatMap(fn($report) => $report->adSpendEntries)->map(fn($item) => ['media'=>$item->media,'domain'=>$item->store_domain])->values());document.querySelectorAll('.fashion-history-ad').forEach(function(card,index){var item=historyBindings[index];if(item&&String(item.media||'').toLowerCase()==='applovin'){var line=document.createElement('div');line.innerHTML='<span class="fashion-history-ad-label">绑定店铺：</span>'+esc(item.domain||'未绑定');card.appendChild(line)}});
-if(operator&&!operator.disabled)operator.addEventListener('change',function(){location.href=this.dataset.url+'?operator_user_id='+encodeURIComponent(this.value)});
+if(operator&&!operator.disabled)operator.addEventListener('change',function(){
+    if (operator.closest('.baokuan-ad-editor')) {
+        var url = new URL(this.dataset.url, location.href), params = new URLSearchParams(location.search);
+        ['from', 'to', 'page', 'per_page'].forEach(function(key){if(params.has(key))url.searchParams.set(key,params.get(key))});
+        params.forEach(function(value,key){if(/^submitter_ids\[\d*\]$/.test(key))url.searchParams.append(key,value)});
+        url.searchParams.set('operator_user_id',this.value);
+        url.searchParams.set('fill','1');
+        location.href=url.href;
+    } else {
+        location.href=this.dataset.url+'?operator_user_id='+encodeURIComponent(this.value);
+    }
+});
 function esc(v){var d=document.createElement('div');d.textContent=v==null?'':v;return d.innerHTML}
 function agencyOptions(){return '<option value="">请选择代理</option>'+agencies.map(function(a){return '<option value="'+esc(a)+'">'+esc(a)+'</option>'}).join('')}
 function mediaOptions(agency){return '<option value="">'+(agency?'请选择媒体':'请先选择代理')+'</option>'+((agencyMedia[agency]||[]).map(function(m){return '<option value="'+esc(m)+'">'+esc(m)+'</option>'}).join(''))}
 function storeOptions(selected){return '<option value="">请选择绑定店铺域名</option>'+operatorStores.map(function(s){return '<option value="'+s.id+'"'+(String(s.id)===String(selected||'')?' selected':'')+'>'+esc(s.domain)+(s.shop_name?'（'+esc(s.shop_name)+'）':'')+'</option>'}).join('')}
 function boundStore(row){var number=(row.querySelector('.field-number')||{}).value||'';return accountBindings[String(number).trim().toLowerCase()]||''}
-function syncStore(row,selected){var media=(row.querySelector('.js-media')||{}).value||'',cell=row.querySelector('.js-applovin-store');if(!cell){cell=document.createElement('td');cell.className='js-applovin-store';row.children[4].before(cell)}var input=row.querySelector('[name*="[account_name]"]'),match=input&&input.name.match(/^advertising\[([^\]]+)\]/),index=match?match[1]:Date.now(),binding=boundStore(row);selected=binding||selected;cell.innerHTML='<select class="form-control" name="advertising['+index+'][assistant_domain_store_id]">'+storeOptions(selected)+'</select>';var needed=media.toLowerCase()==='applovin',select=cell.querySelector('select');select.required=needed;select.disabled=!needed;if(needed&&window.jQuery&&jQuery.fn.select2)jQuery(select).select2({width:'220px',placeholder:'搜索店铺域名',allowClear:true})}
-var fashionHead=document.querySelector('.fashion-table thead tr');if(fashionHead){var th=document.createElement('th');th.textContent='绑定店铺域名（AppLovin）';fashionHead.children[4].before(th)}document.querySelectorAll('#advertising-rows>tr').forEach(function(row,i){row.setAttribute('data-store-ready','1');syncStore(row,savedAds[i]&&savedAds[i].assistant_domain_store_id);recalculate(row)});
+function syncStore(row,selected){var media=(row.querySelector('.js-media')||{}).value||'',cell=row.querySelector('.js-applovin-store');if(!cell){cell=document.createElement('td');cell.className='js-applovin-store';row.children[4].before(cell)}var input=row.querySelector('[name*="[account_name]"]'),match=input&&input.name.match(/^advertising\[([^\]]+)\]/),index=match?match[1]:Date.now(),binding=boundStore(row);selected=binding||selected;cell.innerHTML='<select class="form-control" name="advertising['+index+'][assistant_domain_store_id]">'+storeOptions(selected)+'</select>';var needed=media.toLowerCase()==='applovin',select=cell.querySelector('select');select.required=needed;select.disabled=!needed;if(needed&&!row.closest('.baokuan-ad-editor')&&window.jQuery&&jQuery.fn.select2)jQuery(select).select2({width:'220px',placeholder:'搜索店铺域名',allowClear:true})}
+var fashionHead=document.querySelector('.fashion-table thead tr');if(fashionHead){var th=document.createElement('th');th.textContent=fashionHead.closest('.baokuan-ad-editor') ? @json(__('baokuan_general_advertising_expenses.bound_store_heading')) : '绑定店铺域名（AppLovin）';fashionHead.children[4].before(th)}document.querySelectorAll('#advertising-rows>tr').forEach(function(row,i){row.setAttribute('data-store-ready','1');syncStore(row,savedAds[i]&&savedAds[i].assistant_domain_store_id);recalculate(row)});
 new MutationObserver(function(){document.querySelectorAll('#advertising-rows>tr:not([data-store-ready])').forEach(function(row){row.setAttribute('data-store-ready','1');syncStore(row,'')})}).observe(document.getElementById('advertising-rows'),{childList:true});
 document.addEventListener('change',function(e){if(e.target.matches('.js-media')){var row=e.target.closest('tr'),selected=row.querySelector('.js-applovin-store select');syncStore(row,selected?selected.value:'')}});
 function recalculate(row){var agency=row.querySelector('.js-agency').value||'',media=row.querySelector('.js-media').value||'',book=parseFloat(row.querySelector('.js-book-spend').value||0),rate=agencyRates[(agency+'|'+media).toLocaleLowerCase()]||0;row.querySelector('.js-settlement-coefficient').value=Number(rate).toFixed(4);row.querySelector('.js-actual-spend').value=(book+book*Number(rate)).toFixed(2)}
 function upload(name){var removeName=name.replace('[screenshot]','[remove_screenshot]');return '<span class="fashion-image-summary"></span><input class="fashion-image-input" type="file" accept="image/jpeg,image/png,image/webp" name="'+name+'"><input class="fashion-remove-screenshot" type="hidden" name="'+removeName+'" value="0"><button type="button" class="btn btn-info btn-xs fashion-image-open"><i class="fa fa-picture-o"></i> 上传截图</button>'}
 function advertisingRow(i){var misc=supportsMiscFeeRmb?'<td><input type="number" step="0.01" min="0" class="form-control field-misc-rmb" name="advertising['+i+'][misc_fee_rmb]" placeholder="0.00"></td>':'';return '<tr><td><select class="form-control js-agency" name="advertising['+i+'][agency]" required>'+agencyOptions()+'</select></td><td><select class="form-control js-media" name="advertising['+i+'][media]" required disabled>'+mediaOptions('')+'</select></td><td><input class="form-control field-number" inputmode="numeric" pattern="[0-9]+" title="账户编号只能填写数字" name="advertising['+i+'][account_number]" required></td><td><input class="form-control field-account" name="advertising['+i+'][account_name]" required></td><td><input type="number" step="0.01" min="0" class="form-control js-book-spend" name="advertising['+i+'][book_spend_usd]" required></td><td><input type="number" step="0.0001" min="0" class="form-control js-settlement-coefficient" name="advertising['+i+'][settlement_coefficient]" readonly required></td><td><input type="number" step="0.01" min="0" class="form-control js-actual-spend" name="advertising['+i+'][actual_spend_usd]" readonly required></td>'+misc+'<td class="fashion-image-cell">'+upload('advertising['+i+'][screenshot]')+'</td><td><textarea class="form-control" rows="2" name="advertising['+i+'][remark]"></textarea></td><td><button class="btn btn-danger btn-xs" type="button" data-remove-row><i class="fa fa-trash"></i></button></td></tr>'}
-document.addEventListener('click',function(e){var add=e.target.closest('[data-add-row]');if(add){document.getElementById('advertising-rows').insertAdjacentHTML('beforeend',advertisingRow(adIndex++));return}var removeShot=e.target.closest('.fashion-image-remove');if(removeShot){var cell=removeShot.closest('.fashion-image-cell'),existing=cell.querySelector('.fashion-existing-screenshot'),removeFlag=cell.querySelector('.fashion-remove-screenshot'),input=cell.querySelector('.fashion-image-input'),open=cell.querySelector('.fashion-image-open');if(existing)existing.value='';if(removeFlag)removeFlag.value='1';if(input)input.value='';cell.querySelector('.fashion-image-summary').innerHTML='';open.removeAttribute('data-existing-url');open.innerHTML='<i class="fa fa-picture-o"></i> 上传截图';removeShot.remove();return}var remove=e.target.closest('[data-remove-row]');if(remove){var body=remove.closest('tbody');if(body.children.length>1)remove.closest('tr').remove()}});
-document.addEventListener('change',function(e){if(e.target.matches('.js-agency')){var row=e.target.closest('tr'),select=row.querySelector('.js-media'),value=e.target.value;select.innerHTML=mediaOptions(value);select.disabled=!value;recalculate(row)}else if(e.target.matches('.js-media'))recalculate(e.target.closest('tr'))});
+document.addEventListener('click',function(e){
+    var add=e.target.closest('[data-add-row]');
+    if(add){document.getElementById('advertising-rows').insertAdjacentHTML('beforeend',advertisingRow(adIndex++));return}
+    var removeShot=e.target.closest('.fashion-image-remove');
+    if(removeShot){
+        var cell=removeShot.closest('.fashion-image-cell'),existing=cell.querySelector('.fashion-existing-screenshot'),removeFlag=cell.querySelector('.fashion-remove-screenshot'),input=cell.querySelector('.fashion-image-input'),open=cell.querySelector('.fashion-image-open');
+        if(existing)existing.value='';
+        if(removeFlag)removeFlag.value='1';
+        if(input)input.value='';
+        cell.querySelector('.fashion-image-summary').replaceChildren();
+        var oldUrl=open.getAttribute('data-existing-url');
+        open.removeAttribute('data-existing-url');
+        if(open.classList.contains('baokuan-ad-shot-open')){
+            if(oldUrl?.startsWith('blob:'))URL.revokeObjectURL(oldUrl);
+            open.focus();
+        }else{
+            open.innerHTML='<i class="fa fa-picture-o"></i> 上传截图';
+            removeShot.remove();
+        }
+        return;
+    }
+    var remove=e.target.closest('[data-remove-row]');
+    if(remove){
+        var body=remove.closest('tbody'),row=remove.closest('tr');
+        if(body.children.length>1){
+            var shot=row.querySelector('.baokuan-ad-shot-open')?.getAttribute('data-existing-url');
+            if(shot?.startsWith('blob:'))URL.revokeObjectURL(shot);
+            row.remove();
+        }
+    }
+});
+document.addEventListener('change',function(e){if(e.target.matches('.js-agency')){var row=e.target.closest('tr'),select=row.querySelector('.js-media'),value=e.target.value;select.innerHTML=mediaOptions(value);select.disabled=!value;if(row.closest('.baokuan-ad-editor')){var store=row.querySelector('.js-applovin-store select');if(store){store.required=false;store.disabled=true}}recalculate(row)}else if(e.target.matches('.js-media'))recalculate(e.target.closest('tr'))});
 document.addEventListener('input',function(e){if(e.target.matches('.js-book-spend'))recalculate(e.target.closest('tr'));if(e.target.matches('.field-number')){var row=e.target.closest('tr'),binding=boundStore(row),select=row.querySelector('.js-applovin-store select');if(binding&&select&&select.querySelector('option[value="'+binding+'"]')){select.value=String(binding);if(window.jQuery)jQuery(select).trigger('change.select2')}}});
 function configureAccountNumberInput(input){if(!input)return;input.setAttribute('inputmode','text');input.setAttribute('pattern','[0-9]+(-[0-9]+)*');input.setAttribute('title','账户编号只能填写数字和中横线，例如 460-046-8347')}
 document.querySelectorAll('.field-number,input[name*="[account_number]"]').forEach(configureAccountNumberInput);
@@ -147,6 +273,6 @@ document.addEventListener('focusin',function(e){if(e.target.matches('.field-numb
 var fashionActiveImageCell=null;
 document.addEventListener('click',function(e){var open=e.target.closest&&e.target.closest('.fashion-image-open');if(open)fashionActiveImageCell=open.closest('.fashion-image-cell');if(e.target.closest&&e.target.closest('#fashion-image-confirm')&&fashionActiveImageCell){var input=fashionActiveImageCell.querySelector('.fashion-image-input'),removeFlag=fashionActiveImageCell.querySelector('.fashion-remove-screenshot');if(input&&input.files&&input.files.length&&removeFlag)removeFlag.value='0'}});
 })();
-(function(){var modal=document.getElementById('fashion-image-modal'),zone=document.getElementById('fashion-upload-zone'),picker=document.getElementById('fashion-modal-file'),preview=document.getElementById('fashion-image-preview'),error=document.getElementById('fashion-upload-error'),confirm=document.getElementById('fashion-image-confirm'),targetInput=null,targetCell=null,pendingFile=null,pasteActive=false;if(!modal)return;function showError(message){error.textContent=message;error.style.display=message?'block':'none'}function previewUrl(url){preview.innerHTML=url?'<img src="'+url+'" alt="广告截图预览">':''}function useFile(file){showError('');if(!file||['image/jpeg','image/png','image/webp'].indexOf(file.type)<0){showError('仅支持 JPG、PNG、WEBP 图片。');return}if(file.size>5*1024*1024){showError('图片不能超过 5 MB。');return}pendingFile=file;previewUrl(URL.createObjectURL(file))}document.addEventListener('click',function(e){var open=e.target.closest&&e.target.closest('.fashion-image-open');if(open){targetCell=open.closest('.fashion-image-cell');targetInput=targetCell.querySelector('.fashion-image-input');pendingFile=null;pasteActive=true;showError('');previewUrl(open.getAttribute('data-existing-url')||'');jQuery(modal).modal('show');return}if(e.target.closest&&e.target.closest('#fashion-paste-btn')){e.preventDefault();pasteActive=true;zone.classList.add('is-paste-target');zone.focus()}});zone.addEventListener('click',function(e){if(e.target.closest('#fashion-paste-btn'))return;picker.click()});picker.addEventListener('change',function(){useFile(picker.files&&picker.files[0]);picker.value=''});zone.addEventListener('dragover',function(e){e.preventDefault();zone.classList.add('is-active')});zone.addEventListener('dragleave',function(){zone.classList.remove('is-active')});zone.addEventListener('drop',function(e){e.preventDefault();zone.classList.remove('is-active');useFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])});document.addEventListener('paste',function(e){if(!pasteActive||!jQuery(modal).hasClass('in'))return;var items=(e.clipboardData||window.clipboardData).items||[];for(var i=0;i<items.length;i++){if(items[i].kind==='file'){var file=items[i].getAsFile();if(file&&file.type.indexOf('image/')===0){e.preventDefault();useFile(file);zone.classList.remove('is-paste-target');break}}}});confirm.addEventListener('click',function(){if(!pendingFile){showError('请先选择、拖拽或粘贴一张图片。');return}try{var transfer=new DataTransfer();transfer.items.add(pendingFile);targetInput.files=transfer.files}catch(e){showError('当前浏览器不支持粘贴文件，请使用点击选择文件。');return}var url=URL.createObjectURL(pendingFile);targetCell.querySelector('.fashion-image-summary').innerHTML='<img class="fashion-image-thumb" src="'+url+'" alt="广告截图">';var button=targetCell.querySelector('.fashion-image-open');button.innerHTML='<i class="fa fa-picture-o"></i> 更换截图';button.setAttribute('data-existing-url',url);jQuery(modal).modal('hide')});jQuery(modal).on('hidden.bs.modal',function(){pasteActive=false;zone.classList.remove('is-active','is-paste-target');pendingFile=null;targetInput=null;targetCell=null;preview.innerHTML='';showError('')})})();
+(function(){var modal=document.getElementById('fashion-image-modal'),zone=document.getElementById('fashion-upload-zone'),picker=document.getElementById('fashion-modal-file'),preview=document.getElementById('fashion-image-preview'),error=document.getElementById('fashion-upload-error'),confirm=document.getElementById('fashion-image-confirm'),targetInput=null,targetCell=null,pendingFile=null,pasteActive=false;if(!modal)return;function showError(message){error.textContent=message;error.style.display=message?'block':'none'}function previewUrl(url){preview.innerHTML=url?'<img src="'+url+'" alt="广告截图预览">':''}function useFile(file){showError('');if(!file||['image/jpeg','image/png','image/webp'].indexOf(file.type)<0){showError('仅支持 JPG、PNG、WEBP 图片。');return}if(file.size>5*1024*1024){showError('图片不能超过 5 MB。');return}pendingFile=file;previewUrl(URL.createObjectURL(file))}document.addEventListener('click',function(e){var open=e.target.closest&&e.target.closest('.fashion-image-open');if(open){targetCell=open.closest('.fashion-image-cell');targetInput=targetCell.querySelector('.fashion-image-input');pendingFile=null;pasteActive=true;showError('');previewUrl(open.getAttribute('data-existing-url')||'');jQuery(modal).modal('show');return}if(e.target.closest&&e.target.closest('#fashion-paste-btn')){e.preventDefault();pasteActive=true;zone.classList.add('is-paste-target');zone.focus()}});zone.addEventListener('click',function(e){if(e.target.closest('#fashion-paste-btn'))return;picker.click()});picker.addEventListener('change',function(){useFile(picker.files&&picker.files[0]);picker.value=''});zone.addEventListener('dragover',function(e){e.preventDefault();zone.classList.add('is-active')});zone.addEventListener('dragleave',function(){zone.classList.remove('is-active')});zone.addEventListener('drop',function(e){e.preventDefault();zone.classList.remove('is-active');useFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])});document.addEventListener('paste',function(e){if(!pasteActive||!jQuery(modal).hasClass('in'))return;var items=(e.clipboardData||window.clipboardData).items||[];for(var i=0;i<items.length;i++){if(items[i].kind==='file'){var file=items[i].getAsFile();if(file&&file.type.indexOf('image/')===0){e.preventDefault();useFile(file);zone.classList.remove('is-paste-target');break}}}});confirm.addEventListener('click',function(){if(!pendingFile){showError('请先选择、拖拽或粘贴一张图片。');return}try{var transfer=new DataTransfer();transfer.items.add(pendingFile);targetInput.files=transfer.files}catch(e){showError('当前浏览器不支持粘贴文件，请使用点击选择文件。');return}var url=URL.createObjectURL(pendingFile);targetCell.querySelector('.fashion-image-summary').innerHTML='<img class="fashion-image-thumb" src="'+url+'" alt="广告截图">';var button=targetCell.querySelector('.fashion-image-open');if(button.classList.contains('baokuan-ad-shot-open')){var oldUrl=button.getAttribute('data-existing-url');if(oldUrl?.startsWith('blob:'))URL.revokeObjectURL(oldUrl)}else{button.innerHTML='<i class="fa fa-picture-o"></i> 更换截图'}button.setAttribute('data-existing-url',url);jQuery(modal).modal('hide')});jQuery(modal).on('hidden.bs.modal',function(){pasteActive=false;zone.classList.remove('is-active','is-paste-target');pendingFile=null;targetInput=null;targetCell=null;preview.innerHTML='';showError('')})})();
 </script>
 @endpush

@@ -1,6 +1,34 @@
 <?php
 
 return [
+    'baokuan_list' => [
+        'platform' => '平台',
+        'all_platforms' => '全部平台',
+        'department' => '运营部门',
+        'all_departments' => '全部部门',
+        'operator' => '运营人员',
+        'all_operators' => '全部运营',
+        'store' => '店铺名称／域名',
+        'store_name' => '店铺名称',
+        'keyword' => '输入店铺名称或域名搜索',
+        'expand_stores' => '展开店铺候选',
+        'no_match' => '没有匹配店铺，仍可直接按当前输入内容查询。',
+        'no_domain' => '未填写域名',
+        'no_department' => '未绑定部门',
+        'unnamed' => '未命名店铺',
+        'builder' => '建站系统',
+        'store_status' => '店铺状态',
+        'credential_status' => '配置状态',
+        'credential' => 'API 配置',
+        'guide' => '密钥填写教程',
+        'statuses' => [
+            'in_use' => '在用',
+            'abandoned' => '已弃用',
+            'stopped' => '已停用',
+        ],
+        'configured' => '已配置',
+        'unconfigured' => '未配置',
+    ],
     'credential_guide' => [
         'shopyy_nbc' => [
             'tab' => 'shopyy/nbc',

@@ -1,8 +1,10 @@
 @extends('portal.layout')
 @php
     $operationRoute = ($operationProject['route'] ?? 'fashion').'.stores';
+    $usesBaokuanStoreTemplate = in_array($operationProject['code'] ?? null, ['baokuan-general', 'danbao-general', 'fuzhuang', 'baokuan-fashion'], true);
+    $storeCopy = 'store_management.baokuan_list.';
 @endphp
-@section('page_title','店铺列表')
+@section('page_title', $usesBaokuanStoreTemplate ? __('store_management.page_title') : '店铺列表')
 @push('styles')
 <style>
 .fashion-store-box{border:0;border-radius:12px;box-shadow:0 5px 20px rgba(28,64,91,.09);overflow:hidden}.store-filter{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}.store-filter .form-group{margin:0}.store-filter label{display:block;color:#526f84;font-size:12px;font-weight:700;margin-bottom:6px}.store-filter .form-control,.store-filter .btn{height:38px;border-radius:7px}.store-filter .form-control{min-width:160px;border-color:#d3e1ea;box-shadow:none}.store-filter .store-search{min-width:245px}.fashion-store-table{min-width:1050px;margin:0}.fashion-store-table th{background:#e8f2f8;color:#2d536e;text-align:center;white-space:nowrap;font-size:13px}.fashion-store-table td{vertical-align:middle!important;padding:15px 12px!important}.store-name{font-weight:700;color:#174c70;font-size:14px}.store-domain{margin-top:3px;color:#6d879a;font-size:12px}.builder-label{display:inline-block;padding:5px 10px;border-radius:12px;background:#e7f2fb;color:#2677a8;font-weight:700}.builder-label.shopline{background:#e7f7ef;color:#14815c}.credential-state{display:inline-block;padding:5px 10px;border-radius:12px;background:#e4f5ec;color:#18764f;font-weight:700}.credential-state.missing{background:#f1f1f1;color:#7f898f}.credential-form{display:flex;align-items:flex-start;gap:8px}.credential-form .form-control{min-width:190px}.credential-form textarea.form-control{height:58px;resize:vertical}.credential-locked{padding:9px;text-align:center;border-radius:6px;background:#f3f8f5;color:#24734f}.guide-button{margin-left:7px;border:0;border-radius:12px;padding:3px 9px;background:#2f91c5;color:#fff;font-size:12px}.pagination-wrap{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 20px;border-top:1px solid #dce8ef;background:linear-gradient(180deg,#fbfdfe,#f2f7fa)}.pagination-info{display:flex;align-items:center;gap:7px;color:#708696;font-size:13px;white-space:nowrap}.pagination-info strong{color:#205b7d;font-size:14px}.pagination-links{margin-left:auto;overflow-x:auto;padding:3px}.pagination-wrap .pagination{display:flex;gap:6px;margin:0;white-space:nowrap}.pagination-wrap .pagination>li{display:block}.pagination-wrap .pagination>li>a,.pagination-wrap .pagination>li>span{min-width:36px;height:36px;padding:8px 11px;border:1px solid #d5e3ec;border-radius:8px!important;background:#fff;color:#44718d;text-align:center;line-height:18px;box-shadow:0 2px 5px rgba(35,76,101,.07);transition:all .18s ease}.pagination-wrap .pagination>li>a:hover{border-color:#3b99c8;background:#edf8fe;color:#177daf;transform:translateY(-1px);box-shadow:0 4px 9px rgba(44,139,187,.18)}.pagination-wrap .pagination>.active>span,.pagination-wrap .pagination>.active>span:hover{border-color:#2788b8;background:linear-gradient(135deg,#3aa0d1,#247dad);color:#fff;box-shadow:0 4px 10px rgba(37,137,189,.27)}.pagination-wrap .pagination>.disabled>span{border-color:#e3eaee;background:#f1f4f6;color:#a7b4bc;box-shadow:none}.credential-guide .modal-dialog{width:min(930px,94vw)}.credential-guide .modal-content{border:0;border-radius:12px;overflow:hidden}.guide-shot{display:flex;min-height:350px;border:1px solid #d5e0e7;border-radius:8px;overflow:hidden;background:#f6f8fc}.guide-side{width:140px;padding:20px 12px;background:#354066;color:#e2e9ff}.guide-side div{padding:9px}.guide-side .active{background:#4d5c8d;border-radius:5px;font-weight:700}.guide-main{flex:1;padding:25px 32px}.guide-tabs{display:flex;gap:27px;border-bottom:1px solid #e0e5ea;color:#54657b}.guide-tabs span{padding:10px 0}.guide-tabs .active{color:#315ff5;border-bottom:2px solid #315ff5}.guide-card{position:relative;margin-top:17px;background:#fff;border:1px solid #dfe5ea;border-radius:7px;padding:20px 24px}.guide-field{margin-top:20px}.guide-field label{display:block;margin-bottom:8px}.guide-input{height:34px;border:1px solid #cfd9e2;border-radius:5px;background:#f1f4f8;padding:8px 12px;color:#7a8898}.guide-arrow{position:absolute;right:17px;top:108px;color:#ef5350;font-size:25px}.guide-steps{margin:15px 0 0;padding-left:22px;line-height:1.9;color:#526b7b}.guide-note{margin-top:12px;padding:11px 13px;border-radius:6px;background:#fff7df;color:#775b1a}@media(max-width:700px){.guide-side{display:none}.guide-main{padding:16px}.pagination-wrap{align-items:flex-start;flex-direction:column}.pagination-links{width:100%;margin-left:0}.store-filter .form-group,.store-filter .form-control,.store-filter .store-search{width:100%;min-width:0}}
@@ -21,12 +23,67 @@
 .store-departments{display:flex;flex-wrap:wrap;gap:5px;min-width:150px}.store-department-label{display:inline-flex;align-items:center;max-width:220px;border:1px solid #cfe1ec;border-radius:12px;padding:4px 9px;background:#eef7fc;color:#286d94;font-size:12px;font-weight:700;line-height:1.2}.store-department-empty{color:#9aaab4;font-size:12px}
 .store-pagination{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 18px;border-top:1px solid #dbe7ee;background:linear-gradient(180deg,#fbfdff,#f1f7fa)}.store-pagination-summary{display:flex;align-items:center;gap:9px;color:#6b8192;font-size:13px;white-space:nowrap}.store-pagination-summary i{display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;border-radius:9px;background:#e2f1f9;color:#2783b4}.store-pagination-summary strong{color:#1e5b7f}.store-pagination-nav{display:flex;align-items:center;gap:5px}.store-page-link,.store-page-current,.store-page-disabled,.store-page-ellipsis{display:inline-flex;min-width:36px;height:36px;align-items:center;justify-content:center;padding:0 11px;border-radius:8px;font-size:13px}.store-page-link{border:1px solid #d2e1e9;background:#fff;color:#34799f;box-shadow:0 2px 6px rgba(34,82,112,.07);transition:all .18s ease}.store-page-link:hover,.store-page-link:focus{border-color:#3d94c4;background:#3d94c4;color:#fff;text-decoration:none;transform:translateY(-1px);box-shadow:0 5px 12px rgba(45,137,187,.22)}.store-page-current{border:1px solid #2c87b7;background:linear-gradient(135deg,#3b9bcb,#247aaa);color:#fff;font-weight:700;box-shadow:0 4px 10px rgba(43,135,183,.25)}.store-page-disabled{border:1px solid #e1e9ee;background:#f4f7f9;color:#a8b6c0}.store-page-ellipsis{min-width:24px;padding:0 3px;color:#8194a2}.store-page-direction{gap:6px;min-width:82px}@media(max-width:700px){.store-pagination{align-items:flex-start;flex-direction:column}.store-pagination-nav{width:100%;overflow-x:auto;padding-bottom:4px}.store-pagination-summary{white-space:normal}}
 </style>
+@if($usesBaokuanStoreTemplate)
+    <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261125-1">
+    <link rel="stylesheet" href="{{ asset('css/baokuan-general-stores.css') }}?v=20261126-1">
+@endif
 @endpush
 @section('content')
 <section class="content-header"><h1>店铺列表 <small>{{ ($operationProject['code'] ?? 'fuzhuang') === 'fuzhuang' ? '查看绑定的 XShoppy、Shopline 店铺业绩并配置 API 信息' : '数据来源：助理系统域名和店铺信息管理 · '.($operationProject['name'] ?? '') }}</small></h1></section>
-<section class="content">
+<section class="content{{ $usesBaokuanStoreTemplate ? ' flt baokuan-stores' : '' }}">
 @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
+@if($usesBaokuanStoreTemplate)
+    @php
+        $storeListQuery = array_filter($filters, static fn ($value) => $value !== null && $value !== '');
+        $platformFilterOptions = ['' => __($storeCopy.'all_platforms')] + $platformOptions->mapWithKeys(fn ($platform) => [
+            $platform => match($platform) {
+                'xshoppy' => 'XShoppy', 'shopline' => 'Shopline', 'shopyy' => 'ShopYY', default => strtoupper($platform),
+            },
+        ])->all();
+        $departmentFilterOptions = ['' => __($storeCopy.'all_departments')] + $departmentOptions->mapWithKeys(fn ($department) => [
+            $department->id => ($department->parent ? $department->parent->name.' / ' : '').$department->name,
+        ])->all();
+    @endphp
+    <form method="get" action="{{ route($operationRoute.'.index') }}" class="flt-card flt-filters" data-loading="region" data-loading-target="#baokuan-store-records">
+        <input type="hidden" name="per_page" value="{{ $stores->perPage() }}">
+        <div class="flt-filter-grid baokuan-store-filters">
+            @include('portals.fashion.partials.baokuan-general-single-picker', [
+                'name' => 'platform', 'label' => __($storeCopy.'platform'), 'options' => $platformFilterOptions,
+                'selected' => $filters['platform'] ?? '',
+            ])
+            @include('portals.fashion.partials.baokuan-general-single-picker', [
+                'name' => 'department_id', 'label' => __($storeCopy.'department'), 'options' => $departmentFilterOptions,
+                'selected' => $filters['department_id'] ?? '', 'searchable' => true,
+            ])
+            <div class="store-autocomplete">
+                <label class="flt-field-label" for="fashion-store-keyword">{{ __($storeCopy.'store_name') }}</label>
+                <input id="fashion-store-keyword" class="store-search" name="keyword" value="{{ $filters['keyword'] ?? '' }}" maxlength="191" autocomplete="off" placeholder="{{ __($storeCopy.'keyword') }}">
+                <button class="store-autocomplete-toggle" type="button" aria-label="{{ __($storeCopy.'expand_stores') }}"><i class="fa fa-angle-down" aria-hidden="true"></i></button>
+                <div class="store-autocomplete-menu" id="fashion-store-options" role="listbox">
+                    @foreach($storeOptions as $option)
+                        <button class="store-autocomplete-option" type="button" role="option" data-value="{{ $option->shop_name }}" data-search="{{ mb_strtolower($option->shop_name.' '.$option->domain) }}">
+                            <strong>{{ $option->shop_name }}</strong><small>{{ $option->domain ?: __($storeCopy.'no_domain') }}</small>
+                        </button>
+                    @endforeach
+                    <div class="store-autocomplete-empty" hidden>{{ __($storeCopy.'no_match') }}</div>
+                </div>
+            </div>
+            @if($user->isAdministrator())
+                @include('portals.fashion.partials.baokuan-general-single-picker', [
+                    'name' => 'operator_id', 'label' => __($storeCopy.'operator'),
+                    'options' => ['' => __($storeCopy.'all_operators')] + $operators->mapWithKeys(fn ($operator) => [$operator->id => $operator->name ?: $operator->username])->all(),
+                    'selected' => $filters['operator_id'] ?? '', 'searchable' => true,
+                    'keywords' => $operators->pluck('username', 'id')->all(),
+                ])
+            @endif
+        </div>
+        <div class="flt-filter-actions">
+            <button type="submit" class="flt-btn flt-primary"><i class="fa fa-search" aria-hidden="true"></i> {{ __('frontend_list_template.query') }}</button>
+            <a class="flt-btn" href="{{ route($operationRoute.'.index') }}">{{ __('frontend_list_template.reset') }}</a>
+        </div>
+    </form>
+@else
 <div class="box fashion-store-box"><div class="box-body"><form method="get" class="store-filter"><div class="filter-caption"><i class="fa fa-filter"></i>筛选条件 <small>按平台、店铺或运营人员快速定位</small></div>
  <div class="form-group"><label>平台</label><select class="form-control" name="platform"><option value="">全部平台</option>@foreach($platformOptions as $platform)<option value="{{ $platform }}" @selected(($filters['platform']??'')===$platform)>{{ $platform === 'xshoppy' ? 'XShoppy' : ($platform === 'shopline' ? 'Shopline' : strtoupper($platform)) }}</option>@endforeach</select></div>
  <div class="form-group"><label>运营部门</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{ $department->id }}" @selected((string)($filters['department_id']??'')===(string)$department->id)>{{ $department->parent ? $department->parent->name.' / ' : '' }}{{ $department->name }}</option>@endforeach</select></div>
@@ -35,8 +92,29 @@
  <div class="form-group"><label>每页</label><select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($filters['per_page']===$size)>{{ $size }}</option>@endforeach</select></div>
  <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route($operationRoute.'.index') }}">重置</a>
 </form></div></div>
+@endif
+@if($usesBaokuanStoreTemplate)
+    <div class="flt-card flt-records" id="baokuan-store-records">
+        <div class="flt-toolbar">
+            <div class="flt-selection">{{ __('frontend_list_template.records', ['count' => $stores->total()]) }}</div>
+            <div class="flt-toolbar-actions">
+                <button type="button" class="flt-btn" data-toggle="modal" data-target="#credentialGuideModal"><i class="fa fa-book" aria-hidden="true"></i> {{ __($storeCopy.'guide') }}</button>
+            </div>
+        </div>
+        <div class="flt-table-scroll baokuan-store-scroll{{ $stores->isEmpty() ? ' is-empty' : '' }}" tabindex="0" role="region" aria-label="{{ __('store_management.page_title') }}">
+@else
 <div class="box fashion-store-box"><div class="box-header with-border"><h3 class="box-title">绑定店铺 <small>共 {{ $stores->total() }} 个</small></h3><div class="box-tools pull-right"><button type="button" class="btn btn-default btn-sm tutorial-button" data-toggle="modal" data-target="#credentialGuideModal"><i class="fa fa-book"></i> 密钥填写教程</button></div></div><div class="table-responsive">
+@endif
+@if($usesBaokuanStoreTemplate)
+<table class="fashion-store-table baokuan-store-table">
+    <thead><tr>
+        @foreach(['store', 'builder', 'operator', 'department', 'store_status', 'credential_status', 'credential'] as $column)
+            <th scope="col" class="baokuan-store-col-{{ $column }}">{{ __($storeCopy.$column) }}</th>
+        @endforeach
+    </tr></thead><tbody>
+@else
 <table class="table table-bordered table-hover fashion-store-table"><thead><tr><th>店铺名称 / 域名</th><th>建站系统</th><th>运营人员</th><th>运营部门</th><th>店铺状态</th><th>配置状态</th><th style="min-width:460px">API 配置</th></tr></thead><tbody>
+@endif
 @forelse($stores as $store)
  @php
   $builder = mb_strtolower(trim((string) $store->site_builder));
@@ -55,9 +133,27 @@
   $storeOperator = $store->ownerUser ?: $operatorLookup->get(mb_strtolower(trim((string) $store->user_name)));
   $storeDepartments = $storeOperator?->departments ?? collect();
  @endphp
+@if($usesBaokuanStoreTemplate)
+ <tr><td class="flt-name"><strong>{{ $store->shop_name ?: __($storeCopy.'unnamed') }}</strong><small>{{ $store->domain ?: '—' }}</small></td>
+ <td>{{ $builderLabel }}</td><td>{{ $store->user_name ?: $storeOperator?->name ?: $storeOperator?->username ?: '—' }}</td>
+ <td><div class="baokuan-store-departments">@forelse($storeDepartments as $department)<span>{{ $department->name }}</span>@empty<small>{{ __($storeCopy.'no_department') }}</small>@endforelse</div></td>
+ <td>
+     @if(in_array($store->shop_status, ['in_use', 'abandoned', 'stopped'], true))
+         <span class="flt-status" data-status="{{ $store->shop_status === 'in_use' ? 'active' : 'disabled' }}">{{ __($storeCopy.'statuses.'.$store->shop_status) }}</span>
+     @else
+         —
+     @endif
+ </td>
+ <td>
+     @if($supportsCredentials)<span class="flt-status" data-status="{{ $configured ? 'active' : 'pending' }}">{{ __($storeCopy.($configured ? 'configured' : 'unconfigured')) }}</span>
+     @else—@endif
+ </td>
+ <td class="api-config-cell">
+@else
  <tr><td><div class="store-name">{{ $store->shop_name?:'未命名店铺' }}</div><div class="store-domain">{{ $store->domain?:'—' }}</div></td>
  <td class="text-center"><span class="builder-label {{ $isShopline?'shopline':'' }}">{{ $builderLabel }}</span></td><td>{{ $store->user_name?:$storeOperator?->name?:$storeOperator?->username?:'—' }}</td><td><div class="store-departments">@forelse($storeDepartments as $department)<span class="store-department-label">{{ $department->name }}</span>@empty<span class="store-department-empty">未绑定部门</span>@endforelse</div></td><td>{{ $store->shop_status==='in_use'?'在用':($store->shop_status==='abandoned'?'已弃用':($store->shop_status==='stopped'?'已停用':'—')) }}</td>
  <td>@if($supportsCredentials)<span class="credential-state {{ $configured?'':'missing' }}">{{ $configured?'已配置':'未配置' }}</span>@else<span class="text-muted">—</span>@endif</td><td class="api-config-cell">
+@endif
  @if(!$supportsCredentials)
   <span class="text-muted">该建站系统无需在此配置 API 信息</span>
  @elseif($configured)
@@ -76,8 +172,39 @@
  @elseif($isNbcFamily)<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>{{ $builderLabel }} API Token</label><textarea class="form-control input-sm" name="{{ $nbcFamilyField }}" required autocomplete="new-password" placeholder="粘贴 {{ $builderLabel }} API Token"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 {{ $builderLabel }} 店铺的 API Token？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
  @else<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="password" name="xshoppy_api_key" required autocomplete="new-password" placeholder="填写 API 密钥"></div><div class="credential-field"><label>密码</label><input class="form-control input-sm" type="password" name="xshoppy_password" required autocomplete="new-password" placeholder="填写密码"></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>@endif
  </td></tr>
-@empty<tr><td colspan="7" class="text-center text-muted" style="padding:45px">暂无符合筛选条件的店铺</td></tr>@endforelse
-</tbody></table></div>
+@empty
+    @unless($usesBaokuanStoreTemplate)<tr><td colspan="7" class="text-center text-muted" style="padding:45px">暂无符合筛选条件的店铺</td></tr>@endunless
+@endforelse
+</tbody></table>
+@if($usesBaokuanStoreTemplate && $stores->isEmpty())
+    <div class="flt-empty"><i class="fa fa-search" aria-hidden="true"></i><h4>{{ __('frontend_list_template.empty_title') }}</h4><p>{{ __('frontend_list_template.empty_hint') }}</p></div>
+@endif
+</div>
+@if($usesBaokuanStoreTemplate)
+    <nav class="flt-pagination baokuan-store-pagination" aria-label="{{ __('frontend_list_template.pagination') }}">
+        <form method="get" action="{{ route($operationRoute.'.index') }}" data-loading="region" data-loading-target="#baokuan-store-records">
+            @foreach(array_diff_key($storeListQuery, ['per_page' => true]) as $key => $value)<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endforeach
+            <label>{{ __('frontend_list_template.per_page') }}
+                <select name="per_page" data-baokuan-list-page-size aria-label="{{ __('frontend_list_template.page_size') }}">
+                    @foreach([20, 50, 100] as $size)<option value="{{ $size }}" @selected($stores->perPage() === $size)>{{ $size }}</option>@endforeach
+                </select>
+            </label>
+        </form>
+        @if($stores->onFirstPage())<button type="button" class="flt-btn" disabled>{{ __('frontend_list_template.previous') }}</button>
+        @else<a class="flt-btn" href="{{ $stores->previousPageUrl() }}" rel="prev">{{ __('frontend_list_template.previous') }}</a>@endif
+        <strong>{{ __('frontend_list_template.page_label', ['page' => $stores->currentPage(), 'pages' => $stores->lastPage()]) }}</strong>
+        @if($stores->hasMorePages())<a class="flt-btn" href="{{ $stores->nextPageUrl() }}" rel="next">{{ __('frontend_list_template.next') }}</a>
+        @else<button type="button" class="flt-btn" disabled>{{ __('frontend_list_template.next') }}</button>@endif
+        <form method="get" action="{{ route($operationRoute.'.index') }}" class="baokuan-store-jump" data-loading="region" data-loading-target="#baokuan-store-records">
+            @foreach($storeListQuery as $key => $value)<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endforeach
+            <label>{{ __('frontend_list_template.jump_to') }}
+                <input type="number" name="{{ $stores->getPageName() }}" min="1" max="{{ $stores->lastPage() }}" step="1" required placeholder="{{ __('frontend_list_template.page_placeholder') }}">
+            </label>
+            <button type="submit" class="flt-btn flt-primary">{{ __('frontend_list_template.jump') }}</button>
+        </form>
+    </nav>
+</div>
+@else
 <div class="store-pagination">
  <div class="store-pagination-summary"><i class="fa fa-list-ul"></i><span>显示 <strong>{{ $stores->firstItem() ?: 0 }}–{{ $stores->lastItem() ?: 0 }}</strong> 个，共 <strong>{{ $stores->total() }}</strong> 个店铺　·　第 <strong>{{ $stores->currentPage() }}</strong> / {{ $stores->lastPage() }} 页</span></div>
  @if($stores->hasPages())
@@ -91,6 +218,7 @@
   </nav>
  @endif
 </div></div>
+@endif
 
 <div class="modal fade credential-guide" id="shoplineGuide" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">Shopline 后台 API 访问令牌获取示例</h4></div><div class="modal-body"><div class="guide-shot"><div class="guide-side"><div>应用列表</div><div class="active">已安装应用</div><div>应用设置</div></div><div class="guide-main"><h4>Shopline 应用后台</h4><div class="guide-tabs"><span>权限配置</span><span class="active">API凭据</span><span>应用设置</span><span>操作记录</span></div><div class="guide-card"><b>后台 API 访问令牌（3年有效期）</b><div class="guide-field"><label>使用您的访问令牌从后台API请求数据</label><div class="guide-input">••••••••••••••••••••••••••••</div></div><i class="fa fa-long-arrow-right guide-arrow"></i></div></div></div><ol class="guide-steps"><li>登录 Shopline 后台，进入已安装的应用。</li><li>打开对应应用，点击顶部“API凭据”。</li><li>在“后台 API 访问令牌”区域点击“复制”，粘贴到本系统。</li></ol><div class="guide-note"><i class="fa fa-shield"></i> 令牌属于敏感信息，配置成功后本系统不再允许修改或展示明文。</div></div><div class="modal-footer"><button class="btn btn-primary" data-dismiss="modal">我知道了</button></div></div></div></div>
 <div class="modal fade credential-guide" id="xshoppyGuide" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><button class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">XShoppy API 密钥 / 密码获取示例</h4></div><div class="modal-body"><div class="guide-card"><b>XShoppy 后台 · 设置 · API接口</b><div class="guide-field"><label>API密钥</label><div class="guide-input">xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</div></div><div class="guide-field"><label>密码</label><div class="guide-input">••••••••••••••••</div></div></div><ol class="guide-steps"><li>进入 XShoppy 后台“设置”。</li><li>找到“API接口”，复制“API密钥”和“密码”。</li><li>共享密钥无需填写。</li></ol></div><div class="modal-footer"><button class="btn btn-primary" data-dismiss="modal">我知道了</button></div></div></div></div>
@@ -99,6 +227,9 @@
 </section>
 @endsection
 @push('scripts')
+@if($usesBaokuanStoreTemplate)
+    <script src="{{ asset('js/baokuan-general-list-controls.js') }}?v=20261126-1" defer></script>
+@endif
 <script>
 (function(){
     var previewModal=$('#credentialImagePreviewModal'),previewImage=document.getElementById('credentialImagePreview'),previewTitle=document.getElementById('credentialImagePreviewTitle');

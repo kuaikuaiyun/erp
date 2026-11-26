@@ -1,0 +1,157 @@
+.baokuan-stores .baokuan-store-filters {
+    grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+    gap: 14px;
+}
+
+.baokuan-stores :is(.baokuan-list-picker-field, .store-autocomplete) { min-width: 0; }
+.baokuan-stores .baokuan-store-filters :is(summary, .store-search) { height: 40px; }
+.baokuan-stores .flt-filter-actions .flt-btn { height: 40px; }
+.baokuan-stores .store-autocomplete .flt-field-label { margin-bottom: 8px; }
+.baokuan-stores .store-autocomplete .store-search { padding-right: 36px; }
+.baokuan-stores .store-autocomplete-toggle { height: 38px; }
+
+.baokuan-stores .store-autocomplete-menu {
+    border: 1px solid #d5e3ed;
+    border-radius: 7px;
+    box-shadow: 0 8px 30px #284d6829;
+    padding: 6px;
+}
+
+.baokuan-stores .store-autocomplete-option {
+    border: 0;
+    border-radius: 4px;
+}
+
+.baokuan-stores .store-autocomplete-option:is(:hover, .is-active) {
+    background: #eaf5fd;
+    color: #1779b1;
+}
+
+.baokuan-stores.flt .baokuan-store-table {
+    width: 100%;
+    min-width: 1220px;
+}
+
+.baokuan-stores.flt .baokuan-store-table thead th {
+    width: auto;
+    height: auto;
+    background: #f8fafc !important;
+    color: #577184 !important;
+    font-size: 12px;
+    padding: 14px 10px;
+}
+
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-store { width: 190px; }
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-department { width: 150px; }
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-builder { width: 100px; }
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-store_status,
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-credential_status { width: 96px; }
+.baokuan-stores.flt .baokuan-store-table thead .baokuan-store-col-credential { width: 470px; }
+
+.baokuan-stores .baokuan-store-scroll tbody tr:hover { box-shadow: none; }
+.baokuan-stores .baokuan-store-scroll thead th:last-child,
+.baokuan-stores .baokuan-store-scroll tbody td:last-child {
+    right: auto;
+    box-shadow: none;
+    border-left: 0;
+    white-space: normal;
+}
+
+.baokuan-stores .baokuan-store-scroll tbody td:last-child {
+    position: static;
+    background: transparent;
+}
+
+.baokuan-stores .baokuan-store-scroll.is-empty table { display: none; }
+.baokuan-store-departments { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+.baokuan-store-departments span { padding: 3px 7px; border-radius: 5px; background: #edf6fc; color: #41677f; }
+.baokuan-store-departments small { color: #627d8f; }
+
+.baokuan-stores .api-config-cell .credential-form,
+.baokuan-stores .api-config-cell .credential-locked.credentials-visible {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    background: #f8fafc;
+}
+
+.baokuan-stores .api-config-cell .credential-field { min-width: 0; text-align: left; }
+.baokuan-stores .api-config-cell .credential-field label {
+    margin-bottom: 6px;
+    color: #426176;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.baokuan-stores .api-config-cell .form-control {
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    padding: 7px 8px;
+    border: 1px solid #ccdae6;
+    border-radius: 5px;
+    color: #24455b;
+    font-size: 12px;
+}
+
+.baokuan-stores .api-config-cell textarea.form-control {
+    height: 48px;
+    resize: vertical;
+}
+
+.baokuan-stores .api-config-cell .credential-save {
+    min-height: 36px;
+    border-color: #2188be;
+    border-radius: 5px;
+    background: #2188be;
+}
+
+.baokuan-stores .api-config-cell .credential-save:hover { background: #1778ad; }
+.baokuan-stores .baokuan-store-pagination form:not(.baokuan-store-jump) {
+    flex-basis: auto;
+    margin-top: 0;
+}
+
+.baokuan-stores :is(.credential-guide, .credential-image-preview) .modal-content {
+    overflow: hidden;
+    border: 1px solid #d4e3ef;
+    border-radius: 12px;
+    color: #24455b;
+    box-shadow: 0 22px 90px #17364c40;
+}
+
+.baokuan-stores :is(.credential-guide, .credential-image-preview) .modal-header {
+    padding: 12px 24px;
+    background: #f6faff;
+    border-bottom: 1px solid #e5edf5;
+}
+
+.baokuan-stores :is(.credential-guide, .credential-image-preview) .modal-title {
+    color: #24455b;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.baokuan-stores :is(.credential-guide, .credential-image-preview) .modal-header .close {
+    color: #8b9dad;
+    font-size: 26px;
+    font-weight: 400;
+    opacity: 1;
+    text-shadow: none;
+}
+
+.baokuan-stores :is(.credential-guide, .credential-image-preview) .modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid #e8eff5;
+    background: #fbfdff;
+}
+
+@media (max-width: 600px) {
+    .baokuan-stores .baokuan-store-filters { grid-template-columns: minmax(0, 1fr); }
+    .baokuan-stores .baokuan-store-scroll :is(th:first-child, td:first-child) {
+        left: auto;
+        box-shadow: none;
+    }
+}

@@ -50,6 +50,36 @@ class AdvertisingExpenseController extends Controller
         if (! $isBoss) {
             $query->where('submitter_id', $user->getKey());
         }
+        $canFilterSubmitters = $this->project['code'] === 'baokuan-general' && $isBoss && (int) $user->getKey() === 1;
+        $submitterOptions = collect();
+        $submitterIds = [];
+        if ($canFilterSubmitters) {
+            $historySubmitters = (clone $query)->toBase()
+                ->where('submitter_id', '>', 0)
+                ->selectRaw('submitter_id, MAX(submitter_name) AS submitter_name')
+                ->groupBy('submitter_id')->pluck('submitter_name', 'submitter_id');
+            $activeSubmitters = $operatorOptions->mapWithKeys(fn (AdminUser $operator): array => [
+                $operator->getKey() => ($operator->name ?: $operator->username).'（'.$operator->username.'）',
+            ]);
+            $submitterOptions = $activeSubmitters->union($historySubmitters)->sort(SORT_NATURAL | SORT_FLAG_CASE);
+
+            $requestedIds = $request->query('submitter_ids', []);
+            if (is_array($requestedIds)) {
+                foreach ($requestedIds as $id) {
+                    if (!is_string($id) && !is_int($id)) {
+                        continue;
+                    }
+                    $id = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($id !== false && $submitterOptions->has($id)) {
+                        $submitterIds[$id] = $id;
+                    }
+                }
+            }
+            $submitterIds = array_values($submitterIds);
+            if ($submitterIds) {
+                $query->whereIn('submitter_id', $submitterIds);
+            }
+        }
         if ($from) {
             $query->whereDate('report_date', '>=', $from);
         }
@@ -57,11 +87,20 @@ class AdvertisingExpenseController extends Controller
             $query->whereDate('report_date', '<=', $to);
         }
 
-        $reports = $query->orderByDesc('report_date')->orderByDesc('id')->paginate(20)->withQueryString();
+        $perPage = 20;
+        if ($this->project['code'] === 'baokuan-general') {
+            $requestedSize = $request->query('per_page');
+            $perPage = in_array($requestedSize, ['20', '50', '100'], true) ? (int) $requestedSize : 50;
+        }
+
+        $reports = $query->orderByDesc('report_date')->orderByDesc('id')->paginate($perPage)->withQueryString();
         $editing = null;
         if ($request->filled('edit')) {
             $editing = FashionAdvertisingReport::query()->where('project_code', $this->project['code'])->with(['performanceEntries', 'adSpendEntries'])->findOrFail((int) $request->input('edit'));
             $this->authorizeReport($user, $editing);
+            if ($this->isApprovedBaokuanReport($editing)) {
+                return $this->approvedBaokuanReportRedirect();
+            }
             if ($isBoss && ! $operatorOptions->contains('id', (int) $editing->submitter_id)) {
                 $editingOperator = AdminUser::query()->find((int) $editing->submitter_id);
                 if ($editingOperator) {
@@ -116,6 +155,9 @@ class AdvertisingExpenseController extends Controller
                 ])->values()->all()
                 : [],
             'filters' => ['from' => $from ?? '', 'to' => $to ?? ''],
+            'canFilterSubmitters' => $canFilterSubmitters,
+            'submitterOptions' => $submitterOptions,
+            'submitterIds' => $submitterIds,
             'agencyOptions' => $advertisingOptions['agencies'],
             'agencyMediaOptions' => $advertisingOptions['agency_media'],
             'agencyRateOptions' => $advertisingOptions['agency_rates'],
@@ -160,6 +202,9 @@ class AdvertisingExpenseController extends Controller
             abort(403);
         }
         $this->authorizeReport($context['user'], $report);
+        if ($this->isApprovedBaokuanReport($report)) {
+            return $this->approvedBaokuanReportRedirect();
+        }
         abort_unless(in_array($report->status, [
             FashionAdvertisingReport::STATUS_PENDING,
             FashionAdvertisingReport::STATUS_APPROVED,
@@ -406,6 +451,17 @@ class AdvertisingExpenseController extends Controller
         $context['operationProject'] = $this->project;
 
         return $context;
+    }
+
+    private function isApprovedBaokuanReport(FashionAdvertisingReport $report): bool
+    {
+        return $this->project['code'] === 'baokuan-general' && $report->status === FashionAdvertisingReport::STATUS_APPROVED;
+    }
+
+    private function approvedBaokuanReportRedirect(): RedirectResponse
+    {
+        return redirect()->route(OperationProjectCatalog::route($this->project, 'advertising-expenses.index'))
+            ->with('error', __('baokuan_general_advertising_expenses.approved_locked'));
     }
 
     private function authorizeReport($user, FashionAdvertisingReport $report): void
