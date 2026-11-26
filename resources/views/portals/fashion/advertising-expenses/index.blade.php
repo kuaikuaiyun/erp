@@ -29,7 +29,7 @@
 </style>
 @if($usesBaokuanTemplate)
     <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261125-1">
-    <link rel="stylesheet" href="{{ asset('css/baokuan-general-advertising-expenses.css') }}?v=20261126-10">
+    <link rel="stylesheet" href="{{ asset('css/baokuan-general-advertising-expenses.css') }}?v=20261126-11">
 @endif
 @endpush
 

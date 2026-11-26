@@ -138,7 +138,7 @@
                                         </td>
                                         <td class="baokuan-ad-account-number">{{ $item->account_number ?: '—' }}</td>
                                         <td class="baokuan-ad-money">${{ number_format($item->book_spend_usd, 2) }}</td>
-                                        <td class="baokuan-ad-money">{{ number_format($item->settlement_coefficient, 4) }}</td>
+                                        <td class="baokuan-ad-coefficient">{{ number_format($item->settlement_coefficient, 4) }}</td>
                                         <td class="baokuan-ad-money baokuan-ad-amount">${{ number_format($item->actual_spend_usd, 2) }}</td>
                                         @if($supportsMiscFeeRmb)
                                             <td class="baokuan-ad-money">¥{{ number_format((float) $item->misc_fee_rmb, 2) }}</td>

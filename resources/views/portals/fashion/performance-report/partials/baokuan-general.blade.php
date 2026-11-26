@@ -142,7 +142,7 @@
                                     @if($loop->first)
                                         <td rowspan="{{ $group->count() }}" class="bg-performance-media">
                                             @forelse($row->media_metrics as $medium)
-                                                <div><span>{{ $medium['name'] }}</span><span>{{ $money($medium['spend']) }}</span></div>
+                                                <div><span>{{ $medium['name'] }}</span><span class="bg-performance-money">{{ $money($medium['spend']) }}</span></div>
                                             @empty
                                                 <small>{{ __($copy.'no_advertising') }}</small>
                                             @endforelse

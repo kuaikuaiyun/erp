@@ -99,6 +99,11 @@
     font-variant-numeric: tabular-nums;
 }
 
+.bg-performance .bg-performance-table .bg-performance-money {
+    font-size: calc(1em + 1px);
+    font-weight: 600;
+}
+
 .bg-performance .bg-performance-media { text-align: left; }
 .bg-performance-media div { display: flex; justify-content: space-between; gap: 6px; }
 .bg-performance-media div + div { margin-top: 4px; }

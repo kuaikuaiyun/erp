@@ -515,16 +515,20 @@
 
 .baokuan-ad-account-number,
 .baokuan-ad-amount,
+.baokuan-ad-coefficient,
 .baokuan-ad-money {
     font-variant-numeric: tabular-nums;
 }
 
-.baokuan-ad-history .baokuan-ad-report-group td.baokuan-ad-money {
+.baokuan-ad-history .baokuan-ad-report-group td:is(.baokuan-ad-money, .baokuan-ad-coefficient) {
     text-align: right;
     white-space: nowrap;
 }
 
-.baokuan-ad-amount { font-weight: 600; }
+.baokuan-ad-history .baokuan-ad-report-group :is(.baokuan-ad-amount, .baokuan-ad-money) {
+    font-size: calc(1em + 1px);
+    font-weight: 600;
+}
 .baokuan-ad-muted { color: #627d8f; font-size: 12px; }
 
 .baokuan-ad-history .baokuan-ad-report-group .fashion-image-thumb {

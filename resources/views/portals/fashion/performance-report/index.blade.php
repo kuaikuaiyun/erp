@@ -9,7 +9,7 @@
 @if($usesBaokuanPerformanceTemplate)
     @push('styles')
         <link rel="stylesheet" href="{{ asset('css/frontend-list-template.css') }}?v=20261125-1">
-        <link rel="stylesheet" href="{{ asset('css/baokuan-general-performance-report.css') }}?v=20261126-2">
+        <link rel="stylesheet" href="{{ asset('css/baokuan-general-performance-report.css') }}?v=20261126-3">
     @endpush
 @else
 @push('styles')
