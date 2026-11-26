@@ -66,6 +66,7 @@ use Illuminate\Support\Facades\Route;
 require __DIR__.'/review_center.php';
 require __DIR__.'/asset_manager.php';
 require __DIR__.'/assistant_assets.php';
+require __DIR__.'/aliexpress.php';
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
 Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, 'index'])->name('fashion.applovin-spends.index');

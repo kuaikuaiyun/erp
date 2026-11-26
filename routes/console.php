@@ -23,6 +23,8 @@ if ($financeScheduleOnly) {
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 require __DIR__.'/asset_reminders_schedule.php';
 
+Schedule::command('aliexpress:match-orders')->everyMinute()->withoutOverlapping(10)->runInBackground();
+
 Schedule::command('finance-sync:publish')
     ->everyMinute()
     ->when(fn () => config('finance_sync.enabled'))
