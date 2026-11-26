@@ -31,7 +31,7 @@ Ladmin\Admin::css('/assets/erp/interaction-loading-20261011-1.css?v=20261011-3')
 // Load scoped styles with the admin shell so PJAX navigation needs no head replacement.
 Ladmin\Admin::css(asset('css/erp-account-labels.css').'?v=20261116-1');
 Ladmin\Admin::css(asset('css/dingtalk-bindings.css').'?v=20261116-5');
-Ladmin\Admin::css(asset('css/dingtalk-companies.css').'?v=20261116-4');
+Ladmin\Admin::css(asset('css/dingtalk-companies.css').'?v=20261126-3');
 Ladmin\Admin::headerJs('/assets/erp/admin-notifications.js?v=20260929-2');
 Ladmin\Admin::js('/assets/erp/organization-workspace.js?v=20261120-1');
 Ladmin\Admin::js('/assets/erp/admin-navigation.js?v=20260929-1');
@@ -41,9 +41,9 @@ Ladmin\Admin::js('/assets/erp/interaction-loading-20261011-1.js?v=20261012-1');
 // Feature scripts live outside the PJAX fragment in the admin layout.
 // Register once with the shell so the first sidebar visit can initialize them.
 Ladmin\Admin::js(asset('js/erp-account-labels.js').'?v=20261116-2');
-Ladmin\Admin::js(asset('js/dingtalk-directory.js').'?v=20261116-2');
+Ladmin\Admin::js(asset('js/dingtalk-directory.js').'?v=20261126-2');
 Ladmin\Admin::js(asset('js/dingtalk-bindings.js').'?v=20261116-2');
-Ladmin\Admin::js(asset('js/dingtalk-companies.js').'?v=20261116-4');
+Ladmin\Admin::js(asset('js/dingtalk-companies.js').'?v=20261126-4');
 Ladmin\Admin::css(asset('css/account-company-assignment.css').'?v=20261119-1');
 Ladmin\Admin::js(asset('js/account-company-assignment.js').'?v=20261119-1');
 app(\App\Services\AdminWatermarkService::class)->registerForCurrentAdministrator();

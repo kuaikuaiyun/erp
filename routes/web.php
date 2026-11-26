@@ -626,4 +626,7 @@ Route::delete('/ai-product-requests/{submission}', [AiProductController::class, 
 Route::get('/ai-product-reviews', [AiProductController::class, 'reviewIndex'])->name('ai-products.review.index');
 Route::post('/ai-product-reviews/{submission}/approve', [AiProductController::class, 'reviewApprove'])->name('ai-products.review.approve');
 Route::post('/ai-product-reviews/{submission}/reject', [AiProductController::class, 'reviewReject'])->name('ai-products.review.reject');
+Route::get('auth/enterprise-logo/{file}', \App\Http\Controllers\LoginSiteLogoController::class)
+    ->where('file', \App\Services\Authentication\LoginSiteLogo::FILE_PATTERN)->name('enterprise-login.logo');
+
 Route::fallback([PortalEntryController::class, 'fallback']);

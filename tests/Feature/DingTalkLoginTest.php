@@ -38,7 +38,7 @@ trait DingTalkTestEnvironment
             'admin.database.connection' => null, 'app.key' => 'base64:'.base64_encode(str_repeat('k', 32)),
             'cache.default' => 'array', 'session.driver' => 'array',
             'portals.main_domain' => '', 'portals.root_domain' => '',
-            'dingtalk.challenge_seconds' => 300, 'dingtalk.membership_seconds' => 300]);
+            'dingtalk.challenge_seconds' => 300]);
         DB::purge('sqlite');
         Cache::flush();
         config(['dingtalk.auth_mode' => 'dingtalk']);
@@ -72,8 +72,10 @@ trait DingTalkTestEnvironment
         DB::table('admin_menu')->insert(['title'=>\Illuminate\Support\Facades\Lang::get('configuration.menu.configuration_center',[],'zh-CN'),'uri'=>'','created_at'=>now(),'updated_at'=>now()]);
         (require database_path('migrations/2026_11_15_000400_install_dingtalk_companies.php'))->up();
         (require database_path('migrations/2026_11_16_000100_add_dingtalk_company_login_slug.php'))->up();
+        (require database_path('migrations/2026_11_26_010000_configure_enterprise_login_sites.php'))->up();
+        (require database_path('migrations/2026_11_26_020000_add_company_name_to_erp_login_sites.php'))->up();
         $this->company=\App\Models\DingTalkCompany::query()->create(['name'=>'Test company','login_slug'=>'test-company','corp_id'=>'dingcorp-test','app_key'=>'app-test','app_secret'=>'secret-test',
-            'redirect_uri'=>'http://localhost/auth/dingtalk/callback','callback_token'=>'callback-test','callback_aes_key'=>rtrim(base64_encode(str_repeat('a',32)),'='),'callback_owner_key'=>'app-test','enabled'=>true])->fresh();
+            'redirect_uri'=>'http://localhost/auth/dingtalk/callback','enabled'=>true])->fresh();
         $this->members = [
             'user-a' => ['corp_id' => 'dingcorp-test', 'user_id' => 'user-a', 'union_id' => 'union-a', 'name' => '测试成员 A'],
             'user-b' => ['corp_id' => 'dingcorp-test', 'user_id' => 'user-b', 'union_id' => 'union-b', 'name' => '测试成员 B'],

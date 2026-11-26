@@ -3,6 +3,7 @@
 namespace App\Portal\Services;
 
 use App\Models\Portal;
+use App\Services\Authentication\LoginSiteService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -10,7 +11,7 @@ class PortalDomainService
 {
     public function isConfigured(): bool
     {
-        return $this->mainDomain() !== '' && $this->rootDomain() !== '';
+        return ($this->mainDomain() !== '' && $this->rootDomain() !== '') || app(LoginSiteService::class)->hasSites(request());
     }
 
     public function isMainRequest(Request $request): bool
@@ -19,7 +20,7 @@ class PortalDomainService
             return true;
         }
 
-        return hash_equals($this->mainDomain(), $this->host($request));
+        return hash_equals($this->mainDomain($request), $this->host($request));
     }
 
     public function portalForRequest(Request $request): ?Portal
@@ -39,7 +40,7 @@ class PortalDomainService
             return null;
         }
 
-        $code = $this->portalCodeFromHost($this->host($request));
+        $code = $this->portalCodeFromHost($this->host($request), $this->rootDomain($request));
 
         if ($code === null) {
             return null;
@@ -65,7 +66,7 @@ class PortalDomainService
 
     public function portalDomain(Portal|string $portal): ?string
     {
-        if (!$this->isConfigured()) {
+        if ($this->rootDomain() === '') {
             return null;
         }
 
@@ -99,11 +100,9 @@ class PortalDomainService
 
     public function mainUrl(string $path = '/'): string
     {
-        if (!$this->isConfigured()) {
-            return url($this->normalizePath($path));
-        }
+        $main = $this->mainDomain();
 
-        return $this->urlForHost($this->mainDomain(), $this->normalizePath($path));
+        return $main !== '' ? $this->urlForHost($main, $this->normalizePath($path)) : url($this->normalizePath($path));
     }
 
     public function mainAdminUrl(string $path = ''): string
@@ -128,14 +127,16 @@ class PortalDomainService
         return $this->normalizePath($path.($query ? '?'.$query : ''));
     }
 
-    private function mainDomain(): string
+    private function mainDomain(?Request $request = null): string
     {
-        return strtolower(trim((string) config('portals.main_domain', '')));
+        return app(LoginSiteService::class)->forRequest($request ?? request())?->domain
+            ?? strtolower(trim((string) config('portals.main_domain', '')));
     }
 
-    private function rootDomain(): string
+    public function rootDomain(?Request $request = null): string
     {
-        return strtolower(trim((string) config('portals.root_domain', '')));
+        return app(LoginSiteService::class)->forRequest($request ?? request())?->domain
+            ?? strtolower(trim((string) config('portals.root_domain', '')));
     }
 
     private function host(Request $request): string
@@ -143,11 +144,11 @@ class PortalDomainService
         return strtolower(trim($request->getHost()));
     }
 
-    private function portalCodeFromHost(string $host): ?string
+    private function portalCodeFromHost(string $host, string $root): ?string
     {
-        $suffix = '.'.$this->rootDomain();
+        $suffix = '.'.$root;
 
-        if (!Str::endsWith($host, $suffix)) {
+        if ($root === '' || !Str::endsWith($host, $suffix)) {
             return null;
         }
 
@@ -162,12 +163,9 @@ class PortalDomainService
 
     private function mainDomainLabel(): ?string
     {
-        if (!$this->isConfigured()) {
-            return null;
-        }
-
-        $suffix = '.'.$this->rootDomain();
-        $mainDomain = $this->mainDomain();
+        $root = strtolower(trim((string) config('portals.root_domain', '')));
+        $suffix = '.'.$root;
+        $mainDomain = strtolower(trim((string) config('portals.main_domain', '')));
 
         if (!Str::endsWith($mainDomain, $suffix)) {
             return null;

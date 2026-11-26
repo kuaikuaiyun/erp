@@ -66,8 +66,8 @@ Route::group([
 
     $authController = config('admin.auth.controller', AuthController::class);
     $router->get('auth/login', [$authController, 'getLogin'])->middleware('throttle:'.config('dingtalk.login_rate').',1')->name('login');
-    $router->get('auth/login/{slug}', [$authController, 'getLogin'])->where('slug', '[a-z0-9]+(?:-[a-z0-9]+)*')->middleware('throttle:'.config('dingtalk.login_rate').',1')->name('login.company');
-    $router->post('auth/login', [$authController, 'postLogin'])->middleware('throttle:10,1');
+    $router->post('auth/login', [$authController, 'postLogin'])->middleware('throttle:10,1,erp-password:');
+    $router->post('auth/dingtalk/start', [AuthController::class, 'startDingTalk'])->middleware('throttle:'.config('dingtalk.login_rate').',1,erp-scan-start:')->name('dingtalk.start');
     $router->get('auth/logout', [$authController, 'getLogout'])->name('logout');
     $router->get('auth/setting', [$authController, 'getSetting'])->name('setting');
     $router->put('auth/setting', [$authController, 'putSetting']);
@@ -83,6 +83,8 @@ Route::group([
     $router->get('portal/portals/{portal}/authorization-history', [PortalController::class, 'authorizationHistory'])->whereNumber('portal')->middleware(['admin.permission:check,portal.management', RequireSystemAdministrator::class])->name('portal.portals.authorization-history');
     $router->post('portal/portals/{portal}/status', [PortalController::class, 'updateStatus'])->whereNumber('portal')->middleware(['admin.permission:check,portal.management', RequireSystemAdministrator::class])->name('portal.portals.status');
 
+    $router->get('configuration/enterprise-login', [\App\Admin\Controllers\ConfigurationCenter\ErpLoginSiteController::class, 'index'])->middleware(['admin.permission:check,configuration.dingtalk', RequireSystemAdministrator::class])->name('configuration.enterprise-login');
+    $router->post('configuration/enterprise-login', [\App\Admin\Controllers\ConfigurationCenter\ErpLoginSiteController::class, 'save'])->middleware(['admin.permission:check,configuration.dingtalk', RequireSystemAdministrator::class])->name('configuration.enterprise-login.save');
     $router->get('configuration/captcha', [CaptchaController::class, 'index'])->middleware('admin.permission:check,configuration.captcha')->name('configuration.captcha');
     $router->post('configuration/captcha', [CaptchaController::class, 'save'])->middleware('admin.permission:check,configuration.captcha')->name('configuration.captcha.save');
     $router->post('configuration/captcha/reveal/{secret}', [CaptchaController::class, 'revealSecret'])->where('secret', 'turnstile|recaptcha_v2|tencent_captcha_app_secret_key|tencent_captcha_secret_id|tencent_captcha_secret_key')->middleware('admin.permission:check,configuration.captcha')->name('configuration.captcha.reveal');

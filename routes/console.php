@@ -32,7 +32,6 @@ Schedule::command('finance-sync:publish')
     ->withoutOverlapping(10)
     ->runInBackground();
 
-Schedule::command('dingtalk:reconcile')->everyMinute()->withoutOverlapping(10);
 Schedule::command('dingtalk:directory-sync')->everyMinute()->withoutOverlapping(10);
 
 Schedule::command('operation-tasks:uploads:purge --limit=200')

@@ -4,15 +4,14 @@ namespace Tests\Feature;
 
 require_once __DIR__.'/DingTalkLoginTest.php';
 
-use App\Admin\Controllers\AuthController;
 use App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController;
-use App\Http\Middleware\EnforceDingTalkSession;
-use App\Models\DingTalkCompany;
-use App\Services\DingTalk\CompanyService;
-use App\Services\DingTalk\LoginEntryService;
+use App\Models\ErpLoginSite;
+use App\Portal\Services\PortalDomainService;
+use App\Services\Authentication\ModeService;
+use App\Services\Authentication\PasswordLoginService;
+use App\Services\DingTalk\LoginService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -24,69 +23,181 @@ class DingTalkLoginEntryTest extends TestCase
     {
         return ['id'=>$this->company->id,'name'=>$this->company->name,'corp_id'=>$this->company->corp_id,
             'app_key'=>$this->company->app_key,'redirect_uri'=>$this->company->redirect_uri,
-            'callback_owner_key'=>$this->company->callback_owner_key,'enabled'=>true,'login_slug'=>'test-company'];
+            'enabled'=>true];
     }
 
-    public function test_public_page_never_lists_companies_even_with_old_query_parameter_or_session_hint(): void
+
+    private function site(string $domain, bool $dingtalk = false): ErpLoginSite
     {
-        $request=$this->browser(); $request->query->set('company',$this->company->id);
-        app(LoginEntryService::class)->remember($request,$this->company);
-        view()->share('errors',new ViewErrorBag());
-        $response=app(AuthController::class)->getLogin();
-        self::assertSame(200,$response->getStatusCode());
-        self::assertStringNotContainsString('Test company',$response->getContent());
-        self::assertStringNotContainsString('ding-login-frame',$response->getContent());
-        self::assertStringNotContainsString('<select',$response->getContent());
+        if ($dingtalk) {
+            $this->company->update(['redirect_uri' => 'http://'.$domain.'/auth/dingtalk/callback']);
+        }
+
+        return ErpLoginSite::query()->create([
+            'domain' => $domain, 'display_name' => 'Brand '.$domain,
+            'password_enabled' => true, 'dingtalk_enabled' => $dingtalk,
+            'dingtalk_company_id' => $dingtalk ? $this->company->id : null,
+        ]);
     }
 
-    public function test_http_routes_allow_the_company_entry_but_public_query_parameters_do_not_open_login(): void
+    public function test_registered_domains_show_their_own_brand_methods_and_cookie_scope(): void
     {
-        $this->get('/kky/auth/login/test-company?company=999')->assertOk()->assertSee('ding-login-frame',false);
-        $this->get('/kky/auth/login?company='.$this->company->id)->assertOk()->assertDontSee('ding-login-frame',false)->assertDontSee('Test company');
-        $this->get('/kky/auth/login/missing-company')->assertNotFound()->assertDontSee('Test company');
+        config(['portals.scheme' => 'http']);
+        $a = $this->site('a.test', true);
+        $this->site('b.test');
+        $a->update(['display_name' => '<script>a()</script>']);
+
+        $this->get('http://a.test/kky/auth/login?company=999')->assertOk()
+            ->assertSee('<script>a()</script>')->assertDontSee('<script>a()</script>', false)
+            ->assertSee('data-open-scan', false)->assertSee('admin-login-form', false);
+        $response = $this->get('http://b.test/kky/auth/login')->assertOk()
+            ->assertSee('Brand b.test')->assertDontSee('data-open-scan', false)->assertSee('admin-login-form', false);
+        $cookie = $response->getCookie(config('session.cookie'), false);
+        self::assertSame('b.test', ltrim($cookie->getDomain(), '.'));
+        $a->update(['password_enabled' => false]);
+        $this->get('http://a.test/kky/auth/login')->assertOk()
+            ->assertSee('data-auto-scan', false)->assertDontSee('admin-login-form', false);
+        $this->get('http://a.test/kky/auth/login/test-company')->assertNotFound();
+        $this->get('http://other.test/kky/auth/login')->assertNotFound();
     }
 
-    public function test_slug_selects_only_its_company_and_unavailable_links_return_the_same_error(): void
+    public function test_existing_erp_account_can_sign_in_on_a_different_enterprise_domain(): void
     {
-        self::assertSame($this->company->id,app(CompanyService::class)->forLoginSlug('test-company')->id);
-        $this->denied(fn()=>app(CompanyService::class)->forLoginSlug('missing-company'),404);
-        $this->company->update(['enabled'=>false]);
-        $this->denied(fn()=>app(CompanyService::class)->forLoginSlug('test-company'),404);
-        $this->company->delete();
-        $this->denied(fn()=>app(CompanyService::class)->forLoginSlug('test-company'),404);
+        config(['portals.scheme' => 'http']);
+        $this->site('a.test', true);
+        $this->site('b.test');
+        $account = $this->account();
+
+        $this->post('http://b.test/kky/auth/login', ['username' => $account->username, 'password' => 'test-password-123'])
+            ->assertRedirect('http://b.test/kky');
+        $this->assertAuthenticatedAs($account, 'admin');
     }
 
-    public function test_branding_is_plain_text_and_query_parameters_cannot_switch_the_login_company(): void
+    public function test_password_session_is_scoped_and_remains_valid_after_switch_off(): void
     {
-        $this->company->update(['login_display_name'=>'<script>brand()</script>','login_page_title'=>'Custom title','login_welcome'=>'Welcome A']);
-        $request=$this->browser(); $request->query->set('company',999);
-        view()->share('errors',new ViewErrorBag());
-        $response=app(AuthController::class)->getLogin('test-company');
-        self::assertSame(200,$response->getStatusCode());
-        self::assertStringContainsString('&lt;script&gt;brand()&lt;/script&gt;',$response->getContent());
-        self::assertStringNotContainsString('<script>brand()</script>',$response->getContent());
-        self::assertStringContainsString('client_id=app-test',$response->getContent());
-        self::assertStringContainsString('Custom title',$response->getContent());
-        self::assertSame($this->company->id,$request->session()->get(LoginEntryService::KEY));
+        config(['portals.scheme' => 'http']);
+        $site = $this->site('a.test', true);
+        $this->site('b.test');
+        $account = $this->account();
+        $request = \Illuminate\Http\Request::create('http://a.test/kky/auth/login', 'POST', [
+            'username' => $account->username, 'password' => 'test-password-123',
+        ]);
+        $request->setLaravelSession($this->browser(true)->session());
+        app()->instance('request', $request);
+        $modes = app(ModeService::class);
+
+        app(PasswordLoginService::class)->login($request);
+        $site->update(['password_enabled' => false]);
+        self::assertSame('password', $modes->validate($request, $account));
+        $this->denied(fn () => app(PasswordLoginService::class)->login($request), 403);
+
+        $other = \Illuminate\Http\Request::create('http://b.test/kky/auth/login');
+        $other->setLaravelSession($request->session());
+        $this->denied(fn () => $modes->validate($other, $account), 401);
+
+        $portal = \Illuminate\Http\Request::create('http://wuliu.a.test/');
+        $portal->setLaravelSession($request->session());
+        self::assertSame('password', $modes->validate($portal, $account));
+        $account->forceFill(['status' => 0])->save();
+        $this->denied(fn () => $modes->validate($request, $account), 401);
     }
 
-    public function test_slug_change_disables_old_link_without_revoking_an_existing_authentication_version(): void
+    public function test_scan_started_before_disabling_cannot_finish_after_reenabling(): void
     {
-        $request=$this->browser(); $request->merge(array_merge($this->input(),['login_slug'=>'new-company','login_welcome'=>'Changed message']));
-        app(DingTalkCompanyController::class)->save($request);
-        self::assertSame(1,$this->company->fresh()->version);
-        $this->denied(fn()=>app(CompanyService::class)->forLoginSlug('test-company'),404);
-        self::assertSame($this->company->id,app(CompanyService::class)->forLoginSlug('new-company')->id);
+        config(['portals.scheme' => 'http']);
+        $site = $this->site('a.test', true);
+        $request = $this->browser(true);
+        $request->initialize([], [], [], [], [], ['HTTP_HOST' => 'a.test', 'REQUEST_URI' => '/kky/auth/dingtalk/start']);
+        $login = app(LoginService::class);
+        $flow = $login->start($request);
+        $site->update(['dingtalk_enabled' => false]);
+        $this->denied(fn () => $login->acceptCallback($request, $flow['state'], 'code'), 403);
+        $site->dingtalk_version += 2;
+        $site->dingtalk_enabled = true;
+        $site->save();
+        $this->denied(fn () => $login->acceptCallback($request, $flow['state'], 'code'), 401);
     }
 
-    public function test_archived_company_keeps_its_identifier_reserved(): void
+    public function test_http_scan_callback_checks_the_configured_enterprise_and_keeps_existing_sessions(): void
     {
-        $other=$this->company->replicate(); $other->corp_id='other-corp'; $other->login_slug='other-company'; $other->save(); $other->delete();
-        $request=$this->browser(); $request->merge(array_merge($this->input(),['login_slug'=>'other-company']));
-        try { app(DingTalkCompanyController::class)->save($request); self::fail('Duplicate slug accepted'); }
-        catch (ValidationException $e) { self::assertArrayHasKey('login_slug',$e->errors()); }
+        config(['portals.scheme' => 'http']);
+        $site = $this->site('a.test', true);
+        $this->site('b.test');
+        $account = $this->account();
+        app(\App\Services\DingTalk\BindingService::class)->bind($account->id, 'user-a');
+        $this->postJson('http://b.test/kky/auth/dingtalk/start')->assertForbidden();
+        $flow = $this->postJson('http://a.test/kky/auth/dingtalk/start')->assertOk()->json();
+
+        $this->returnedCorp = 'wrong-enterprise';
+        $this->get('http://a.test/auth/dingtalk/callback?'.http_build_query(['state' => $flow['state'], 'code' => 'wrong-company']))
+            ->assertRedirect('http://a.test/kky/auth/login');
+        $this->assertGuest('admin');
+
+        $this->returnedCorp = $this->company->corp_id;
+        $flow = $this->postJson('http://a.test/kky/auth/dingtalk/start')->assertOk()->json();
+        $this->get('http://a.test/auth/dingtalk/callback?'.http_build_query(['state' => $flow['state'], 'code' => 'valid']))
+            ->assertRedirect('http://a.test/kky');
+        $this->assertAuthenticatedAs($account, 'admin');
+        $site->update(['dingtalk_enabled' => false]);
+        $this->get('http://a.test/kky/auth/login')->assertRedirect('http://a.test/kky');
     }
 
+    public function test_enterprise_setup_requires_a_method_and_stores_brand_parts_independently(): void
+    {
+        Storage::fake('public');
+        $controller = app(\App\Admin\Controllers\ConfigurationCenter\ErpLoginSiteController::class);
+        $sites = app(\App\Services\Authentication\LoginSiteService::class);
+        $request = $this->browser();
+        $request->merge(['domain' => 'B.test', 'display_name' => 'Enterprise B']);
+        try {
+            $controller->save($request, $sites);
+            self::fail('Both sign-in methods were disabled');
+        } catch (ValidationException $e) {
+            self::assertArrayHasKey('password_enabled', $e->errors());
+        }
+
+        $request->merge(['password_enabled' => true]);
+        $request->files->set('logo', UploadedFile::fake()->image('logo.png'));
+        $controller->save($request, $sites);
+        $site = ErpLoginSite::query()->where('domain', 'b.test')->firstOrFail();
+        self::assertSame('Enterprise B', $site->display_name);
+        self::assertNull($site->dingtalk_company_id);
+        Storage::disk('public')->assertExists($site->logo_path);
+    }
+
+    public function test_saved_logo_is_available_before_login_without_a_public_storage_link(): void
+    {
+        Storage::fake('public');
+        config(['portals.scheme' => 'http']);
+        $site = $this->site('a.test');
+        $path = UploadedFile::fake()->image('company.png')->store('erp/login-site-logos', 'public');
+        $site->update(['logo_path' => $path]);
+        $url = '/auth/enterprise-logo/'.basename($path);
+
+        $this->get('http://a.test/kky/auth/login')->assertOk()->assertSee('src="'.$url.'"', false);
+        $image = $this->get('http://a.test'.$url)->assertOk()
+            ->assertHeader('Content-Type', 'image/png')->assertHeader('X-Content-Type-Options', 'nosniff');
+        self::assertSame(Storage::disk('public')->get($path), $image->streamedContent());
+
+        Storage::disk('public')->put('erp/login-site-logos/orphan.png', Storage::disk('public')->get($path));
+        $this->get('http://a.test/auth/enterprise-logo/orphan.png')->assertNotFound();
+
+        Storage::disk('public')->delete($path);
+        $this->get('http://a.test'.$url)->assertNotFound();
+        $this->get('http://a.test/kky/auth/login')->assertOk()->assertSee('login-brand-default', false);
+    }
+
+    public function test_portal_links_use_the_matching_enterprise_root(): void
+    {
+        config(['portals.scheme' => 'http']);
+        $this->site('a.test');
+        $this->site('b.test');
+        app()->instance('request', \Illuminate\Http\Request::create('http://wuliu.b.test/orders'));
+        $domains = app(PortalDomainService::class);
+
+        self::assertSame('http://wuliu.b.test/orders', $domains->portalUrl('wuliu', '/orders'));
+        self::assertSame('http://b.test/kky/auth/login', $domains->mainLoginUrl());
+    }
     public function test_logo_upload_replacement_removal_and_failed_save_preserve_files_correctly(): void
     {
         Storage::fake('admin'); config(['admin.upload.disk'=>'admin']);
@@ -94,15 +205,17 @@ class DingTalkLoginEntryTest extends TestCase
         $request->files->set('logo',UploadedFile::fake()->image('first.png',100,100));
         app(DingTalkCompanyController::class)->save($request);
         $first=$this->company->fresh()->login_logo_path; Storage::disk('admin')->assertExists($first);
+        $request=$this->browser(); $request->merge($this->input());
         $request->files->set('logo',UploadedFile::fake()->image('second.jpg',100,100));
         app(DingTalkCompanyController::class)->save($request);
         $second=$this->company->fresh()->login_logo_path;
         Storage::disk('admin')->assertMissing($first); Storage::disk('admin')->assertExists($second);
+        $request=$this->browser(); $request->merge($this->input());
         $request->files->set('logo',UploadedFile::fake()->create('bad.svg',1,'image/svg+xml'));
         try { app(DingTalkCompanyController::class)->save($request); self::fail('SVG accepted'); }
         catch (ValidationException $e) { self::assertArrayHasKey('logo',$e->errors()); }
         self::assertSame($second,$this->company->fresh()->login_logo_path); Storage::disk('admin')->assertExists($second);
-        $request->files->remove('logo'); $request->merge(['logo_remove'=>true]);
+        $request=$this->browser(); $request->merge($this->input() + ['logo_remove'=>true]);
         app(DingTalkCompanyController::class)->save($request);
         self::assertNull($this->company->fresh()->login_logo_path); Storage::disk('admin')->assertMissing($second);
         self::assertSame(1,$this->company->fresh()->version);
@@ -124,39 +237,4 @@ class DingTalkLoginEntryTest extends TestCase
         self::assertSame([$old],Storage::disk('admin')->allFiles('dingtalk/company-logos'));
     }
 
-    public function test_guest_and_logout_redirects_keep_the_company_entry_and_emergency_mode_uses_public_login(): void
-    {
-        $request=$this->browser(); $entries=app(LoginEntryService::class); $entries->remember($request,$this->company);
-        self::assertStringEndsWith('/kky/auth/login/test-company',$entries->url($request));
-        $request->server->set('REQUEST_URI','/kky/organization/accounts');
-        // A genuine protected URL is used so the guest middleware can route before admin authentication.
-        $request=\Illuminate\Http\Request::create('http://localhost/kky/organization/accounts');
-        $request->setLaravelSession(app('session')->driver()); app()->instance('request',$request);
-        $response=app(EnforceDingTalkSession::class)->handle($request,fn()=>response('unexpected'));
-        self::assertStringEndsWith('/kky/auth/login/test-company',$response->getTargetUrl());
-        $response=app(AuthController::class)->getLogout($request);
-        self::assertStringEndsWith('/kky/auth/login/test-company',$response->getTargetUrl());
-        self::assertNull($request->session()->get(LoginEntryService::KEY));
-        config(['dingtalk.auth_mode'=>'password']);
-        self::assertStringEndsWith('/kky/auth/login',$entries->url($request));
-    }
-
-    public function test_expiration_captures_the_company_url_before_invalidating_the_session(): void
-    {
-        $request=$this->browser(); app(LoginEntryService::class)->remember($request,$this->company);
-        \Encore\Admin\Facades\Admin::guard()->login($this->account());
-        $request->session()->put(\App\Http\Middleware\EnforceAdminLoginExpiration::LOGIN_ISSUED_AT_KEY,now()->subDays(30)->timestamp);
-        $response=app(\App\Http\Middleware\EnforceAdminLoginExpiration::class)->handle($request,fn()=>response('unexpected'));
-        self::assertStringEndsWith('/kky/auth/login/test-company',$response->getTargetUrl());
-        self::assertNull($request->session()->get(LoginEntryService::KEY));
-    }
-
-    public function test_emergency_mode_opens_password_page_and_routes_company_links_to_the_public_entry(): void
-    {
-        $this->browser(); view()->share('errors',new ViewErrorBag()); config(['dingtalk.auth_mode'=>'password']);
-        $response=app(AuthController::class)->getLogin('test-company');
-        self::assertStringEndsWith('/kky/auth/login',$response->getTargetUrl());
-        $response=app(AuthController::class)->getLogin();
-        self::assertStringContainsString('admin-login-form',$response->getContent());
-    }
 }

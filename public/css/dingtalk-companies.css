@@ -175,3 +175,83 @@
         font-size: 12px;
     }
 }
+
+.dc-current-logo { display: flex; align-items: center; gap: 16px; }
+.dc-current-logo img { width: 64px; height: 48px; object-fit: contain; }
+.dc-callback { display: flex; align-items: baseline; gap: 8px; }
+.dc-callback input { min-width: 0; }
+.dc-login-methods { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 22px; }
+.dc-card > header small { display: block; }
+
+.dc-workspace .dc-heading {
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    border: 1px solid #dce7ef;
+    border-radius: 8px;
+    background: #fff;
+    gap: 12px 24px;
+}
+.dc-heading .dg-toolbar { margin-left: auto; }
+.dc-heading .dc-archive-toggle { color: #486476; }
+.dc-workspace .dc-cards { gap: 16px; }
+.dc-workspace .dc-card { display: flex; flex-direction: column; }
+.dc-workspace .dc-card > header { padding: 16px 20px; }
+.dc-workspace .dc-card-domain { margin-bottom: 3px; color: #236489; font-size: 13px; font-weight: 600; }
+.dc-workspace .dc-login-methods { padding: 10px 20px 0; }
+.dc-workspace .dc-login-methods .dc-badge { color: #215b83; background: #eaf4fc; }
+.dc-workspace .dc-metrics { gap: 8px; padding: 14px 20px; }
+.dc-workspace .dc-metrics > div { padding: 9px 10px; border-radius: 6px; background: #f3f7fb; }
+.dc-workspace .dc-metrics strong { font-size: 23px; }
+.dc-workspace .dc-card-info { padding: 0 20px 12px; }
+.dc-workspace .dc-card-info p { color: #536f82; }
+.dc-workspace .dc-sync-progress { padding: 0 20px 12px; }
+.dc-workspace .dc-sync-progress:empty { display: none; }
+.dc-workspace .dc-card > footer { margin-top: auto; padding: 12px 20px; }
+.dc-workspace .dc-archive-action { margin-left: auto; color: #994542; }
+
+.dc-company-editor { width: 770px; }
+.dc-company-editor .dc-editor-section { margin-bottom: 15px; padding-bottom: 15px; }
+.dc-company-editor .dc-editor-section:last-child { margin-bottom: 0; padding-bottom: 0; }
+.dc-company-editor .dc-editor-section > h5 { margin-bottom: 9px; }
+.dc-company-editor .dg-field { margin-bottom: 12px; }
+.dc-company-editor .dg-field .form-control { margin-top: 4px; }
+.dc-company-editor .dc-logo-area {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    padding: 12px;
+    border: 1px solid #e1eaf2;
+    border-radius: 8px;
+    background: #f8fbfd;
+}
+.dc-company-editor .dc-logo-area > .dg-field { margin: 0; flex: 1 1 250px; min-width: 0; }
+.dc-company-editor .dc-current-logo { align-items: flex-start; gap: 8px; flex-direction: column; }
+.dc-company-editor .dc-current-logo img { border-radius: 6px; border: 1px solid #dce7ef; background: #fff; }
+.dc-company-editor .dc-method-options .dc-enabled {
+    padding: 10px 12px;
+    border: 1px solid #dce7ef;
+    border-radius: 7px;
+    cursor: pointer;
+}
+.dc-company-editor .dc-method-options .dc-enabled:has(input:checked) { background: #eef6fd; border-color: #aacde7; }
+.dc-company-editor .dc-method-options input { margin: 0; accent-color: #266c9a; }
+.dc-company-editor .dc-credentials { border: 1px solid #dce7ef; border-radius: 8px; background: #f8fbfd; }
+.dc-company-editor .dc-credentials > summary { padding: 11px 14px; font-weight: 600; cursor: pointer; }
+.dc-company-editor .dc-credentials-body { padding: 12px 14px 3px; border-top: 1px solid #e1eaf2; }
+.dc-company-editor .dc-callback { align-items: center; }
+.dc-company-editor .dc-callback .form-control { margin-top: 0; }
+.dc-company-editor .dc-callback button { flex-shrink: 0; }
+
+@media (max-width: 600px) {
+    .dc-heading .dg-toolbar { margin-left: 0; width: 100%; justify-content: space-between; }
+    .dc-workspace .dc-card > header,
+    .dc-workspace .dc-card > footer { padding: 12px; }
+    .dc-workspace .dc-metrics { padding: 12px; }
+    .dc-workspace .dc-metrics > div { padding: 7px; }
+    .dc-workspace .dc-login-methods,
+    .dc-workspace .dc-card-info,
+    .dc-workspace .dc-sync-progress { padding-inline: 12px; }
+    .dc-company-editor .dg-inline { grid-template-columns: 1fr; gap: 4px; }
+    .dc-company-editor > header, .dc-company-editor .dg-modal-body, .dc-company-editor footer { padding: 12px; }
+}

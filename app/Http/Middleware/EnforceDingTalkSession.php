@@ -18,13 +18,6 @@ class EnforceDingTalkSession
     {
         $guard = Admin::guard();
         if ($guard->guest()) {
-            $prefix = trim(config('admin.route.prefix'), '/');
-            $entries = app(\App\Services\DingTalk\LoginEntryService::class);
-            if (!$request->expectsJson() && ($request->is($prefix) || $request->is($prefix.'/*'))
-                && !$request->is($prefix.'/auth/login', $prefix.'/auth/login/*', $prefix.'/auth/logout', $prefix.'/auth/tencent-captcha/options')
-                && $entries->company($request)) {
-                return redirect()->to($entries->url($request));
-            }
             return $next($request);
         }
         if ($request->routeIs(config('admin.route.prefix').'.logout')) {
@@ -50,7 +43,7 @@ class EnforceDingTalkSession
                 // Retain the session, but stop access until authoritative revalidation succeeds.
                 return $request->expectsJson()
                     ? response()->json(['message' => $exception->getMessage()], 503)->header('Cache-Control', 'no-store')
-                    : response()->view('admin.auth.login', array_merge(app(\App\Services\DingTalk\LoginEntryService::class)->viewData($request), ['flow' => null, 'loginError' => $exception->getMessage(), 'paused' => true]), 503)
+                    : response()->view('admin.auth.login', array_merge(app(\App\Services\DingTalk\LoginEntryService::class)->viewData($request), ['loginError' => $exception->getMessage(), 'paused' => true]), 503)
                         ->header('Cache-Control', 'no-store');
             }
             if (method_exists($guard, 'logoutCurrentDevice')) {

@@ -19,12 +19,12 @@ class PasswordLoginService
     public function login(Request $request): string
     {
         $modes = app(ModeService::class);
-        $state = $modes->current();
-        if ($state->mode !== 'password') throw new HttpException(403, __('dingtalk.errors.password_disabled'));
+        $state = $modes->requireMethod($request, 'password');
         $request->attributes->set('erp.auth_mode', 'password');
         $request->attributes->remove('dingtalk.identity');
         $captcha = app(LoginCaptchaService::class);
-        $key = 'admin-login:'.sha1(Str::lower((string) $request->input('username')).'|'.$request->ip());
+        $username = $request->input('username');
+        $key = 'admin-login:'.sha1(Str::lower(is_string($username) ? $username : '').'|'.$request->ip());
         if (RateLimiter::tooManyAttempts($key, $captcha->maxAttempts())) {
             throw ValidationException::withMessages(['username' => __('configuration.login.rate_limited', ['seconds' => RateLimiter::availableIn($key)])]);
         }
@@ -40,7 +40,7 @@ class PasswordLoginService
         if (!$guard->attempt($data, false)) {
             RateLimiter::hit($key, $captcha->decaySeconds());
             app(AuditService::class)->record('login.denied', null, null, ['reason' => 'password_failed']);
-            throw ValidationException::withMessages(['username' => trans('auth.failed')]);
+            throw ValidationException::withMessages(['username' => __('enterprise_login.invalid_credentials')]);
         }
         try {
             $account = $guard->user()->fresh();
@@ -49,7 +49,7 @@ class PasswordLoginService
                 throw new HttpException(403, trans('admin.login_banned'));
             }
             $request->session()->regenerate(true);
-            $request->session()->forget(['dingtalk.login', 'dingtalk.pending', 'url.intended']);
+            $request->session()->forget(['dingtalk.login', 'dingtalk.pending', 'url.intended', 'dingtalk.browser']);
             $modes->stamp($request, $account, $state);
             $modes->validate($request, $account);
             $request->session()->put(EnforceAdminLoginExpiration::LOGIN_ISSUED_AT_KEY, now()->timestamp);

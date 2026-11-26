@@ -20,10 +20,6 @@
             t = ui.translator(translations),
             editing = null,
             directory = null,
-            previewUrl = null,
-            logoFile = null,
-            logoBase = null,
-            logoUndo = null,
             syncs = new Set();
         function q(s, p) {
             return (p || root).querySelector(s);
@@ -31,49 +27,7 @@
         function modal(n) {
             return q('[data-modal="' + n + '"]');
         }
-        async function upload(path, body) {
-            var controller = new AbortController(),
-                expired = false;
-            var timer = setTimeout(function () {
-                expired = true;
-                controller.abort();
-            }, 30000);
-            try {
-                var response = await fetch(path, {
-                    method: 'POST',
-                    body: body,
-                    credentials: 'same-origin',
-                    signal: controller.signal,
-                    headers: {
-                        Accept: 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-TOKEN': options.csrf,
-                    },
-                });
-                if (response.redirected) throw Error(t('session_expired'));
-                var data;
-                try {
-                    data = await response.json();
-                } catch (_) {
-                    throw Error(t('request_error'));
-                }
-                if (!response.ok)
-                    throw Error(
-                        data.errors
-                            ? Object.values(data.errors).flat().join('\n')
-                            : data.message || t('request_error'),
-                    );
-                return data;
-            } catch (e) {
-                if (expired) throw Error(t('timeout'));
-                if (e.name === 'TypeError') throw Error(t('request_error'));
-                throw e;
-            } finally {
-                clearTimeout(timer);
-            }
-        }
         function api(path, body, method, controller) {
-            if (body instanceof FormData) return upload(path, body);
             return ui.api(path, {
                 t: t,
                 csrf: options.csrf,
@@ -91,101 +45,146 @@
             options.companies = result.companies;
             render();
         }
+        var recovery = q('[data-page-recovery]'),
+            retry = q('[data-retry-refresh]'),
+            reopen = q('[data-reopen-login]');
+        async function savedStatus(message, redirectUrl) {
+            var pageStatus = q('[data-page-status]');
+            reopen.hidden = !redirectUrl;
+            if (redirectUrl) {
+                retry.hidden = true;
+                recovery.hidden = false;
+                reopen.href = redirectUrl;
+                ui.status(pageStatus, t('saved_sign_in_again'));
+                reopen.focus();
+                return;
+            }
+            try {
+                await refresh();
+                recovery.hidden = retry.hidden = true;
+                ui.status(pageStatus, message);
+            } catch (_) {
+                recovery.hidden = retry.hidden = false;
+                ui.status(pageStatus, t('saved_retry_refresh'), true);
+                retry.focus();
+            }
+        }
+        reopen.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            location.assign(reopen.href);
+        });
+        retry.onclick = async function () {
+            retry.disabled = true;
+            try {
+                await savedStatus(t('list_refreshed'));
+            } finally {
+                retry.disabled = false;
+                if (!retry.hidden) retry.focus();
+            }
+        };
+        var form = q('[data-company-form]');
+        var credentials = q('[data-credentials]');
+        form.addEventListener('invalid', function (event) {
+            if (credentials.contains(event.target)) credentials.open = true;
+        }, true);
+        function updateCompanyFields() {
+            var hasCredentials = !!(editing?.id || form.elements.existing_company_id?.value);
+            form.elements.corp_id.readOnly = hasCredentials;
+            form.elements.app_secret.required = !hasCredentials;
+            form.elements.app_secret.placeholder = hasCredentials ? t('secret_saved') : '';
+        }
+        function updateCallback() {
+            var domain = form.elements.domain.value.trim().toLowerCase();
+            var valid = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/i.test(domain);
+            form.elements.redirect_uri.value = valid ? options.callback_template.replace(':domain', domain) : '';
+            q('[data-copy-callback]').disabled = !valid;
+            ui.status(q('[data-copy-status]'), '');
+        }
+        function updateCredentials() {
+            if (!options.can_configure_login) return;
+            var section = q('[data-credentials]');
+            section.hidden = !editing?.id && !form.elements.dingtalk_enabled.checked;
+            section.querySelectorAll('input').forEach(function (input) {
+                input.disabled = section.hidden;
+            });
+            var picker = form.elements.existing_company_id;
+            picker.disabled = section.hidden || !editing?.login_site || !!editing?.id || picker.options.length < 2;
+            q('[data-existing-company]').hidden = picker.disabled;
+            updateCallback();
+        }
+        function showLogo(url) {
+            var logo = q('[data-current-logo]');
+            var image = q('img', logo);
+            logo.hidden = !url;
+            form.elements.remove_logo.checked = false;
+            form.elements.remove_logo.disabled = !url;
+            if (url) image.src = url;
+            else image.removeAttribute('src');
+        }
         function edit(company) {
             editing = company || null;
-            var form = q('[data-company-form]');
             form.reset();
             q('[data-edit-title]').textContent = t(company ? 'edit_company' : 'add');
-            [
-                'name',
-                'corp_id',
-                'app_key',
-                'redirect_uri',
-                'callback_owner_key',
-                'login_slug',
-                'login_display_name',
-                'login_page_title',
-                'login_welcome',
-            ].forEach(function (k) {
-                form.elements[k].value = company
-                    ? company[k] || ''
-                    : k === 'redirect_uri'
-                      ? options.callback_url
-                      : '';
-            });
-            form.elements.corp_id.readOnly = !!company;
-            form.elements.enabled.checked = company ? company.enabled : false;
-            ['app_secret', 'callback_token', 'callback_aes_key'].forEach(function (k) {
-                form.elements[k].value = '';
-                form.elements[k].required = !company;
-                form.elements[k].placeholder = company ? t('secret_saved') : '';
-            });
-            logoFile = null;
-            logoUndo = null;
-            logoBase = company && company.logo_url ? { url: company.logo_url, file: null } : null;
-            form.elements.logo_remove.value = '0';
-            renderLogo();
+
+            form.elements.name.value = company?.name || '';
+            form.elements.corp_id.value = company?.corp_id || '';
+            form.elements.app_key.value = company?.app_key || '';
+            form.elements.enabled.checked = !!company?.enabled;
+            if (options.can_configure_login) {
+                var site = company?.login_site;
+                var picker = form.elements.existing_company_id;
+                picker.replaceChildren(new Option(t('new_dingtalk_company'), ''));
+                if (site && !company.id) {
+                    options.companies.forEach(function (candidate) {
+                        if (candidate.id && !candidate.archived && !candidate.login_site) {
+                            var label = candidate.name + ' (' + candidate.corp_id + ')';
+                            picker.add(new Option(label, candidate.id));
+                        }
+                    });
+                }
+                form.elements.domain.value = site?.domain || '';
+                form.elements.display_name.value = site?.display_name || company?.name || '';
+                form.elements.password_enabled.checked = site ? site.password_enabled : true;
+                form.elements.dingtalk_enabled.checked = site ? site.dingtalk_enabled : !!company?.enabled;
+                showLogo(site?.logo_url);
+                updateCredentials();
+            } else {
+                form.elements.redirect_uri.value = company?.redirect_uri || options.callback_url;
+            }
+            credentials.open = !options.can_configure_login || !company?.id;
+            updateCompanyFields();
             ui.status(q('[data-status]', form), '');
             modal('edit').showModal();
             modal('edit').scrollTop = 0;
         }
-        function releasePreview() {
-            if (previewUrl) URL.revokeObjectURL(previewUrl);
-            previewUrl = null;
-        }
-        function renderLogo() {
-            releasePreview();
-            var form = q('[data-company-form]');
-            var removing = form.elements.logo_remove.value === '1';
-            var file = logoFile || (!removing && logoBase && logoBase.file);
-            var url = !removing && logoBase && logoBase.url;
-            var pending = !!logoFile || removing || !!logoUndo;
-            var hasLogo = !!file || !!url;
-            if (file) {
-                previewUrl = URL.createObjectURL(file);
-                url = previewUrl;
-            }
-            var img = q('[data-logo-preview]');
-            img.hidden = !hasLogo;
-            if (hasLogo) img.src = url;
-            else img.removeAttribute('src');
-            q('[data-logo-default]').hidden = hasLogo;
-            q('.dc-logo-card').dataset.pending = pending ? 'true' : 'false';
-            q('[data-logo-status]').textContent = t(
-                logoFile
-                    ? 'logo_upload_pending'
-                    : pending
-                      ? 'logo_default_pending'
-                      : hasLogo
-                        ? 'logo_saved'
-                        : 'default_logo',
-            );
-            q('[data-logo-filename]').textContent = logoFile ? logoFile.name : '';
-            q('[data-logo-filename]').hidden = !logoFile;
-            q('[data-logo-upload-label]').textContent = t(hasLogo ? 'replace_logo' : 'upload_logo');
-            var busy = form.getAttribute('aria-busy') === 'true';
-            q('[data-logo-upload]').disabled = busy;
-            q('[data-logo-reset]').disabled = busy || !hasLogo;
-            q('[data-logo-undo]').hidden = !pending;
-            q('[data-logo-undo]').disabled = busy;
-        }
-        function copyLink(input) {
-            (async function () {
-                try {
-                    if (navigator.clipboard && window.isSecureContext)
-                        await navigator.clipboard.writeText(input.value);
-                    else {
-                        input.focus();
-                        input.select();
-                        if (!document.execCommand('copy')) throw Error();
-                    }
-                    ui.status(q('[data-page-status]'), t('copied'));
-                } catch (_) {
-                    input.focus();
-                    input.select();
-                    ui.status(q('[data-page-status]'), t('copy_failed'), true);
+        if (options.can_configure_login) {
+            form.elements.domain.addEventListener('input', updateCallback);
+            form.elements.existing_company_id.addEventListener('change', function () {
+                var company = options.companies.find(candidate => String(candidate.id) === this.value);
+                form.elements.corp_id.value = company?.corp_id || '';
+                form.elements.app_key.value = company?.app_key || '';
+                form.elements.app_secret.value = '';
+                updateCompanyFields();
+            });
+            form.elements.dingtalk_enabled.addEventListener('change', function () {
+                if (this.checked) {
+                    form.elements.enabled.checked = true;
+                    credentials.open = true;
                 }
-            })();
+                updateCredentials();
+            });
+            q('[data-copy-callback]').addEventListener('click', async function () {
+                var callback = form.elements.redirect_uri;
+                try {
+                    await navigator.clipboard.writeText(callback.value);
+                    ui.status(q('[data-copy-status]'), t('callback_copied'));
+                } catch (_) {
+                    callback.focus();
+                    callback.select();
+                    ui.status(q('[data-copy-status]'), t('callback_selected'));
+                }
+            });
         }
         async function sync(company, button, progress) {
             if (syncs.has(company.id)) return;
@@ -244,15 +243,40 @@
                 var card = ui.el('article', null, 'dc-card'),
                     head = ui.el('header'),
                     name = ui.el('div');
-                name.append(ui.el('h4', c.name), ui.el('small', c.corp_id));
-                head.append(
-                    name,
-                    ui.el(
+                name.append(ui.el('h4', c.name));
+                if (c.login_site) name.append(ui.el('small', c.login_site.domain, 'dc-card-domain'));
+                if (c.corp_id) name.append(ui.el('small', c.corp_id));
+                head.append(name);
+                if (c.id) {
+                    head.append(ui.el(
                         'span',
                         t(c.archived ? 'archived_state' : c.enabled ? 'company_enabled' : 'company_disabled'),
                         'dc-badge' + (c.enabled ? '' : ' off'),
-                    ),
-                );
+                    ));
+                }
+                card.append(head);
+
+                var tools = ui.el('div', null, 'dg-toolbar'),
+                    foot = ui.el('footer');
+                tools.append(ui.button(t('edit_company'), function () {
+                    edit(c);
+                }));
+                foot.append(tools);
+                if (c.login_site) {
+                    var methods = ui.el('div', null, 'dc-login-methods');
+                    if (c.login_site.password_enabled) {
+                        methods.append(ui.el('span', t('password_method'), 'dc-badge'));
+                    }
+                    if (c.login_site.dingtalk_enabled && c.enabled && !c.archived) {
+                        methods.append(ui.el('span', t('dingtalk_method'), 'dc-badge'));
+                    }
+                    card.append(methods);
+                }
+                if (!c.id) {
+                    card.append(foot);
+                    container.append(card);
+                    return;
+                }
                 var metrics = ui.el('div', null, 'dc-metrics');
                 [
                     ['members_count', c.member_count],
@@ -270,41 +294,18 @@
                 info.append(
                     ui.el('p', t('last_synced') + '：' + (c.synced_at || t('not_synced'))),
                     ui.el('p', t('count_hint')),
-                    ui.el('p', t('events_address') + '：' + c.events_url),
                 );
-                if (c.login_url) {
-                    var link = ui.el('input');
-                    link.type = 'text';
-                    link.readOnly = true;
-                    link.value = c.login_url;
-                    link.className = 'form-control';
-                    link.setAttribute('aria-label', t('entry_link'));
-                    info.append(
-                        ui.el('label', t('entry_link'), 'dg-help'),
-                        link,
-                        ui.button(t('copy_link'), function () {
-                            copyLink(link);
-                        }),
-                    );
-                } else info.append(ui.el('p', t('missing_slug')));
-                var tools = ui.el('div', null, 'dg-toolbar'),
-                    foot = ui.el('footer'),
-                    progress = ui.el('div', c.sync_pending ? t('sync_pending') : '', 'dc-sync-progress');
-                tools.append(
-                    ui.button(t('edit_company'), function () {
-                        edit(c);
-                    }),
-                    ui.button(t('details_company'), function () {
-                        details(c);
-                    }),
-                );
+                var progress = ui.el('div', c.sync_pending ? t('sync_pending') : '', 'dc-sync-progress');
+                var detailsButton = ui.button(t('details_company'), function () {
+                    details(c);
+                });
+                detailsButton.disabled = !c.enabled;
+                tools.append(detailsButton);
                 var syncButton = ui.button(t('sync_company'), function () {
                     sync(c, syncButton, progress);
                 });
                 syncButton.disabled = !c.enabled || syncs.has(c.id);
                 tools.append(syncButton);
-                tools.children[1].disabled = !c.enabled;
-                foot.append(tools);
                 if (!c.archived)
                     foot.append(
                         ui.button(
@@ -325,10 +326,10 @@
                                     this.disabled = false;
                                 }
                             },
-                            'btn btn-default btn-sm',
+                            'btn btn-default btn-sm dc-archive-action',
                         ),
                     );
-                card.append(head, metrics, info, progress, foot);
+                card.append(metrics, info, progress, foot);
                 container.append(card);
             });
         }
@@ -336,105 +337,58 @@
         q('[data-company-add]').onclick = function () {
             edit(null);
         };
-        var companyForm = q('[data-company-form]');
-        q('[data-logo-upload]').onclick = function () {
-            companyForm.elements.logo.click();
-        };
-        companyForm.elements.logo.addEventListener('change', function () {
-            var file = companyForm.elements.logo.files[0];
-            if (!file) return;
-            logoFile = file;
-            logoUndo = null;
-            companyForm.elements.logo_remove.value = '0';
-            companyForm.elements.logo.value = '';
-            renderLogo();
-        });
-        q('[data-logo-reset]').onclick = function () {
-            logoUndo = { file: logoFile, remove: companyForm.elements.logo_remove.value };
-            logoFile = null;
-            companyForm.elements.logo.value = '';
-            companyForm.elements.logo_remove.value = logoBase ? '1' : '0';
-            renderLogo();
-        };
-        q('[data-logo-undo]').onclick = function () {
-            logoFile = logoUndo ? logoUndo.file : null;
-            companyForm.elements.logo_remove.value = logoUndo ? logoUndo.remove : '0';
-            logoUndo = null;
-            renderLogo();
-        };
-        modal('edit').addEventListener('close', function () {
-            releasePreview();
-            logoFile = null;
-            logoUndo = null;
-            logoBase = null;
-            companyForm.elements.logo.value = '';
-            companyForm.elements.logo_remove.value = '0';
-        });
-        q('[data-company-form]').elements.app_key.addEventListener('change', function (e) {
-            var owner = q('[data-company-form]').elements.callback_owner_key;
-            if (!editing && !owner.value) owner.value = e.target.value;
-        });
-        q('[data-company-form]').addEventListener('submit', async function (e) {
+        form.addEventListener('submit', async function (e) {
             e.preventDefault();
-            var form = e.currentTarget;
-            if (editing && !confirm(t('change_confirm'))) return;
-            var body = { enabled: form.elements.enabled.checked };
-            [
-                'name',
-                'login_slug',
-                'login_display_name',
-                'login_page_title',
-                'login_welcome',
-                'corp_id',
-                'app_key',
-                'app_secret',
-                'redirect_uri',
-                'callback_token',
-                'callback_aes_key',
-                'callback_owner_key',
-            ].forEach(function (k) {
-                body[k] = form.elements[k].value;
-            });
-            body.logo_remove = form.elements.logo_remove.value === '1';
-            var removingLogo = body.logo_remove;
-            if (editing) body.id = editing.id;
-            if (logoFile) {
-                var multipart = new FormData();
-                Object.keys(body).forEach(function (k) {
-                    multipart.append(k, typeof body[k] === 'boolean' ? (body[k] ? '1' : '0') : body[k]);
-                });
-                multipart.append('logo', logoFile);
-                body = multipart;
-            }
-            await ui.busy(form, t, async function () {
-                var r = await api(options.save_url, body);
-                ['app_secret', 'callback_token', 'callback_aes_key'].forEach(function (k) {
-                    form.elements[k].value = '';
-                });
-                logoBase = logoFile ? { file: logoFile, url: null } : removingLogo ? null : logoBase;
-                logoFile = null;
-                logoUndo = null;
-                form.elements.logo.value = '';
-                form.elements.logo_remove.value = '0';
-                editing = { id: r.id };
-                form.elements.corp_id.readOnly = true;
-                ['app_secret', 'callback_token', 'callback_aes_key'].forEach(function (k) {
-                    form.elements[k].required = false;
-                    form.elements[k].placeholder = t('secret_saved');
-                });
-                try {
-                    await refresh();
-                    modal('edit').close();
-                    ui.status(q('[data-page-status]'), r.message);
-                } catch (_) {
-                    ui.status(q('[data-status]', form), t('refresh_failed'), true);
+
+            var body;
+            if (options.can_configure_login) {
+                var domain = form.elements.domain.value.trim().toLowerCase();
+                if (editing) {
+                    var oldDomain = editing.login_site?.domain;
+                    var moving = oldDomain === location.hostname && domain !== oldDomain;
+                    if (!confirm(t(moving ? 'domain_change_confirm' : 'change_confirm'))) return;
                 }
+                body = new FormData(form);
+                body.set('login_configuration', '1');
+                ['password_enabled', 'dingtalk_enabled', 'remove_logo', 'enabled'].forEach(function (key) {
+                    body.set(key, form.elements[key].checked ? '1' : '0');
+                });
+                if (editing?.login_site?.id) body.set('site_id', editing.login_site.id);
+                if (editing?.id) body.set('id', editing.id);
+            } else {
+                if (editing && !confirm(t('change_confirm'))) return;
+                body = Object.fromEntries(new FormData(form));
+                body.enabled = form.elements.enabled.checked;
+                if (editing?.id) body.id = editing.id;
+            }
+            var saved = false;
+            await ui.busy(form, t, async function () {
+                var result = await api(options.save_url, body);
+                saved = true;
+                editing = { id: result.id, login_site: result.login_site };
+                form.elements.app_secret.value = '';
+                if (options.can_configure_login) {
+                    form.elements.logo.value = '';
+                }
+                modal('edit').close();
+                await savedStatus(result.message, result.redirect_url);
             });
-            if (root.isConnected) renderLogo();
+            updateCompanyFields();
+            updateCredentials();
+            if (saved && options.can_configure_login && editing?.login_site) {
+                showLogo(editing.login_site.logo_url);
+            }
         });
         modal('directory').addEventListener('close', function () {
             if (directory) directory.cancel();
         });
+        if (options.open_site) {
+            var selected = options.companies.find(function (company) {
+                return company.login_site?.id === options.open_site;
+            });
+            if (selected?.archived) q('[data-show-archived]').checked = true;
+            if (selected) edit(selected);
+        }
         render();
         active = function () {
             if (directory) directory.cancel();

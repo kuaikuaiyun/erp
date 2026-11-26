@@ -21,6 +21,7 @@ class PortalReturnUrlService
 
         $request->session()->put(self::SESSION_KEY, [
             'portal_id' => (int) $portal->getKey(),
+            'root' => $this->domains->rootDomain($request),
             'path' => $this->domains->currentPortalPath($request),
         ]);
     }
@@ -30,6 +31,7 @@ class PortalReturnUrlService
         $stored = $request->session()->pull(self::SESSION_KEY);
 
         if (!is_array($stored)
+            || (isset($stored['root']) && $stored['root'] !== $this->domains->rootDomain($request))
             || !isset($stored['portal_id'])
             || !is_numeric($stored['portal_id'])
             || !is_string($stored['path'] ?? null)

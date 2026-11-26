@@ -44,12 +44,34 @@ class ModeService
         }, 3);
     }
 
-    public function requireDingTalk(): object
+    public function allows(Request $request, string $method): bool
     {
+        $site = app(LoginSiteService::class)->forRequest($request);
+
+        return $site ? (bool) $site->{$method.'_enabled'} : $this->current()->mode === $method;
+    }
+
+    public function requireMethod(Request $request, string $method): object
+    {
+        $site = app(LoginSiteService::class)->forRequest($request, true);
+        $error = $method === 'password' ? 'dingtalk.errors.password_disabled' : 'dingtalk.mode.changed';
+
+        if ($site) {
+            abort_unless($site->{$method.'_enabled'}, 403, __($error));
+
+            return (object) [
+                'mode' => $method, 'version' => $site->{$method.'_version'},
+                'site_id' => (int) $site->id, 'domain' => $site->domain,
+                'company_id' => $site->dingtalk_company_id,
+            ];
+        }
+
         $state = $this->current();
-        if ($state->mode !== 'dingtalk') throw new HttpException(403, __('dingtalk.mode.changed'));
+        abort_unless($state->mode === $method, 403, __($error));
+
         return $state;
     }
+
 
     public function accountVersion(int $id): int
     {
@@ -71,30 +93,43 @@ class ModeService
 
     public function stamp(Request $request, AdminUser $account, object $expected): void
     {
-        $current = $this->current();
-        if ($current->mode !== $expected->mode || (int) $current->version !== (int) $expected->version) {
+        $current = $this->requireMethod($request, $expected->mode);
+        if ((int) $current->version !== (int) $expected->version
+            || ($current->site_id ?? null) !== ($expected->site_id ?? null)
+            || ($current->domain ?? null) !== ($expected->domain ?? null)) {
             throw new HttpException(401, __('dingtalk.mode.changed'));
         }
         $request->session()->put(self::KEY, ['mode' => $current->mode, 'version' => (int) $current->version,
+            'site_id' => $current->site_id ?? null, 'domain' => $current->domain ?? null,
             'account_id' => (int) $account->id, 'account_version' => $this->accountVersion((int) $account->id), 'issued_at' => now()->timestamp]);
     }
 
     public function validate(Request $request, AdminUser $account): string
     {
-        $state = $this->current();
         $proof = $request->session()->get(self::KEY, []);
+        $site = app(LoginSiteService::class)->forRequest($request);
+        $mode = $proof['mode'] ?? null;
+        if ($site) {
+            $validMethod = ($proof['site_id'] ?? null) === (int) $site->id
+                && ($proof['domain'] ?? null) === $site->domain
+                && in_array($mode, ['password', 'dingtalk'], true);
+        } else {
+            $state = $this->current();
+            $validMethod = empty($proof['site_id']) && $mode === $state->mode
+                && (int) ($proof['version'] ?? 0) === (int) $state->version;
+        }
         $fresh = AdminUser::query()->find($account->id);
         if (!$fresh || (isset($fresh->status) && (int) $fresh->status !== AdminUser::STATUS_ACTIVE)
-            || ($proof['mode'] ?? null) !== $state->mode || (int) ($proof['version'] ?? 0) !== (int) $state->version
+            || !$validMethod
             || (int) ($proof['account_id'] ?? 0) !== (int) $account->id
             || (int) ($proof['account_version'] ?? 0) !== $this->accountVersion((int) $account->id)
             || (int) ($proof['issued_at'] ?? 0) <= 0
             || now()->timestamp >= (int) ($proof['issued_at'] ?? 0) + app(\App\Services\SystemSettingService::class)->loginExpirationSeconds()) {
             throw new HttpException(401, __('dingtalk.mode.changed'));
         }
-        $request->attributes->set('erp.auth_mode', $state->mode);
-        if ($state->mode === 'password') $request->attributes->remove('dingtalk.identity');
+        $request->attributes->set('erp.auth_mode', $mode);
+        if ($mode === 'password') $request->attributes->remove('dingtalk.identity');
         $request->attributes->set('dingtalk.account_id', (int) $account->id);
-        return $state->mode;
+        return $mode;
     }
 }

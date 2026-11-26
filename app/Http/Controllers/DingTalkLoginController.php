@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Portal\Services\PortalDomainService;
 use App\Services\DingTalk\AuditService;
 use App\Services\DingTalk\LoginService;
+use Encore\Admin\Facades\Admin;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -12,6 +13,10 @@ class DingTalkLoginController extends Controller
 {
     public function callback(Request $request, LoginService $login)
     {
+        if (Admin::guard()->check()) {
+            return redirect(app(PortalDomainService::class)->mainAdminUrl())->header('Cache-Control', 'no-store');
+        }
+
         try {
             $state = $request->query('state');
             $code = $request->query('authCode', $request->query('code'));
@@ -20,8 +25,8 @@ class DingTalkLoginController extends Controller
             }
             $choices = $login->acceptCallback($request, $state, $code);
             return $choices->count() === 1
-                ? redirect()->to($login->complete($request, (int) $choices->first()->account_id))->header('Referrer-Policy', 'no-referrer')
-                : redirect()->route('dingtalk.accounts')->header('Referrer-Policy', 'no-referrer');
+                ? redirect()->to($login->complete($request, (int) $choices->first()->account_id))->header('Referrer-Policy', 'no-referrer')->header('Cache-Control', 'no-store')
+                : redirect()->route('dingtalk.accounts')->header('Referrer-Policy', 'no-referrer')->header('Cache-Control', 'no-store');
         } catch (HttpException $exception) {
             app(AuditService::class)->record('login.denied', null, null, ['reason' => 'callback_failed', 'status' => $exception->getStatusCode()]);
             return redirect(app(PortalDomainService::class)->mainLoginUrl())->withErrors(['dingtalk' => $exception->getMessage()])
@@ -31,6 +36,10 @@ class DingTalkLoginController extends Controller
 
     public function accounts(Request $request, LoginService $login)
     {
+        if (Admin::guard()->check()) {
+            return redirect(app(PortalDomainService::class)->mainAdminUrl())->header('Cache-Control', 'no-store');
+        }
+
         try {
             $choices = $login->pendingChoices($request);
             if ($choices->isEmpty()) {
@@ -44,6 +53,10 @@ class DingTalkLoginController extends Controller
 
     public function select(Request $request, LoginService $login)
     {
+        if (Admin::guard()->check()) {
+            return redirect(app(PortalDomainService::class)->mainAdminUrl())->header('Cache-Control', 'no-store');
+        }
+
         try {
             $account = $request->input('account_id');
             if (!is_scalar($account) || !ctype_digit((string) $account) || (int) $account <= 0) {

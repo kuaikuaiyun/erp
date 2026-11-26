@@ -70,7 +70,7 @@ class AuthenticationModeSwitchTest extends TestCase
         $stateReads = 0;
         foreach ($queries as $query) {
             self::assertDoesNotMatchRegularExpression('/^\\s*(insert|update|delete|replace)\\b|for\\s+update|lock\\s+in\\s+share/i', $query['query']);
-            if (str_contains($query['query'], 'erp_authentication_states')) $stateReads++;
+            if (preg_match('/\bfrom\s+[`"]?erp_authentication_states\b/i', $query['query'])) $stateReads++;
         }
         self::assertSame(5, $stateReads);
     }

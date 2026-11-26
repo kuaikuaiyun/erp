@@ -40,7 +40,7 @@
             setSubmitting(true);
             window.fetch(form.getAttribute('data-tencent-options-url'), {
                 credentials: 'same-origin',
-                headers: { 'Accept': 'application/json' }
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
                 if (!response.ok) { throw new Error('Unable to create Tencent captcha options.'); }
                 return response.json();

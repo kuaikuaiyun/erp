@@ -143,7 +143,7 @@ return [
         // The URIs that should be excluded from authorization.
         'excepts' => [
             'auth/login',
-            'auth/login/*',
+            'auth/dingtalk/start',
             'auth/logout',
             'auth/tencent-captcha/options',
         ],

@@ -11,7 +11,7 @@ class DingTalkIdentity extends Model
 
     protected $guarded = ['id'];
 
-    protected $casts = ['active' => 'boolean', 'version' => 'integer', 'verified_at' => 'datetime', 'next_check_at' => 'datetime'];
+    protected $casts = ['active' => 'boolean', 'version' => 'integer'];
 
     public function bindings(): HasMany
     {

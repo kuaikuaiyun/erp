@@ -3,9 +3,6 @@
 return [
     'auth_mode' => env('ERP_AUTH_MODE', 'password'),
     'challenge_seconds' => max(60, (int) env('DINGTALK_CHALLENGE_SECONDS', 300)),
-    'membership_seconds' => max(60, (int) env('DINGTALK_MEMBERSHIP_SECONDS', 300)),
-    'reconcile_seconds' => max(60, (int) env('DINGTALK_RECONCILE_SECONDS', 60)),
-    'reconcile_batch' => max(1, (int) env('DINGTALK_RECONCILE_BATCH', 10)),
     'http_timeout' => max(1, (int) env('DINGTALK_HTTP_TIMEOUT', 5)),
     'login_rate' => max(1, (int) env('DINGTALK_LOGIN_RATE', 120)),
     'callback_rate' => max(1, (int) env('DINGTALK_CALLBACK_RATE', 120)),

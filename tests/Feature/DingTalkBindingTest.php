@@ -8,7 +8,6 @@ use App\Models\DingTalkAudit;
 use App\Models\DingTalkIdentity;
 use App\Services\DingTalk\BindingService;
 use App\Services\DingTalk\LoginService;
-use App\Services\DingTalk\MembershipService;
 use Tests\TestCase;
 
 class DingTalkBindingTest extends TestCase
@@ -60,18 +59,16 @@ class DingTalkBindingTest extends TestCase
         $this->denied(fn () => $login->complete($request, $account->id), 403);
     }
 
-    public function test_rejoining_does_not_automatically_restore_any_old_binding(): void
+    public function test_rebinding_one_account_does_not_restore_another_manual_unbinding(): void
     {
         $first = $this->account();
         $second = $this->account();
         $service = app(BindingService::class);
         $one = $service->bind($first->id, 'user-a');
         $two = $service->bind($second->id, 'user-a');
-        $events = app(MembershipService::class);
-        $events->receiveEvent(['CorpId' => 'dingcorp-test', 'EventType' => 'user_leave_org', 'UserId' => ['user-a'], 'eventId' => 'leave-a']);
-        $events->receiveEvent(['CorpId' => 'dingcorp-test', 'EventType' => 'user_add_org', 'UserId' => ['user-a'], 'eventId' => 'rejoin-a']);
+        $service->unbind($one->id);
+        $service->unbind($two->id);
         self::assertFalse($one->fresh()->active);
-        self::assertFalse($one->identity()->first()->active);
         $service->bind($first->id, 'user-a');
         self::assertTrue($one->fresh()->active);
         self::assertFalse($two->fresh()->active);

@@ -226,7 +226,7 @@ class PortalController extends Controller
             'grantedDepartmentIds' => $grantedDepartmentIds,
             'history' => $portal ? $this->portals->authorizationHistory($portal) : collect(),
             'domain' => $portal ? $this->domains->portalDomain($portal) : null,
-            'rootDomain' => (string) config('portals.root_domain', ''),
+            'rootDomain' => $this->domains->rootDomain(),
             'domainConfigured' => $this->domains->isConfigured(),
             'statuses' => $this->statusOptions(),
         ])->render();

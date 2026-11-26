@@ -47,6 +47,49 @@ class ErpPasswordLoginTest extends TestCase
         app(PasswordLoginService::class)->login($request);
     }
 
+    public function test_tencent_options_cannot_be_the_return_page_for_an_incorrect_password(): void
+    {
+        config(['portals.scheme' => 'http']);
+        \App\Models\ErpLoginSite::query()->create([
+            'domain' => 'a.test', 'display_name' => 'Company A', 'password_enabled' => true,
+        ]);
+        $account = $this->account();
+        $captcha = $this->mock(\App\Services\LoginCaptchaService::class);
+        $captcha->shouldReceive('publicConfiguration')->andReturn([
+            'enabled' => true, 'provider' => 'tencent_captcha', 'site_key' => '12345',
+        ]);
+        $captcha->shouldReceive('tencentCaptchaClientOptions')->andReturn([
+            'aid_encrypted' => 'test-options', 'aid_encrypted_type' => 'CBC',
+        ]);
+        $captcha->shouldReceive('maxAttempts')->andReturn(5);
+        $captcha->shouldReceive('decaySeconds')->andReturn(60);
+        $captcha->shouldReceive('verify')->twice()->andReturn(true);
+
+        $login = 'http://a.test/kky/auth/login';
+        $options = 'http://a.test/kky/auth/tencent-captcha/options';
+        $this->get($login)->assertOk()->assertSessionHas('_previous.url', $login)
+            ->assertSee('已接入腾讯云天御安全验证，请按页面提示完成腾讯验证码验证。')
+            ->assertDontSee('login-captcha__heading', false);
+        $this->get($options, ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
+            ->assertOk()->assertSessionHas('_previous.url', $login);
+        $this->get($options, ['Accept' => 'application/json'])
+            ->assertOk()->assertSessionHas('_previous.url', $options);
+
+        $payload = [
+            'username' => $account->username, 'password' => 'incorrect',
+            'tencent_captcha_ticket' => 'test-ticket', 'tencent_captcha_randstr' => 'test-randstr',
+        ];
+        $message = __('enterprise_login.invalid_credentials');
+        $this->post($login, $payload)->assertRedirect($login)
+            ->assertSessionHasErrors(['username' => $message])
+            ->assertSessionHas('_old_input', ['username' => $account->username]);
+        $this->get($login)->assertOk()->assertSee($message)
+            ->assertSee('value="'.$account->username.'"', false)
+            ->assertDontSee('test-ticket');
+        $this->postJson($login, $payload)->assertUnprocessable()->assertJsonValidationErrors(['username' => $message]);
+        $this->assertGuest('admin');
+    }
+
     public function test_password_login_is_closed_in_dingtalk_mode(): void
     {
         $this->denied(fn () => app(PasswordLoginService::class)->login($this->browser()), 403);

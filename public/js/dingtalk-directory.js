@@ -35,6 +35,7 @@
                 c.abort();
             }, 30000),
             t = options.t;
+        var multipart = options.body instanceof FormData;
         try {
             var r = await fetch(path, {
                 method: options.method || (options.body ? 'POST' : 'GET'),
@@ -43,11 +44,11 @@
                 signal: c.signal,
                 headers: {
                     Accept: 'application/json',
-                    'Content-Type': 'application/json',
+                    ...(multipart ? {} : { 'Content-Type': 'application/json' }),
                     'X-Requested-With': 'XMLHttpRequest',
                     'X-CSRF-TOKEN': options.csrf || '',
                 },
-                body: options.body ? JSON.stringify(options.body) : undefined,
+                body: multipart ? options.body : options.body ? JSON.stringify(options.body) : undefined,
             });
             if (r.redirected) throw Error(t('session_expired'));
             var data;

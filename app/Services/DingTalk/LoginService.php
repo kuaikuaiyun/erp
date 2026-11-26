@@ -6,6 +6,9 @@ use App\Http\Middleware\EnforceAdminLoginExpiration;
 use App\Models\AdminUser;
 use App\Models\DingTalkBinding;
 use App\Models\DingTalkIdentity;
+use App\Services\Authentication\LoginSiteService;
+use App\Services\Authentication\ModeService;
+use Illuminate\Support\Facades\Cache;
 use App\Portal\Services\PortalDomainService;
 use App\Portal\Services\PortalReturnUrlService;
 use Encore\Admin\Facades\Admin;
@@ -20,11 +23,15 @@ class LoginService
     private const PENDING_KEY = 'dingtalk.pending';
 
     public function __construct(private readonly Client $client, private readonly BindingService $bindings,
-        private readonly MembershipService $memberships, private readonly AuditService $audit) {}
+        private readonly AuditService $audit) {}
 
     public function start(Request $request, ?int $companyId = null): array
     {
-        app(\App\Services\Authentication\ModeService::class)->requireDingTalk();
+        $policy = app(ModeService::class)->requireMethod($request, 'dingtalk');
+        if (isset($policy->site_id)) {
+            $companyId = (int) $policy->company_id;
+            abort_unless($companyId, 503, __('dingtalk.errors.not_configured'));
+        }
         $companies = app(CompanyService::class);
         $options = $companyId ? null : $companies->options();
         $company = $companyId ? $companies->enabled($companyId) : ($options->count() === 1 ? $companies->enabled((int)$options->first()->id) : throw new HttpException(503, __('dingtalk.company.choose')));
@@ -35,7 +42,8 @@ class LoginService
             throw new HttpException(503, __('dingtalk.errors.not_configured'));
         }
         $request->session()->forget(self::PENDING_KEY);
-        $state = $this->challenge($request, 'state', company: $company);
+        $this->pruneExpiredChallenges();
+        $state = $this->challenge($request, 'state', company: $company, policy: $policy);
         $parameters = ['redirect_uri' => $company->redirect_uri, 'response_type' => 'code',
             'client_id' => $company->app_key, 'scope' => 'openid corpid', 'state' => $state,
             'prompt' => 'consent', 'corpId' => $company->corp_id];
@@ -48,12 +56,12 @@ class LoginService
 
     public function acceptCallback(Request $request, string $state, string $code): Collection
     {
-        app(\App\Services\Authentication\ModeService::class)->requireDingTalk();
+        $policy = app(ModeService::class)->requireMethod($request, 'dingtalk');
         // Consume before exchanging the code, including failed exchanges. Codes are never retried/reused.
         $stateProof = $this->consume($request, $state, 'state');
         $company = app(CompanyService::class)->enabled((int)$stateProof->company_id);
         app(CompanyService::class)->assertVersion($company, (int)$stateProof->company_version);
-        app(LoginEntryService::class)->remember($request, $company);
+        $this->assertChallengePolicy($stateProof, $policy);
         $client = $this->client->forCompany($company);
         $unionId = $client->loginUnionId($code);
         $member = $client->memberByUnionId($unionId);
@@ -66,18 +74,13 @@ class LoginService
             $this->audit->record('login.denied', $identity, null, ['reason' => 'not_bound']);
             throw new HttpException(403, __('dingtalk.errors.not_bound'));
         }
-        // Fetch again with the local generation snapshot so a concurrent leave cannot revive the identity.
-        $identity = $this->memberships->refresh($identity);
-        if (!$identity->active) {
-            throw new HttpException(401, __('dingtalk.errors.revoked'));
-        }
         $choices = $this->choices($identity);
         if ($choices->isEmpty()) {
             $this->audit->record('login.denied', $identity, null, ['reason' => 'no_account']);
             throw new HttpException(403, __('dingtalk.errors.no_account'));
         }
         $snapshot = $choices->mapWithKeys(fn (DingTalkBinding $binding): array => [(string) $binding->id => $binding->version])->all();
-        $pending = $this->challenge($request, 'pending', $identity, $snapshot, $stateProof->expires_at, $company);
+        $pending = $this->challenge($request, 'pending', $identity, $snapshot, $stateProof->expires_at, $company, $policy);
         $request->session()->put(self::PENDING_KEY, $pending);
         $this->audit->record('login.verified', $identity, null, ['accounts' => $choices->pluck('account_id')->all()]);
         return $choices;
@@ -85,12 +88,10 @@ class LoginService
 
     public function pendingChoices(Request $request): Collection
     {
-        app(\App\Services\Authentication\ModeService::class)->requireDingTalk();
-        $pending = $this->pending($request);
+        $pending = $this->pending($request, app(ModeService::class)->requireMethod($request, 'dingtalk'));
         $company = app(CompanyService::class)->enabled((int)$pending->company_id);
         $identity = DingTalkIdentity::query()->find($pending->identity_id);
-        if (!$identity || !hash_equals($company->corp_id,$identity->corp_id) || !$identity->active || $identity->version !== (int) $pending->identity_version
-            || !$this->memberships->isFresh($identity)) {
+        if (!$identity || !hash_equals($company->corp_id,$identity->corp_id) || !$identity->active || $identity->version !== (int) $pending->identity_version) {
             throw new HttpException(401, __('dingtalk.errors.expired'));
         }
         $snapshot = json_decode($pending->payload ?? '{}', true);
@@ -101,25 +102,25 @@ class LoginService
     public function complete(Request $request, int $accountId): string
     {
         $modeService = app(\App\Services\Authentication\ModeService::class);
-        $modeState = $modeService->requireDingTalk();
-        $pending = $this->pending($request);
+        $modeState = $modeService->requireMethod($request, 'dingtalk');
+        $pending = $this->pending($request, $modeState);
         $company = app(CompanyService::class)->enabled((int)$pending->company_id);
-        $identity = DingTalkIdentity::query()->findOrFail($pending->identity_id);
-        if (!hash_equals($company->corp_id,$identity->corp_id) || $identity->version !== (int) $pending->identity_version) {
+        $identity = DingTalkIdentity::query()->find($pending->identity_id);
+        if (!$identity || !$identity->active || !hash_equals($company->corp_id,$identity->corp_id) || $identity->version !== (int) $pending->identity_version) {
             throw new HttpException(401, __('dingtalk.errors.expired'));
         }
-        $identity = $this->memberships->refresh($identity);
-        if (!$identity->active) {
-            throw new HttpException(401, __('dingtalk.errors.revoked'));
+        $member = $this->client->forCompany($company)->memberByUserId($identity->user_id);
+        if (!$member || !hash_equals($identity->union_id, $member['union_id'])) {
+            throw new HttpException(403, __('dingtalk.errors.not_member'));
         }
-        $proof = DB::transaction(function () use ($request, $accountId, $pending, $identity, $company): array {
+        $proof = DB::transaction(function () use ($request, $accountId, $pending, $identity, $company, $member): array {
             app(CompanyService::class)->assertVersion($company, (int)$pending->company_version);
             $account = AdminUser::query()->lockForUpdate()->find($accountId);
             $current = DingTalkIdentity::query()->lockForUpdate()->findOrFail($identity->id);
             $binding = DingTalkBinding::query()->where('account_id', $accountId)->where('identity_id', $current->id)->lockForUpdate()->first();
             $snapshot = json_decode($pending->payload ?? '{}', true);
             if (!$account || !$current->active || $current->version !== (int) $pending->identity_version
-                || !$this->memberships->isFresh($current) || !$binding || !$binding->active
+                || !hash_equals($current->union_id, $member['union_id']) || !$binding || !$binding->active
                 || (int) ($snapshot[(string) $binding->id] ?? 0) !== $binding->version
                 || !$this->bindings->eligibleAccount($account)) {
                 throw new HttpException(403, __('dingtalk.errors.no_account'));
@@ -138,9 +139,15 @@ class LoginService
         $request->session()->regenerate(true);
         $request->session()->forget(self::PENDING_KEY);
         $request->session()->put(self::PROOF_KEY, $proof);
-        $modeService->stamp($request, Admin::guard()->user(), $modeState);
-        $request->session()->put(EnforceAdminLoginExpiration::LOGIN_ISSUED_AT_KEY, $proof['issued_at']);
-        $this->validSession($request, Admin::guard()->user());
+        try {
+            $modeService->stamp($request, Admin::guard()->user(), $modeState);
+            $request->session()->put(EnforceAdminLoginExpiration::LOGIN_ISSUED_AT_KEY, $proof['issued_at']);
+            $this->validSession($request, Admin::guard()->user());
+        } catch (\Throwable $exception) {
+            Admin::guard()->logoutCurrentDevice();
+            $request->session()->forget([self::PROOF_KEY, ModeService::KEY]);
+            throw $exception;
+        }
         $this->audit->record('login.succeeded', $identity, $accountId, ['binding_id' => $proof['binding_id']]);
 
         return app(PortalReturnUrlService::class)->pull($request) ?? app(PortalDomainService::class)->mainAdminUrl();
@@ -166,12 +173,8 @@ class LoginService
             || !$this->bindings->eligibleAccount($account)) {
             throw new HttpException(401, __('dingtalk.errors.revoked'));
         }
-        if (!$this->memberships->isFresh($identity)) {
-            $identity = $this->memberships->refresh($identity);
-            if (!$this->memberships->isFresh($identity)) {
-                throw new HttpException(401, __('dingtalk.errors.revoked'));
-            }
-        }
+        $site = app(LoginSiteService::class)->forRequest($request);
+        abort_if($site && (int) $site->dingtalk_company_id !== (int) $company->id, 401, __('dingtalk.errors.revoked'));
         return $identity;
     }
 
@@ -179,6 +182,26 @@ class LoginService
     {
         return $identity->bindings()->where('active', true)->with('account')->orderBy('account_id')->get()
             ->filter(fn (DingTalkBinding $binding): bool => $binding->account !== null && $this->bindings->eligibleAccount($binding->account))->values();
+    }
+
+    private function pruneExpiredChallenges(): void
+    {
+        if (!Cache::add('dingtalk:challenges:prune', true, 60)) {
+            return;
+        }
+
+        $expired = DB::table('dingtalk_challenges')->where('expires_at', '<', now()->subDay());
+        $ids = (clone $expired)->orderBy('expires_at')->limit(500)->pluck('id');
+        if ($ids->isNotEmpty()) {
+            $expired->whereIn('id', $ids)->delete();
+        }
+    }
+
+    private function assertChallengePolicy(object $challenge, object $policy): void
+    {
+        abort_unless((int) ($challenge->login_site_id ?? 0) === (int) ($policy->site_id ?? 0)
+            && (!isset($policy->site_id) || ((int) $challenge->login_method_version === (int) $policy->version
+                && (int) $challenge->company_id === (int) $policy->company_id)), 401, __('dingtalk.errors.expired'));
     }
 
     private function browserHash(Request $request): string
@@ -189,13 +212,15 @@ class LoginService
         return hash('sha256', $request->session()->get('dingtalk.browser'));
     }
 
-    private function challenge(Request $request, string $purpose, ?DingTalkIdentity $identity = null, ?array $payload = null, ?string $expiresAt = null, ?\App\Models\DingTalkCompany $company = null): string
+    private function challenge(Request $request, string $purpose, ?DingTalkIdentity $identity = null, ?array $payload = null, ?string $expiresAt = null, ?\App\Models\DingTalkCompany $company = null, ?object $policy = null): string
     {
         $token = bin2hex(random_bytes(32));
         DB::table('dingtalk_challenges')->insert(['token_hash' => hash('sha256', $token), 'browser_hash' => $this->browserHash($request),
             'company_id' => $company?->id, 'company_version' => $company?->version, 'purpose' => $purpose, 'identity_id' => $identity?->id, 'identity_version' => $identity?->version,
             'payload' => $payload === null ? null : json_encode($payload), 'expires_at' => $expiresAt ?? now()->addSeconds(config('dingtalk.challenge_seconds')),
-            'created_at' => now()]);
+            'created_at' => now(),
+            ...(isset($policy->site_id) ? ['login_site_id' => $policy->site_id, 'login_method_version' => $policy->version] : []),
+        ]);
         return $token;
     }
 
@@ -211,7 +236,7 @@ class LoginService
         return $challenge;
     }
 
-    private function pending(Request $request): object
+    private function pending(Request $request, object $policy): object
     {
         $token = $request->session()->get(self::PENDING_KEY);
         $pending = is_string($token) ? DB::table('dingtalk_challenges')->where('token_hash', hash('sha256', $token))
@@ -220,6 +245,7 @@ class LoginService
         if (!$pending) {
             throw new HttpException(401, __('dingtalk.errors.expired'));
         }
+        $this->assertChallengePolicy($pending, $policy);
         $company = app(CompanyService::class)->enabled((int)$pending->company_id);
         app(CompanyService::class)->assertVersion($company, (int)$pending->company_version);
         return $pending;

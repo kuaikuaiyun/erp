@@ -19,12 +19,11 @@ class BindingService
         $company = $companyId ? $companies->enabled($companyId) : ($options->count() === 1 ? $companies->enabled((int)$options->first()->id) : throw new HttpException(422, __('dingtalk.company.choose')));
         $companyVersion = (int)$company->version;
         $expectedVersion = DingTalkIdentity::query()->where('corp_id', $company->corp_id)->where('user_id', $userId)->value('version');
-        $startedAt = now();
         $member = $this->client->forCompany($company)->memberByUserId($userId);
         if (!$member) {
             throw new HttpException(403, __('dingtalk.errors.not_member'));
         }
-        return DB::transaction(function () use ($accountId, $member, $startedAt, $expectedVersion, $requireAdministrator, $company, $companyVersion): DingTalkBinding {
+        return DB::transaction(function () use ($accountId, $member, $expectedVersion, $requireAdministrator, $company, $companyVersion): DingTalkBinding {
             // Serializes all binding changes for one ERP account, including concurrent administrators.
             $account = AdminUser::query()->lockForUpdate()->findOrFail($accountId);
             app(CompanyService::class)->assertVersion($company, $companyVersion);
@@ -35,7 +34,7 @@ class BindingService
             }
             $identity = DingTalkIdentity::query()->firstOrCreate(
                 ['corp_id' => $member['corp_id'], 'user_id' => $member['user_id']],
-                ['union_id' => $member['union_id'], 'name' => $member['name'], 'active' => true, 'verified_at' => $startedAt],
+                ['union_id' => $member['union_id'], 'name' => $member['name'], 'active' => true],
             );
             $created = $identity->wasRecentlyCreated;
             $identity = DingTalkIdentity::query()->lockForUpdate()->findOrFail($identity->id);
@@ -52,8 +51,7 @@ class BindingService
                     ->update(['active' => false, 'version' => DB::raw('version + 1'), 'updated_at' => now()]);
                 $identity->version++;
             }
-            $identity->forceFill(['union_id' => $member['union_id'], 'name' => $member['name'], 'active' => true,
-                'verified_at' => $startedAt, 'next_check_at' => now()->addSeconds(config('dingtalk.reconcile_seconds'))])->save();
+            $identity->forceFill(['union_id' => $member['union_id'], 'name' => $member['name'], 'active' => true])->save();
             $binding = DingTalkBinding::query()->firstOrNew(['account_id' => $accountId, 'identity_id' => $identity->id]);
             if ($binding->exists && $binding->active) {
                 return $binding;
@@ -126,8 +124,5 @@ class BindingService
         $operatorCompany=app(CompanyService::class)->enabled((int)($proof['company_id'] ?? 0));
         app(CompanyService::class)->assertVersion($operatorCompany,(int)($proof['company_version'] ?? 0));
         if (!hash_equals($operatorCompany->corp_id,$current->corp_id)) throw new HttpException(403, __('dingtalk.errors.revoked'));
-        if (!$current->verified_at || $current->verified_at->timestamp + config('dingtalk.membership_seconds') <= now()->timestamp) {
-            throw new HttpException(401, __('dingtalk.errors.expired'));
-        }
     }
 }

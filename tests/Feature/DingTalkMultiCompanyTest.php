@@ -5,8 +5,6 @@ use App\Models\DingTalkCompany;
 use App\Models\DingTalkIdentity;
 use App\Services\DingTalk\LoginService;
 use App\Services\DingTalk\BindingService;
-use App\Services\DingTalk\MembershipService;
-use App\Services\DingTalk\CallbackCrypto;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -16,11 +14,10 @@ class DingTalkMultiCompanyTest extends TestCase
     private function second(): DingTalkCompany
     {
         $attributes=$this->company->getAttributes();
-        unset($attributes['id'],$attributes['created_at'],$attributes['updated_at']);
+        unset($attributes['id'],$attributes['created_at'],$attributes['updated_at'],$attributes['login_slug']);
         $company=new DingTalkCompany();
         $company->setRawAttributes($attributes);
-        $company->forceFill(['name'=>'Second company','corp_id'=>'dingcorp-second','app_key'=>'second-key','app_secret'=>'second-secret',
-            'callback_token'=>'second-token','callback_aes_key'=>rtrim(base64_encode(str_repeat('b',32)),'='),'callback_owner_key'=>'second-key']);
+        $company->forceFill(['name'=>'Second company','corp_id'=>'dingcorp-second','app_key'=>'second-key','app_secret'=>'second-secret']);
         $company->save(); return $company->fresh();
     }
     public function test_identical_member_ids_in_different_companies_are_separate_and_ordinary_accounts_still_allow_one_identity(): void
@@ -31,11 +28,11 @@ class DingTalkMultiCompanyTest extends TestCase
         $b=$service->bind($two->id,'user-a',false,$second->id);
         self::assertNotSame($a->identity_id,$b->identity_id); self::assertSame(2,DingTalkIdentity::query()->count());
     }
-    public function test_departure_in_one_company_does_not_revoke_another_company(): void
+    public function test_manual_unbinding_in_one_company_does_not_revoke_another_company(): void
     {
         $second=$this->second(); $one=$this->account(); $two=$this->account(); $service=app(BindingService::class);
         $a=$service->bind($one->id,'user-a',false,$this->company->id); $b=$service->bind($two->id,'user-a',false,$second->id);
-        app(MembershipService::class)->receiveEvent(['CorpId'=>'dingcorp-test','EventType'=>'user_leave_org','UserId'=>['user-a'],'eventId'=>'leave-first'],$this->company);
+        $service->unbind($a->id);
         self::assertFalse($a->fresh()->active); self::assertTrue($b->fresh()->active);
     }
     public function test_state_cannot_switch_companies_and_is_consumed_even_after_a_wrong_company_claim(): void
@@ -61,10 +58,5 @@ class DingTalkMultiCompanyTest extends TestCase
         $this->company->update(['enabled'=>false,'version'=>2]);
         $this->denied(fn()=>app(LoginService::class)->validSession($first,$account),403);
         self::assertSame($b->identity_id,app(LoginService::class)->validSession($other,$account)->id);
-    }
-    public function test_callbacks_are_authenticated_with_the_selected_company_credentials(): void
-    {
-        $second=$this->second(); $firstCrypto=app(CallbackCrypto::class)->forCompany($this->company); $signed=$firstCrypto->encrypt('message');
-        $this->denied(fn()=>app(CallbackCrypto::class)->forCompany($second)->decrypt($signed['msg_signature'],$signed['timeStamp'],$signed['nonce'],$signed['encrypt']),403);
     }
 }

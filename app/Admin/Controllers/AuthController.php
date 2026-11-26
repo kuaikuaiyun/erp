@@ -6,19 +6,22 @@ use App\Admin\Form\Field\ProfileAvatar;
 use App\Portal\Services\PortalReturnUrlService;
 use App\Services\LoginCaptchaService;
 use App\Services\DingTalk\LoginService;
-use App\Services\SystemSettingService;
+use App\Services\DingTalk\LoginEntryService;
+use App\Services\Authentication\ModeService;
+use App\Portal\Services\PortalDomainService;
 use Encore\Admin\Controllers\AuthController as BaseAuthController;
 use Encore\Admin\Form;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class AuthController extends BaseAuthController
 {
     protected $loginView = 'admin.auth.login';
 
-    public function __construct(private readonly LoginCaptchaService $captcha, private readonly SystemSettingService $settings) {}
+    public function __construct(private readonly LoginCaptchaService $captcha) {}
 
     protected function settingForm()
     {
@@ -36,35 +39,35 @@ class AuthController extends BaseAuthController
         return $form;
     }
 
-    public function getLogin(?string $slug = null)
+    public function getLogin(): \Symfony\Component\HttpFoundation\Response
     {
+        $request = request();
         if ($this->guard()->check()) {
-            if ($portalReturnUrl = app(PortalReturnUrlService::class)->pull(request())) return redirect()->to($portalReturnUrl);
-            return redirect($this->redirectPath());
+            return redirect()->to(app(PortalReturnUrlService::class)->pull($request) ?? app(PortalDomainService::class)->mainAdminUrl());
         }
-        $entries = app(\App\Services\DingTalk\LoginEntryService::class);
-        $data = $entries->viewData(request(), null, false);
-        // The public endpoint never uses session hints to enumerate or select companies.
-        $data = array_merge($data, ['brandName' => config('admin.name'), 'brandLogo' => null,
-            'pageTitle' => __('dingtalk.login.title').' · '.config('admin.name'), 'welcome' => __('dingtalk.entry.public_hint'),
-            'entryUrl' => null, 'flow' => null, 'loginError' => null, 'entryClosed' => true]);
+
+        $modes = app(ModeService::class);
+        $data = app(LoginEntryService::class)->viewData($request);
         try {
-            if (app(\App\Services\Authentication\ModeService::class)->current()->mode === 'password') {
-                if ($slug !== null) return redirect()->to($entries->url(request()));
-                return response()->view('admin.auth.password', ['captcha' => $this->captcha->publicConfiguration()])->header('Cache-Control', 'no-store');
-            }
-            if ($slug !== null) {
-                $company = app(\App\Services\DingTalk\CompanyService::class)->forLoginSlug($slug);
-                $entries->remember(request(), $company);
-                $data = array_merge($data, $entries->viewData(request(), $company), ['entryClosed' => false]);
-                $data['flow'] = app(LoginService::class)->start(request(), (int) $company->id);
-            }
-            return response()->view($this->loginView, $data)->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
+            $password = $modes->allows($request, 'password');
+            $dingtalk = $modes->allows($request, 'dingtalk');
+
+            return response()->view($this->loginView, $data + [
+                'passwordEnabled' => $password,
+                'dingtalkEnabled' => $dingtalk,
+                'captcha' => $password ? $this->captcha->publicConfiguration() : null,
+            ])->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
         } catch (HttpException $exception) {
-            $data['loginError'] = $exception->getMessage();
-            return response()->view($this->loginView, $data, $exception->getStatusCode())
+            return response()->view($this->loginView, $data + ['loginError' => $exception->getMessage()], $exception->getStatusCode())
                 ->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
         }
+    }
+
+    public function startDingTalk(Request $request, LoginService $login): JsonResponse
+    {
+        abort_if($this->guard()->check(), 403, __('dingtalk.errors.revoked'));
+
+        return response()->json($login->start($request))->header('Cache-Control', 'no-store');
     }
 
     public function getLogout(Request $request)
@@ -78,11 +81,24 @@ class AuthController extends BaseAuthController
 
     public function postLogin(Request $request)
     {
-        return redirect()->to(app(\App\Services\Authentication\PasswordLoginService::class)->login($request));
+        try {
+            return redirect()->to(app(\App\Services\Authentication\PasswordLoginService::class)->login($request));
+        } catch (ValidationException $exception) {
+            if ($request->expectsJson()) {
+                throw $exception;
+            }
+
+            $username = $request->input('username');
+
+            return redirect()->to(app(LoginEntryService::class)->url($request))
+                ->withErrors($exception->errors())
+                ->withInput(is_string($username) ? ['username' => $username] : []);
+        }
     }
 
     public function tencentCaptchaOptions(): JsonResponse
     {
+        app(ModeService::class)->requireMethod(request(), 'password');
         $options = $this->captcha->tencentCaptchaClientOptions(); abort_if($options === null, 404);
         return response()->json($options)->header('Cache-Control', 'no-store, private, max-age=0')->header('Pragma', 'no-cache');
     }

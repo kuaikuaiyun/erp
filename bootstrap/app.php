@@ -15,7 +15,10 @@ $app = Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->web(append: [\App\Http\Middleware\EnforceDingTalkSession::class]);
+        $middleware->web(
+            prepend: [\App\Http\Middleware\UseEnterpriseSessionDomain::class],
+            append: [\App\Http\Middleware\EnforceDingTalkSession::class],
+        );
         $middleware->validateCsrfTokens(except: [
             'shopify/webhooks/orders',
             'api/paypal/import',
