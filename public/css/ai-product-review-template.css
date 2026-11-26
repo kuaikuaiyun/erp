@@ -19,9 +19,9 @@
 .ai-product-review-page .assistant-filter-multiselect .flt-picker-options input,
 .ai-product-review-page input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: #1884bf; }
 .ai-product-review-page .assistant-filter-multiselect .flt-picker-actions { display: none; }
-.ai-product-review-records { overflow: visible; }
-.ai-product-review-table-wrap { overflow: visible; }
-.ai-product-review-table { width: 100%; min-width: 0; margin: 0; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.ai-product-review-records { overflow: hidden; }
+.ai-product-review-table-wrap { width: 100%; overflow: hidden; }
+.ai-product-review-page .ai-product-review-table { width: 100%; min-width: 100% !important; max-width: 100%; margin: 0; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .ai-product-review-table th { padding: 12px 9px; background: #eaf4fa; color: #345c75; border-right: 1px solid #dce8ef; border-bottom: 1px solid #dce8ef; font-size: 12px; text-align: center; white-space: normal; }
 .ai-product-review-table td { padding: 11px 9px; border-right: 1px solid #e7eef3; border-bottom: 1px solid #e7eef3; text-align: center; vertical-align: middle; overflow-wrap: anywhere; }
 .ai-product-review-table tbody tr:nth-child(even) td { background: #f3f9fd; }

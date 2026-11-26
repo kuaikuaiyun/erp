@@ -11,7 +11,7 @@
 @endphp
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
-<link rel="stylesheet" href="{{ $portalOrigin }}/css/ai-product-review-template.css?v=20261125-2">
+<link rel="stylesheet" href="{{ $portalOrigin }}/css/ai-product-review-template.css?v=20261126-1">
 @endpush
 @push('scripts')<script src="{{ $portalOrigin }}/js/assistant-filter-multiselect.js?v=20261124-2"></script>@endpush
 
