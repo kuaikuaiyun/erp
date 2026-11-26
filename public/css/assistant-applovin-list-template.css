@@ -367,3 +367,48 @@
         padding: 8px 7px !important;
     }
 }
+.applovin-list-template .applovin-risk-cell {
+    min-width: 270px;
+    vertical-align: middle;
+}
+
+.applovin-list-template .applovin-risk-form {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 255px;
+    margin: 0;
+}
+
+.applovin-list-template .applovin-risk-form textarea {
+    width: 100%;
+    min-width: 195px;
+    min-height: 54px;
+    padding: 7px 9px;
+    resize: vertical;
+    border: 1px solid #ccdce8;
+    border-radius: 6px;
+    background: #fff;
+    color: #29475d;
+    line-height: 1.45;
+}
+
+.applovin-list-template .applovin-risk-form textarea:focus {
+    border-color: #42a5e8;
+    box-shadow: 0 0 0 2px rgba(66, 165, 232, .12);
+    outline: none;
+}
+
+.applovin-list-template .applovin-risk-form .btn {
+    flex: 0 0 auto;
+    margin-top: 1px;
+}
+
+.applovin-list-template .applovin-risk-readonly {
+    min-width: 205px;
+    max-width: 360px;
+    color: #3d5668;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

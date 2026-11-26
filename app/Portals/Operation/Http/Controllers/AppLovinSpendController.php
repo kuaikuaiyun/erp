@@ -3,6 +3,7 @@
 namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppLovinAccountRiskNote;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -87,6 +88,32 @@ class AppLovinSpendController extends Controller
         return back()->with('success', '账户消耗图片已上传。');
     }
 
+    public function saveRiskNote(Request $request): RedirectResponse
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $validated = $request->validate([
+            'account_key' => ['required', 'string', 'size:64'],
+            'risk_factors' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $account = $this->summarize($this->reportsFor($context['user'], false)->get())
+            ->firstWhere('account_key', $validated['account_key']);
+        abort_unless($account, 403);
+        $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+        abort_if($number === '', 422, '账号编号为空，无法保存账户限额/风控等因素。');
+        $content = trim((string) ($validated['risk_factors'] ?? ''));
+        if ($content === '') {
+            AppLovinAccountRiskNote::query()->where('account_number', $number)->delete();
+        } else {
+            AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], [
+                'risk_factors' => $content, 'updated_by' => $context['user']->getKey(),
+            ]);
+        }
+
+        return back()->with('success', '账户限额/风控等因素已保存。');
+    }
+
     public function pendingCount(Request $request): JsonResponse
     {
         $context = $this->portalEntries->portalContext($request);
@@ -167,7 +194,12 @@ class AppLovinSpendController extends Controller
     private function withScreenshots($accounts)
     {
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
-        return $accounts->map(fn (array $account) => [...$account, 'uploaded_screenshot' => $screenshots->get($account['account_key'])]);
+        $numbers = $accounts->pluck('account_number')->map(fn ($number) => AppLovinAccountRiskNote::normalizeAccountNumber((string) $number))->filter()->unique();
+        $notes = AppLovinAccountRiskNote::query()->whereIn('account_number', $numbers)->pluck('risk_factors', 'account_number');
+        return $accounts->map(function (array $account) use ($screenshots, $notes): array {
+            $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+            return [...$account, 'uploaded_screenshot' => $screenshots->get($account['account_key']), 'risk_factors' => (string) ($notes->get($number) ?: '')];
+        });
     }
 
     private function paginate($items, Request $request): LengthAwarePaginator

@@ -24,12 +24,14 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
         Schema::create('assistant_domain_stores', function (Blueprint $table): void {
             $table->id();
             $table->string('domain');
+            $table->string('shop_name')->nullable();
             $table->unsignedBigInteger('owner_user_id');
         });
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('assistant_domain_store_id');
             $table->unsignedBigInteger('assigned_owner_user_id');
+            $table->string('shopify_order_id')->nullable();
             $table->string('operator_name');
             $table->dateTime('order_created_at');
             $table->string('media_source');
@@ -56,6 +58,20 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
             $table->dateTime('effective_to')->nullable();
             $table->timestamps();
         });
+        Schema::create('assistant_shopify_store_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('assistant_domain_store_id');
+            $table->string('shopify_order_id')->nullable();
+            $table->dateTime('shopify_created_at');
+            $table->boolean('is_test')->default(false);
+            $table->string('financial_status');
+            $table->string('subscription_category');
+            $table->string('original_currency_code');
+            $table->decimal('original_total_price', 18, 4);
+            $table->text('shopify_tags')->nullable();
+        });
+
+        config(['assistant_shopify_analytics.reference_rates_to_usd.USD' => 1]);
 
         DB::table('admin_users')->insert(['id' => 1, 'name' => 'Test Operator', 'username' => 'test-operator']);
         DB::table('assistant_domain_stores')->insert(['id' => 1, 'domain' => 'test.example', 'owner_user_id' => 1]);
@@ -123,11 +139,61 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
         self::assertEquals(10, $totals['first_total_revenue']);
     }
 
-    private function order(array|string $tags, string $type = '订阅首次购买', ?string $payload = ''): void
+    public function test_shopify_report_uses_logistics_order_before_store_analytics_sync(): void
+    {
+        $this->order([], '无订阅', '', 'gid://shopify/Order/1001');
+
+        $totals = app(OperationReportMetricsService::class)->buildRangeForOperators(
+            '2026-11-15', '2026-11-15', [1], '-04:00', useShopifySourceMetrics: true,
+        )[1]['totals'];
+
+        self::assertEquals(1, $totals['first_normal_orders']);
+        self::assertEquals(10, $totals['first_normal_revenue']);
+    }
+
+    public function test_shopify_report_replaces_matching_logistics_order_without_double_counting(): void
+    {
+        $this->order([], '无订阅', '', 'gid://shopify/Order/1002');
+        DB::table('assistant_shopify_store_orders')->insert([
+            'assistant_domain_store_id' => 1,
+            'shopify_order_id' => '1002',
+            'shopify_created_at' => '2026-11-15 12:00:00',
+            'is_test' => false,
+            'financial_status' => 'PAID',
+            'subscription_category' => 'subscribed',
+            'original_currency_code' => 'USD',
+            'original_total_price' => '15.0000',
+            'shopify_tags' => json_encode(['subscription'], JSON_THROW_ON_ERROR),
+        ]);
+
+        $result = app(OperationReportMetricsService::class)->buildRangeForOperators(
+            '2026-11-15', '2026-11-15', [1], '-04:00', useShopifySourceMetrics: true,
+        )[1];
+        $totals = $result['totals'];
+
+        self::assertEquals(1, $totals['first_total_orders']);
+        self::assertEquals(1, $totals['first_subscription_orders']);
+        self::assertEquals(0, $totals['first_normal_orders']);
+        self::assertEquals(15, $totals['first_total_revenue']);
+        self::assertCount(1, $result['rows']);
+        self::assertNotEmpty(array_filter(
+            $result['rows'],
+            static fn (array $row): bool => $row['first_total_orders'] === 1
+                && $row['first_shipping_cost'] > 0,
+        ));
+        self::assertEmpty(array_filter(
+            $result['rows'],
+            static fn (array $row): bool => $row['first_total_orders'] === 0
+                && ($row['first_purchase_cost'] > 0 || $row['first_shipping_cost'] > 0),
+        ));
+    }
+
+    private function order(array|string $tags, string $type = '订阅首次购买', ?string $payload = '', ?string $shopifyOrderId = null): void
     {
         DB::table('logistics_orders')->insert([
             'assistant_domain_store_id' => 1,
             'assigned_owner_user_id' => 1,
+            'shopify_order_id' => $shopifyOrderId,
             'operator_name' => 'Test Operator',
             'order_created_at' => '2026-11-15 12:00:00',
             'media_source' => 'AppLovin',

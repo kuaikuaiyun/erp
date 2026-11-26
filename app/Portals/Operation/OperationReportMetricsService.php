@@ -398,6 +398,7 @@ class OperationReportMetricsService
             }
         }
         $groups = $missingGuide = $missingGuideSkus = $missingWeight = [];
+        $logisticsOrderMetrics = [];
         $logisticsOwnerByShopifyOrder = [];
         foreach ($orders as $order) {
             $storeId = (int) ($order->assistant_domain_store_id ?? 0);
@@ -453,6 +454,8 @@ class OperationReportMetricsService
                 $row['renewal_orders']++;
                 $row['renewal_revenue'] += $amount;
             }
+            $orderPurchaseCost = 0.0;
+            $orderShippingCost = 0.0;
             if ($isSubscriptionFirst || $isNormalFirst) {
                 $orderWeight = 0.0;
                 foreach ($order->items as $item) {
@@ -473,7 +476,9 @@ class OperationReportMetricsService
                         $missingGuide[$operatorId] = ($missingGuide[$operatorId] ?? 0) + 1;
                         $missingGuideSkus[$operatorId][] = $this->itemSku($item);
                     } else {
-                        $row['first_purchase_cost'] += (float) $guide * $quantity / self::CNY_PER_USD;
+                        $itemPurchaseCost = (float) $guide * $quantity / self::CNY_PER_USD;
+                        $row['first_purchase_cost'] += $itemPurchaseCost;
+                        $orderPurchaseCost += $itemPurchaseCost;
                     }
                     if ($weight === null || (float) $weight <= 0) {
                         $missingWeight[$operatorId] = ($missingWeight[$operatorId] ?? 0) + 1;
@@ -481,19 +486,39 @@ class OperationReportMetricsService
                         $orderWeight += (float) $weight * $quantity;
                     }
                 }
-                $row['first_shipping_cost'] += ($orderWeight / 1000 * 80 + 20) / self::CNY_PER_USD;
+                $orderShippingCost = ($orderWeight / 1000 * 80 + 20) / self::CNY_PER_USD;
+                $row['first_shipping_cost'] += $orderShippingCost;
+            }
+            if ($isSubscriptionFirst || $isNormalFirst || $isRenewal) {
+                $logisticsOrderMetrics[] = [
+                    'assistant_domain_store_id' => $storeId,
+                    'shopify_order_id' => $normalizedShopifyOrderId,
+                    'operator_id' => $operatorId,
+                    'date' => $rowDate,
+                    'shop_domain' => $domain,
+                    'media_source' => $media,
+                    'amount' => $amount,
+                    'first_purchase_cost' => $orderPurchaseCost,
+                    'first_shipping_cost' => $orderShippingCost,
+                    'category' => $isSubscriptionFirst
+                        ? AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_SUBSCRIBED
+                        : ($isNormalFirst
+                            ? AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_REGULAR
+                            : AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_RECURRING),
+                ];
             }
             unset($row);
         }
 
-        // Shopify store analytics is the authoritative source for order count,
-        // subscription category and sales. Logistics sync can trail Shopify by
-        // one or more orders, so retain logistics-derived cost/weight fields but
-        // rebuild order/revenue metrics from the same source used by store analysis.
+        // Prefer the Shopify analytics source once an order has reached it, but
+        // immediately supplement it with logistics orders that have not reached
+        // that source yet. This keeps the report current without double-counting
+        // an order after the independent Shopify analytics synchronization runs.
         if ($useShopifySourceMetrics) {
-            $groups = $this->replaceOrderMetricsWithShopifySource(
+            $groups = $this->mergeOrderMetricsWithShopifySource(
                 $groups,
                 $orders->pluck('assistant_domain_store_id')->map(fn ($id) => (int) $id)->all(),
+                $logisticsOrderMetrics,
                 $operatorUserIds,
                 $operatorNames,
                 $logisticsOwnerByShopifyOrder,
@@ -521,6 +546,12 @@ class OperationReportMetricsService
 
                 return $row;
             }, $groups[$operatorId] ?? []));
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => (int) ($row['total_orders'] ?? 0) > 0
+                    || (float) ($row['first_purchase_cost'] ?? 0) > 0
+                    || (float) ($row['first_shipping_cost'] ?? 0) > 0,
+            ));
             usort($rows, fn (array $a, array $b) => [$a['date'], $a['shop_domain'], $a['media_source']] <=> [$b['date'], $b['shop_domain'], $b['media_source']]);
             $totals = array_fill_keys($numericFields, 0.0);
             foreach ($rows as $row) {
@@ -544,13 +575,15 @@ class OperationReportMetricsService
     /**
      * @param  array<int,array<string,array<string,mixed>>>  $groups
      * @param  list<int>  $logisticsStoreIds
+     * @param  list<array<string,mixed>>  $logisticsOrderMetrics
      * @param  list<int>  $operatorUserIds
      * @param  array<string,int>  $logisticsOwnerByShopifyOrder
      * @return array<int,array<string,array<string,mixed>>>
      */
-    private function replaceOrderMetricsWithShopifySource(
+    private function mergeOrderMetricsWithShopifySource(
         array $groups,
         array $logisticsStoreIds,
+        array $logisticsOrderMetrics,
         array $operatorUserIds,
         $operatorNames,
         array $logisticsOwnerByShopifyOrder,
@@ -582,6 +615,7 @@ class OperationReportMetricsService
                 foreach ([
                     'first_subscription_orders', 'first_subscription_revenue',
                     'first_normal_orders', 'first_normal_revenue',
+                    'first_purchase_cost', 'first_shipping_cost',
                     'renewal_orders', 'renewal_revenue',
                 ] as $field) {
                     $row[$field] = 0;
@@ -608,6 +642,14 @@ class OperationReportMetricsService
             ->orderBy('shopify_created_at')
             ->get();
 
+        $logisticsMetricIndexesByOrder = [];
+        foreach ($logisticsOrderMetrics as $index => $metric) {
+            $normalizedOrderId = (string) ($metric['shopify_order_id'] ?? '');
+            if ($normalizedOrderId !== '') {
+                $logisticsMetricIndexesByOrder[(int) ($metric['assistant_domain_store_id'] ?? 0)."\x1F".$normalizedOrderId] = $index;
+            }
+        }
+        $consumedLogisticsMetricIndexes = [];
         foreach ($sourceOrders as $sourceOrder) {
             $storeId = (int) $sourceOrder->assistant_domain_store_id;
             $store = $stores->get($storeId);
@@ -661,6 +703,54 @@ class OperationReportMetricsService
                 $row['renewal_orders']++;
                 $row['renewal_revenue'] += $amount;
             }
+
+            $orderKey = $normalizedOrderId === '' ? null : $storeId."\x1F".$normalizedOrderId;
+            $logisticsMetricIndex = $orderKey === null ? null : ($logisticsMetricIndexesByOrder[$orderKey] ?? null);
+            if ($logisticsMetricIndex !== null) {
+                $matchedMetric = $logisticsOrderMetrics[$logisticsMetricIndex];
+                $row['first_purchase_cost'] += (float) ($matchedMetric['first_purchase_cost'] ?? 0);
+                $row['first_shipping_cost'] += (float) ($matchedMetric['first_shipping_cost'] ?? 0);
+                $consumedLogisticsMetricIndexes[$logisticsMetricIndex] = true;
+            }
+            unset($row);
+        }
+
+        foreach ($logisticsOrderMetrics as $index => $metric) {
+            if (isset($consumedLogisticsMetricIndexes[$index])) {
+                continue;
+            }
+
+            $operatorId = (int) ($metric['operator_id'] ?? 0);
+            if (! isset($operatorLookup[$operatorId])) {
+                continue;
+            }
+
+            $rowDate = (string) ($metric['date'] ?? '');
+            $domain = (string) ($metric['shop_domain'] ?? '未知店铺');
+            $media = (string) ($metric['media_source'] ?? LogisticsOrder::MEDIA_SOURCE_OTHER);
+            $key = $rowDate."\x1F".$domain."\x1F".$media;
+            $groups[$operatorId][$key] ??= $this->emptyRow(
+                $rowDate,
+                (string) $operatorNames->get($operatorId, '未分配'),
+                $domain,
+                $media,
+            );
+            $row = &$groups[$operatorId][$key];
+            $amount = (float) ($metric['amount'] ?? 0);
+            $category = (string) ($metric['category'] ?? '');
+
+            if ($category === AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_SUBSCRIBED) {
+                $row['first_subscription_orders']++;
+                $row['first_subscription_revenue'] += $amount;
+            } elseif ($category === AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_REGULAR) {
+                $row['first_normal_orders']++;
+                $row['first_normal_revenue'] += $amount;
+            } elseif ($category === AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_RECURRING) {
+                $row['renewal_orders']++;
+                $row['renewal_revenue'] += $amount;
+            }
+            $row['first_purchase_cost'] += (float) ($metric['first_purchase_cost'] ?? 0);
+            $row['first_shipping_cost'] += (float) ($metric['first_shipping_cost'] ?? 0);
             unset($row);
         }
 

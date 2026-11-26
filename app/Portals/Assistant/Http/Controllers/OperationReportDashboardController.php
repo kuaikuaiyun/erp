@@ -282,6 +282,7 @@ class OperationReportDashboardController extends Controller
                 $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
                     && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
                 $advertisingMedia = collect($approvedReport?->advertising_rows ?: [])
+                    ->filter(fn (array $row): bool => (float) ($row['actual_spend'] ?? 0) > 0)
                     ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
                     ->unique(fn (string $media) => mb_strtolower($media))
                     ->values();
@@ -321,7 +322,17 @@ class OperationReportDashboardController extends Controller
                 $reportActualAdSpend = (float) ($approvedReport?->actual_ad_spend ?? 0);
                 $reportFirstProfit = $reportFirstRevenue - $reportActualAdSpend - $reportFirstCost;
                 $dailyMediaNames = $dateRows->pluck('media_source')
-                    ->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+                    ->map(fn ($media) => trim((string) $media) ?: '其他')
+                    ->unique()
+                    ->filter(function (string $media) use ($dateRows): bool {
+                        $orderCount = (int) $dateRows
+                            ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
+                            ->sum('first_total_orders');
+
+                        return mb_strtolower($media) !== mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                            || $orderCount > 0;
+                    })
+                    ->values();
                 $dailySummary = [
                     'daily_first_total_orders' => (int) $dateRows->sum('first_total_orders'),
                     'daily_first_total_revenue' => $reportFirstRevenue,
@@ -792,13 +803,16 @@ class OperationReportDashboardController extends Controller
             $mediaRois = [];
             foreach ($mediaRows as $items) {
                 $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
-                if ($mediaName === '—') {
+                $mediaOrderCount = (int) $items->sum('first_total_orders');
+                if ($mediaName === '—'
+                    || (mb_strtolower($mediaName) === mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                        && $mediaOrderCount <= 0)) {
                     continue;
                 }
                 $mediaRevenue = (float) $items->sum('first_total_revenue');
                 $mediaSpend = (float) $items->sum('allocated_actual_ad_spend');
                 $mediaNames[] = $mediaName;
-                $mediaOrderCounts[] = (int) $items->sum('first_total_orders');
+                $mediaOrderCounts[] = $mediaOrderCount;
                 $mediaAdSpends[] = $mediaSpend;
                 $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
             }
@@ -877,13 +891,16 @@ class OperationReportDashboardController extends Controller
                     $domainMediaRois = [];
                     foreach ($domainMediaRows as $mediaItems) {
                         $mediaName = trim((string) ($mediaItems->first()['media_source'] ?? '')) ?: '其他';
-                        if ($mediaName === '—') {
+                        $mediaOrderCount = (int) $mediaItems->sum('first_total_orders');
+                        if ($mediaName === '—'
+                            || (mb_strtolower($mediaName) === mb_strtolower(LogisticsOrder::MEDIA_SOURCE_OTHER)
+                                && $mediaOrderCount <= 0)) {
                             continue;
                         }
                         $mediaRevenue = (float) $mediaItems->sum('first_total_revenue');
                         $mediaSpend = (float) $mediaItems->sum('allocated_actual_ad_spend');
                         $domainMediaNames[] = $mediaName;
-                        $domainMediaOrderCounts[] = (int) $mediaItems->sum('first_total_orders');
+                        $domainMediaOrderCounts[] = $mediaOrderCount;
                         $domainMediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
                     }
 

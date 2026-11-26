@@ -34,6 +34,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DomainStoreController extends Controller
 {
+    private const FILTER_UNMATCHED = '__unmatched__';
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
@@ -1106,7 +1108,7 @@ class DomainStoreController extends Controller
             'keyword' => $this->filterKeyword($request),
             'created_from' => $this->filterDate($request, 'created_from'),
             'created_to' => $this->filterDate($request, 'created_to'),
-            'site_builder' => $this->filterText($request, 'site_builder'),
+            'site_builder' => $this->filterTextList($request, 'site_builder'),
             'shop_name' => $this->filterText($request, 'shop_name'),
             'domain' => $this->filterText($request, 'domain'),
             'domain_expires_from' => $this->filterDate($request, 'domain_expires_from'),
@@ -1122,17 +1124,17 @@ class DomainStoreController extends Controller
             'email_bound' => $this->filterBoolean($request, 'email_bound'),
             'email_purchased' => $this->filterBoolean($request, 'email_purchased'),
             'team' => $this->filterTextList($request, 'team'),
-            'project' => $this->filterText($request, 'project'),
+            'project' => $this->filterTextList($request, 'project'),
             'user_name' => $this->filterText($request, 'user_name'),
             'owner_assignment' => $this->filterEnum($request, 'owner_assignment', [
                 'assigned' => 'assigned',
                 'unassigned' => 'unassigned',
             ]),
-            'erp' => $this->filterText($request, 'erp'),
-            'credit_card' => $this->filterText($request, 'credit_card'),
-            'wallet' => $this->filterText($request, 'wallet'),
-            'paypal' => $this->filterText($request, 'paypal'),
-            'other_payment' => $this->filterText($request, 'other_payment'),
+            'erp' => $this->filterTextList($request, 'erp'),
+            'credit_card' => $this->filterTextList($request, 'credit_card'),
+            'wallet' => $this->filterTextList($request, 'wallet'),
+            'paypal' => $this->filterTextList($request, 'paypal'),
+            'other_payment' => $this->filterTextList($request, 'other_payment'),
             'shop_login_url' => $this->filterText($request, 'shop_login_url'),
             'plan_expires_from' => $this->filterDate($request, 'plan_expires_from'),
             'plan_expires_to' => $this->filterDate($request, 'plan_expires_to'),
@@ -1172,16 +1174,10 @@ class DomainStoreController extends Controller
         }
 
         foreach ([
-            'site_builder' => 'site_builder',
             'shop_name' => 'shop_name',
             'domain' => 'domain',
             'email' => 'email',
-            'project' => 'project',
             'user_name' => 'user_name',
-            'credit_card' => 'credit_card',
-            'wallet' => 'wallet',
-            'paypal' => 'paypal',
-            'other_payment' => 'other_payment',
             'shop_login_url' => 'shop_login_url',
             'payment_card' => 'payment_card',
             'last_operator_name' => 'last_operator_name',
@@ -1192,17 +1188,14 @@ class DomainStoreController extends Controller
             }
         }
 
-        if ($filters['team'] !== []) {
-            $query->where(function (Builder $teams) use ($filters): void {
-                foreach ($filters['team'] as $team) {
-                    $teams->orWhereJsonContains('team', $team);
-                }
-            });
-        }
-
-        if ($filters['erp'] !== '') {
-            $query->whereJsonContains('erp', (string) $filters['erp']);
-        }
+        $this->applyScalarListFilter($query, 'site_builder', $filters['site_builder'], true);
+        $this->applyJsonListFilter($query, 'team', $filters['team'], true);
+        $this->applyScalarListFilter($query, 'project', $filters['project'], true);
+        $this->applyJsonListFilter($query, 'erp', $filters['erp'], true);
+        $this->applyScalarListFilter($query, 'credit_card', $filters['credit_card']);
+        $this->applyScalarListFilter($query, 'wallet', $filters['wallet']);
+        $this->applyScalarListFilter($query, 'paypal', $filters['paypal']);
+        $this->applyScalarListFilter($query, 'other_payment', $filters['other_payment']);
 
         if ($filters['owner_assignment'] === 'assigned') {
             $query->whereNotNull('owner_user_id');
@@ -2438,6 +2431,64 @@ class DomainStoreController extends Controller
         $value = $request->input($field, '');
 
         return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    /** @param list<string> $values */
+    private function applyScalarListFilter(Builder $query, string $column, array $values, bool $allowUnmatched = false): void
+    {
+        if ($values === []) {
+            return;
+        }
+
+        $includeUnmatched = $allowUnmatched && in_array(self::FILTER_UNMATCHED, $values, true);
+        $matchedValues = array_values(array_filter(
+            $values,
+            static fn (string $value): bool => $value !== self::FILTER_UNMATCHED,
+        ));
+
+        $query->where(function (Builder $choices) use ($column, $matchedValues, $includeUnmatched): void {
+            if ($matchedValues !== []) {
+                $choices->whereIn($column, $matchedValues);
+            }
+
+            if ($includeUnmatched) {
+                $missing = static fn (Builder $value): Builder => $value
+                    ->whereNull($column)
+                    ->orWhere($column, '');
+
+                $matchedValues === [] ? $choices->where($missing) : $choices->orWhere($missing);
+            }
+        });
+    }
+
+    /** @param list<string> $values */
+    private function applyJsonListFilter(Builder $query, string $column, array $values, bool $allowUnmatched = false): void
+    {
+        if ($values === []) {
+            return;
+        }
+
+        $includeUnmatched = $allowUnmatched && in_array(self::FILTER_UNMATCHED, $values, true);
+        $matchedValues = array_values(array_filter(
+            $values,
+            static fn (string $value): bool => $value !== self::FILTER_UNMATCHED,
+        ));
+
+        $query->where(function (Builder $choices) use ($column, $matchedValues, $includeUnmatched): void {
+            foreach ($matchedValues as $index => $value) {
+                $index === 0
+                    ? $choices->whereJsonContains($column, $value)
+                    : $choices->orWhereJsonContains($column, $value);
+            }
+
+            if ($includeUnmatched) {
+                $missing = static fn (Builder $value): Builder => $value
+                    ->whereNull($column)
+                    ->orWhereJsonLength($column, 0);
+
+                $matchedValues === [] ? $choices->where($missing) : $choices->orWhere($missing);
+            }
+        });
     }
 
     /** @return list<string> */

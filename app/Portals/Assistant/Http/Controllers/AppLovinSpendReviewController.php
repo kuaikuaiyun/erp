@@ -4,6 +4,7 @@ namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppLovinAccountStoreBinding;
+use App\Models\AppLovinAccountRiskNote;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreOwnerHistory;
@@ -228,6 +229,12 @@ class AppLovinSpendReviewController extends Controller
         $allAccountKeys = $accounts->pluck('account_keys')->flatten()->unique()->values();
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
         $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
+        $accountNumbers = $accounts->pluck('account_number')
+            ->map(fn ($number) => AppLovinAccountRiskNote::normalizeAccountNumber((string) $number))
+            ->filter()->unique()->values();
+        $riskNotes = AppLovinAccountRiskNote::query()
+            ->whereIn('account_number', $accountNumbers)
+            ->pluck('risk_factors', 'account_number');
         $eligibleOperatorIds = $accounts->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
         $stores = $eligibleOperatorIds->isEmpty()
             ? collect()
@@ -250,11 +257,12 @@ class AppLovinSpendReviewController extends Controller
                 ->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
             $store->setAttribute('eligible_owner_ids', $ownerIds);
         });
-        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings): array {
+        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings, $riskNotes): array {
             $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()->first();
             $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
+            $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
 
-            return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding];
+            return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding, 'risk_factors' => (string) ($riskNotes->get($number) ?: '')];
         });
         $page = max(1, (int) $request->query('page', 1));
         $perPage = (int) ($filters['per_page'] ?? 20);
