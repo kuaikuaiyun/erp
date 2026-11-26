@@ -166,14 +166,26 @@ class AppLovinPerformanceSubscriptionMetricsTest extends TestCase
             'shopify_tags' => json_encode(['subscription'], JSON_THROW_ON_ERROR),
         ]);
 
-        $totals = app(OperationReportMetricsService::class)->buildRangeForOperators(
+        $result = app(OperationReportMetricsService::class)->buildRangeForOperators(
             '2026-11-15', '2026-11-15', [1], '-04:00', useShopifySourceMetrics: true,
-        )[1]['totals'];
+        )[1];
+        $totals = $result['totals'];
 
         self::assertEquals(1, $totals['first_total_orders']);
         self::assertEquals(1, $totals['first_subscription_orders']);
         self::assertEquals(0, $totals['first_normal_orders']);
         self::assertEquals(15, $totals['first_total_revenue']);
+        self::assertCount(1, $result['rows']);
+        self::assertNotEmpty(array_filter(
+            $result['rows'],
+            static fn (array $row): bool => $row['first_total_orders'] === 1
+                && $row['first_shipping_cost'] > 0,
+        ));
+        self::assertEmpty(array_filter(
+            $result['rows'],
+            static fn (array $row): bool => $row['first_total_orders'] === 0
+                && ($row['first_purchase_cost'] > 0 || $row['first_shipping_cost'] > 0),
+        ));
     }
 
     private function order(array|string $tags, string $type = '订阅首次购买', ?string $payload = '', ?string $shopifyOrderId = null): void

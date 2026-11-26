@@ -282,6 +282,7 @@ class OperationReportDashboardController extends Controller
                 $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
                     && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
                 $advertisingMedia = collect($approvedReport?->advertising_rows ?: [])
+                    ->filter(fn (array $row): bool => (float) ($row['actual_spend'] ?? 0) > 0)
                     ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
                     ->unique(fn (string $media) => mb_strtolower($media))
                     ->values();
