@@ -4,6 +4,7 @@ namespace App\Services\Authentication;
 
 use App\Models\DingTalkCompany;
 use App\Models\ErpLoginSite;
+use App\Models\Portal;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +14,7 @@ use Throwable;
 
 class LoginSiteSettings
 {
-    public function __construct(private LoginSiteService $domains)
+    public function __construct(private LoginSiteService $domains, private LoginSiteDomainRoot $roots)
     {
     }
 
@@ -43,15 +44,27 @@ class LoginSiteSettings
             throw ValidationException::withMessages(['password_enabled' => __('enterprise_login.method_required')]);
         }
 
-        $roots = $sites->reject(fn (ErpLoginSite $other): bool => $other->is($site))->pluck('domain');
+        $data['root_domain'] = $site->exists && $site->domain === $data['domain'] && $site->root_domain !== null
+            ? $site->rootDomain() : $this->roots->infer($data['domain']);
+        if ($data['root_domain'] === null) {
+            throw ValidationException::withMessages(['domain' => __('enterprise_login.public_suffix')]);
+        }
+        $rootDomain = $data['root_domain'];
+        $roots = $sites->reject(fn (ErpLoginSite $other): bool => $other->is($site))
+            ->map(fn (ErpLoginSite $other): string => $other->rootDomain());
         $legacy = strtolower(trim((string) config('portals.root_domain', '')));
-        if ($legacy !== $data['domain']) {
+        if ($legacy !== $rootDomain) {
             $roots->push($legacy);
         }
         foreach ($roots as $root) {
-            if ($this->domains->contains($root, $data['domain']) || $this->domains->contains($data['domain'], $root)) {
+            if ($this->domains->contains($root, $rootDomain) || $this->domains->contains($rootDomain, $root)) {
                 throw ValidationException::withMessages(['domain' => __('enterprise_login.domain_overlap')]);
             }
+        }
+
+        $prefix = $this->domains->subdomainLabel($rootDomain, $data['domain']);
+        if ($prefix !== null && Portal::query()->where('code', $prefix)->exists()) {
+            throw ValidationException::withMessages(['domain' => __('enterprise_login.portal_code_conflict', ['code' => $prefix])]);
         }
 
         if ($request->hasFile('logo') && $request->boolean('remove_logo')) {
@@ -104,11 +117,13 @@ class LoginSiteSettings
     public function persist(ErpLoginSite $site, array $data, ?string $logo, bool $removeLogo): ?string
     {
         unset($data['logo'], $data['remove_logo'], $data['name']);
+        $previousRoot = $site->exists ? $site->rootDomain() : null;
         $site->fill($data);
-        if ($site->exists && $site->isDirty(['domain', 'password_enabled'])) {
+        $rootChanged = $previousRoot !== $site->rootDomain();
+        if ($site->exists && ($rootChanged || $site->isDirty(['domain', 'password_enabled']))) {
             $site->password_version++;
         }
-        if ($site->exists && $site->isDirty(['domain', 'dingtalk_enabled', 'dingtalk_company_id'])) {
+        if ($site->exists && ($rootChanged || $site->isDirty(['domain', 'dingtalk_enabled', 'dingtalk_company_id']))) {
             $site->dingtalk_version++;
         }
 

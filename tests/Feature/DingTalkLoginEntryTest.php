@@ -73,6 +73,34 @@ class DingTalkLoginEntryTest extends TestCase
         $this->assertAuthenticatedAs($account, 'admin');
     }
 
+    public function test_prefixed_login_shares_a_cookie_and_return_url_with_registered_sibling_portals(): void
+    {
+        $this->createPortalFixture();
+        config(['portals.scheme' => 'http', 'portals.main_domain' => 'kkyerp.test', 'portals.root_domain' => 'kkyerp.test']);
+        $site = $this->site('xxx.kkyerp.test', true);
+        $site->update(['root_domain' => 'kkyerp.test']);
+        \App\Models\Portal::query()->create(['name' => 'Logistics', 'code' => 'wuliu', 'status' => 'enabled']);
+        $account = $this->account();
+        $login = 'http://xxx.kkyerp.test/kky/auth/login';
+        $portal = 'http://wuliu.kkyerp.test/';
+
+        $this->get('http://kkyerp.test/kky/auth/login')->assertNotFound();
+        $this->get('http://wuliu.kkyerp.test/kky/auth/login')->assertNotFound();
+        $this->get('http://unknown.kkyerp.test/')->assertNotFound();
+        $this->get($portal)->assertOk()->assertSee($login, false);
+        $view = $this->get($login)->assertOk()->assertSee('data-open-scan', false);
+        self::assertSame('kkyerp.test', ltrim($view->getCookie(config('session.cookie'), false)->getDomain(), '.'));
+
+        $signedIn = $this->post($login, ['username' => $account->username, 'password' => 'test-password-123']);
+        $signedIn->assertRedirect($portal);
+        self::assertSame('kkyerp.test', ltrim($signedIn->getCookie(config('session.cookie'), false)->getDomain(), '.'));
+        $this->assertAuthenticatedAs($account, 'admin');
+
+        $portalRequest = \Illuminate\Http\Request::create($portal);
+        $portalRequest->setLaravelSession(app('session')->driver());
+        self::assertSame('password', app(ModeService::class)->validate($portalRequest, $account));
+    }
+
     public function test_password_session_is_scoped_and_remains_valid_after_switch_off(): void
     {
         config(['portals.scheme' => 'http']);

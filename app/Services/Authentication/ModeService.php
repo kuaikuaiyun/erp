@@ -61,7 +61,7 @@ class ModeService
 
             return (object) [
                 'mode' => $method, 'version' => $site->{$method.'_version'},
-                'site_id' => (int) $site->id, 'domain' => $site->domain,
+                'site_id' => (int) $site->id, 'domain' => $site->domain, 'root_domain' => $site->rootDomain(),
                 'company_id' => $site->dingtalk_company_id,
             ];
         }
@@ -96,11 +96,12 @@ class ModeService
         $current = $this->requireMethod($request, $expected->mode);
         if ((int) $current->version !== (int) $expected->version
             || ($current->site_id ?? null) !== ($expected->site_id ?? null)
-            || ($current->domain ?? null) !== ($expected->domain ?? null)) {
+            || ($current->domain ?? null) !== ($expected->domain ?? null)
+            || ($current->root_domain ?? null) !== ($expected->root_domain ?? null)) {
             throw new HttpException(401, __('dingtalk.mode.changed'));
         }
         $request->session()->put(self::KEY, ['mode' => $current->mode, 'version' => (int) $current->version,
-            'site_id' => $current->site_id ?? null, 'domain' => $current->domain ?? null,
+            'site_id' => $current->site_id ?? null, 'domain' => $current->domain ?? null, 'root_domain' => $current->root_domain ?? null,
             'account_id' => (int) $account->id, 'account_version' => $this->accountVersion((int) $account->id), 'issued_at' => now()->timestamp]);
     }
 
@@ -112,6 +113,7 @@ class ModeService
         if ($site) {
             $validMethod = ($proof['site_id'] ?? null) === (int) $site->id
                 && ($proof['domain'] ?? null) === $site->domain
+                && ($proof['root_domain'] ?? $proof['domain'] ?? null) === $site->rootDomain()
                 && in_array($mode, ['password', 'dingtalk'], true);
         } else {
             $state = $this->current();

@@ -5,7 +5,6 @@ namespace App\Portal\Services;
 use App\Models\Portal;
 use App\Services\Authentication\LoginSiteService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 
 class PortalDomainService
 {
@@ -40,7 +39,7 @@ class PortalDomainService
             return null;
         }
 
-        $code = $this->portalCodeFromHost($this->host($request), $this->rootDomain($request));
+        $code = app(LoginSiteService::class)->subdomainLabel($this->rootDomain($request), $this->host($request));
 
         if ($code === null) {
             return null;
@@ -55,13 +54,16 @@ class PortalDomainService
         $reserved = collect(config('portals.reserved_codes', []))
             ->filter()
             ->map(fn (string $value): string => strtolower($value));
-        $mainLabel = $this->mainDomainLabel();
+        $domains = app(LoginSiteService::class);
+        $mainLabel = $domains->subdomainLabel($this->legacyRootDomain(), strtolower(trim((string) config('portals.main_domain', ''))));
 
         if ($mainLabel !== null) {
             $reserved->push($mainLabel);
         }
 
-        return $reserved->unique()->contains($code);
+        return $reserved->contains($code) || $domains->sites()->contains(
+            fn ($site): bool => $domains->subdomainLabel($site->rootDomain(), $site->domain) === $code,
+        );
     }
 
     public function portalDomain(Portal|string $portal): ?string
@@ -135,8 +137,8 @@ class PortalDomainService
 
     public function rootDomain(?Request $request = null): string
     {
-        return app(LoginSiteService::class)->forRequest($request ?? request())?->domain
-            ?? strtolower(trim((string) config('portals.root_domain', '')));
+        return app(LoginSiteService::class)->forRequest($request ?? request())?->rootDomain()
+            ?? $this->legacyRootDomain();
     }
 
     private function host(Request $request): string
@@ -144,36 +146,9 @@ class PortalDomainService
         return strtolower(trim($request->getHost()));
     }
 
-    private function portalCodeFromHost(string $host, string $root): ?string
+    private function legacyRootDomain(): string
     {
-        $suffix = '.'.$root;
-
-        if ($root === '' || !Str::endsWith($host, $suffix)) {
-            return null;
-        }
-
-        $code = substr($host, 0, -strlen($suffix));
-
-        if ($code === '' || str_contains($code, '.')) {
-            return null;
-        }
-
-        return $code;
-    }
-
-    private function mainDomainLabel(): ?string
-    {
-        $root = strtolower(trim((string) config('portals.root_domain', '')));
-        $suffix = '.'.$root;
-        $mainDomain = strtolower(trim((string) config('portals.main_domain', '')));
-
-        if (!Str::endsWith($mainDomain, $suffix)) {
-            return null;
-        }
-
-        $label = substr($mainDomain, 0, -strlen($suffix));
-
-        return $label !== '' && !str_contains($label, '.') ? $label : null;
+        return strtolower(trim((string) config('portals.root_domain', '')));
     }
 
     private function urlForHost(string $host, string $path): string

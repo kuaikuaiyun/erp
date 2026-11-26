@@ -74,6 +74,7 @@ trait DingTalkTestEnvironment
         (require database_path('migrations/2026_11_16_000100_add_dingtalk_company_login_slug.php'))->up();
         (require database_path('migrations/2026_11_26_010000_configure_enterprise_login_sites.php'))->up();
         (require database_path('migrations/2026_11_26_020000_add_company_name_to_erp_login_sites.php'))->up();
+        (require database_path('migrations/2026_11_26_030000_add_root_domain_to_erp_login_sites.php'))->up();
         $this->company=\App\Models\DingTalkCompany::query()->create(['name'=>'Test company','login_slug'=>'test-company','corp_id'=>'dingcorp-test','app_key'=>'app-test','app_secret'=>'secret-test',
             'redirect_uri'=>'http://localhost/auth/dingtalk/callback','enabled'=>true])->fresh();
         $this->members = [
@@ -108,6 +109,17 @@ trait DingTalkTestEnvironment
     {
         $this->travelBack();
         parent::tearDown();
+    }
+
+    protected function createPortalFixture(): void
+    {
+        Schema::create('portals', function (Blueprint $table): void {
+            $table->id();
+            $table->string('code')->unique();
+            $table->string('name');
+            $table->string('status');
+            $table->timestamps();
+        });
     }
 
     protected function account(bool $administrator = false): AdminUser

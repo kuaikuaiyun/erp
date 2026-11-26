@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ErpLoginSite extends Model
 {
-    protected $fillable = ['domain', 'company_name', 'display_name', 'logo_path', 'password_enabled', 'dingtalk_enabled', 'dingtalk_company_id'];
+    protected $fillable = ['domain', 'root_domain', 'company_name', 'display_name', 'logo_path', 'password_enabled', 'dingtalk_enabled', 'dingtalk_company_id'];
 
     protected $casts = [
         'password_enabled' => 'boolean',
@@ -15,6 +15,11 @@ class ErpLoginSite extends Model
         'password_version' => 'integer',
         'dingtalk_version' => 'integer',
     ];
+
+    public function rootDomain(): string
+    {
+        return $this->root_domain ?? $this->domain;
+    }
 
     public function company(): BelongsTo
     {

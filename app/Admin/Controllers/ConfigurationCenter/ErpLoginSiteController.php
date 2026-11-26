@@ -57,7 +57,7 @@ class ErpLoginSiteController extends Controller
 
         $path = admin_base_path('configuration/dingtalk').'?site='.$site->id;
         $host = strtolower($request->getHost());
-        if ($host === $previousDomain || $domains->contains($site->domain, $host)) {
+        if ($host === $previousDomain || $host === $site->rootDomain() || $domains->subdomainLabel($site->rootDomain(), $host) !== null) {
             return redirect()->to(config('portals.scheme').'://'.$site->domain.$path);
         }
 

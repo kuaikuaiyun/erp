@@ -131,6 +131,70 @@ class DingTalkCompanyTest extends TestCase
         $this->assertDatabaseCount('erp_login_sites', 2);
     }
 
+    public function test_prefixed_admin_host_keeps_sibling_portal_root_when_renamed(): void
+    {
+        $this->createPortalFixture();
+        $this->signInForCompanySettings();
+        \App\Models\Portal::query()->create(['name' => 'Logistics', 'code' => 'wuliu', 'status' => 'enabled']);
+        $url = 'http://admin.test/kky/configuration/dingtalk/companies';
+        $input = array_replace($this->enterpriseInputs(), ['domain' => 'xxx.kkyerp.test', 'dingtalk_enabled' => '1']) + [
+            'corp_id' => 'ding-company-prefix', 'app_key' => 'key-prefix', 'app_secret' => 'secret-prefix', 'enabled' => '1',
+        ];
+        $saved = $this->postJson($url, $input)->assertOk()
+            ->assertJsonPath('login_site.domain', 'xxx.kkyerp.test')->assertJsonPath('login_site.root_domain', 'kkyerp.test');
+        $siteId = $saved->json('login_site.id');
+        $companyId = $saved->json('id');
+        $this->assertDatabaseHas('dingtalk_companies', ['id' => $companyId, 'redirect_uri' => 'http://xxx.kkyerp.test/auth/dingtalk/callback']);
+
+        $this->postJson($url, array_replace($this->enterpriseInputs(), ['domain' => 'other.kkyerp.test']))
+            ->assertUnprocessable()->assertJsonValidationErrors(['domain' => __('enterprise_login.domain_overlap')]);
+        $this->postJson($url, array_replace($this->enterpriseInputs(), ['domain' => 'wuliu.new.test']))
+            ->assertUnprocessable()->assertJsonValidationErrors(['domain' => __('enterprise_login.portal_code_conflict', ['code' => 'wuliu'])]);
+
+        $this->postJson($url, array_replace($input, ['site_id' => $siteId, 'id' => $companyId, 'domain' => 'ops.kkyerp.test', 'app_secret' => '']))
+            ->assertOk()->assertJsonPath('login_site.id', $siteId)->assertJsonPath('login_site.root_domain', 'kkyerp.test');
+        $this->assertDatabaseHas('dingtalk_companies', ['id' => $companyId, 'redirect_uri' => 'http://ops.kkyerp.test/auth/dingtalk/callback']);
+        $portalDomains = app(\App\Portal\Services\PortalDomainService::class);
+        self::assertTrue($portalDomains->isReservedCode('ops'));
+        self::assertFalse($portalDomains->isReservedCode('xxx'));
+    }
+
+    public function test_resaving_existing_prefixed_host_updates_its_cookie_scope_and_requires_new_sign_in(): void
+    {
+        $this->createPortalFixture();
+        config(['portals.scheme' => 'http']);
+        $host = 'xxx.kkyerp.test';
+        $site = ErpLoginSite::query()->create(['domain' => $host, 'display_name' => 'Existing', 'password_enabled' => true]);
+        $admin = $this->account(true);
+        $login = 'http://'.$host.'/kky/auth/login';
+        $list = 'http://'.$host.'/kky/configuration/dingtalk';
+        $this->post($login, ['username' => $admin->username, 'password' => 'test-password-123'])
+            ->assertRedirect('http://'.$host.'/kky');
+
+        $this->postJson($list.'/companies', array_replace($this->enterpriseInputs(), ['domain' => $host, 'site_id' => $site->id]))
+            ->assertOk()->assertJsonPath('login_site.root_domain', 'kkyerp.test')->assertJsonPath('redirect_url', $list);
+        $this->assertDatabaseHas('erp_login_sites', ['id' => $site->id, 'password_version' => 2, 'dingtalk_version' => 2]);
+        $this->get($list)->assertRedirect($login);
+
+        $cookies = collect($this->get($login)->assertOk()->headers->getCookies())
+            ->filter(fn ($cookie): bool => $cookie->getName() === config('session.cookie'));
+        self::assertTrue($cookies->contains(fn ($cookie): bool => $cookie->getDomain() === $host && $cookie->isCleared()));
+        self::assertTrue($cookies->contains(fn ($cookie): bool => ltrim((string) $cookie->getDomain(), '.') === 'kkyerp.test' && $cookie->getExpiresTime() > 1));
+    }
+
+    public function test_public_suffix_is_not_used_as_the_shared_login_domain(): void
+    {
+        $this->createPortalFixture();
+        $this->signInForCompanySettings();
+        $url = 'http://admin.test/kky/configuration/dingtalk/companies';
+        $this->postJson($url, array_replace($this->enterpriseInputs(), ['domain' => 'co.uk']))
+            ->assertUnprocessable()->assertJsonValidationErrors(['domain' => __('enterprise_login.public_suffix')]);
+        $this->postJson($url, array_replace($this->enterpriseInputs(), ['domain' => 'example.co.uk']))
+            ->assertOk()->assertJsonPath('login_site.root_domain', 'example.co.uk');
+        $this->postJson($url, array_replace($this->enterpriseInputs(), ['domain' => 'admin.other.co.uk']))
+            ->assertOk()->assertJsonPath('login_site.root_domain', 'other.co.uk');
+    }
+
     public function test_existing_password_site_can_reuse_an_unlinked_dingtalk_company(): void
     {
         $this->signInForCompanySettings();

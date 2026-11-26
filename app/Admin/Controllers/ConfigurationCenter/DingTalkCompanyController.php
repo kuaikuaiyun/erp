@@ -70,6 +70,7 @@ class DingTalkCompanyController extends Controller
         return [
             'id' => $site->id,
             'domain' => $site->domain,
+            'root_domain' => $site->rootDomain(),
             'display_name' => $site->display_name,
             'logo_url' => app(LoginSiteLogo::class)->url($site->logo_path),
             'password_enabled' => $site->password_enabled,
@@ -121,7 +122,7 @@ class DingTalkCompanyController extends Controller
         ]);
         $logo = null;
         try {
-            [$site, $company, $oldLogo, $previousDomain] = DB::transaction(function () use ($request, $settings, $domains, $ids, &$logo): array {
+            [$site, $company, $oldLogo, $previousDomain, $previousRoot] = DB::transaction(function () use ($request, $settings, $domains, $ids, &$logo): array {
                 $sites = ErpLoginSite::query()->orderBy('id')->lockForUpdate()->get();
                 $companyId = $ids['id'] ?? null;
                 $site = isset($ids['site_id']) ? $sites->find($ids['site_id']) : null;
@@ -138,6 +139,7 @@ class DingTalkCompanyController extends Controller
                 $site ??= $companyId ? $sites->firstWhere('dingtalk_company_id', $companyId) : null;
                 $site ??= new ErpLoginSite();
                 $previousDomain = $site->domain;
+                $previousRoot = $site->exists ? $site->rootDomain() : null;
 
                 $company = $companyId ? DingTalkCompany::withTrashed()->lockForUpdate()->findOrFail($companyId) : null;
                 if ($existingId && $company->trashed()) {
@@ -171,7 +173,7 @@ class DingTalkCompanyController extends Controller
                     'dingtalk_enabled' => $site->dingtalk_enabled,
                 ]);
 
-                return [$site, $company, $oldLogo, $previousDomain];
+                return [$site, $company, $oldLogo, $previousDomain, $previousRoot];
             }, 3);
         } catch (Throwable $exception) {
             $settings->deleteLogo($logo);
@@ -181,7 +183,9 @@ class DingTalkCompanyController extends Controller
         $settings->deleteLogo($oldLogo);
 
         $host = strtolower($request->getHost());
-        $sessionScopeChanged = $previousDomain !== $site->domain && ($previousDomain === $host || $site->domain === $host);
+        $domainChanged = $previousDomain !== $site->domain || $previousRoot !== $site->rootDomain();
+        $sessionScopeChanged = $domainChanged && ($previousDomain === $host || $site->domain === $host
+            || ($previousDomain === null && ($host === $site->rootDomain() || $domains->subdomainLabel($site->rootDomain(), $host) !== null)));
         $redirect = $sessionScopeChanged
             ? config('portals.scheme').'://'.$site->domain.'/'.ltrim(admin_base_path('configuration/dingtalk'), '/') : null;
 

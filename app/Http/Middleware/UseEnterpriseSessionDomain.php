@@ -22,10 +22,22 @@ class UseEnterpriseSessionDomain
         }
 
         $previous = config('session.domain');
-        config(['session.domain' => $site->domain]);
+        config(['session.domain' => $site->rootDomain()]);
 
         try {
-            return $next($request);
+            $response = $next($request);
+
+            if ($site->domain !== $site->rootDomain() && $request->routeIs(config('admin.route.prefix').'.login')) {
+                // The retired host-scoped cookie can otherwise mask the new cookie sent to sibling domains.
+                foreach ([$site->domain, null] as $oldDomain) {
+                    $response->headers->clearCookie(
+                        config('session.cookie'), config('session.path', '/'), $oldDomain,
+                        $request->isSecure() || (bool) config('session.secure'), true, config('session.same_site'),
+                    );
+                }
+            }
+
+            return $response;
         } finally {
             config(['session.domain' => $previous]);
         }

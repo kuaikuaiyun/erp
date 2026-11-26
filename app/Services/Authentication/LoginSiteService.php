@@ -28,9 +28,10 @@ class LoginSiteService
     {
         $host = strtolower($request->getHost());
 
-        return $sites->sortByDesc(fn (ErpLoginSite $site): int => strlen($site->domain))
-            ->first(fn (ErpLoginSite $site): bool => $site->domain === $host || ($this->contains($site->domain, $host)
-                && !str_contains(substr($host, 0, -strlen($site->domain) - 1), '.')));
+        return $sites->firstWhere('domain', $host)
+            ?? $sites->sortByDesc(fn (ErpLoginSite $site): int => strlen($site->rootDomain()))
+                ->first(fn (ErpLoginSite $site): bool => $site->rootDomain() === $host
+                    || $this->subdomainLabel($site->rootDomain(), $host) !== null);
     }
 
     public function hasSites(Request $request): bool
@@ -41,6 +42,17 @@ class LoginSiteService
     public function contains(string $root, string $host): bool
     {
         return $root !== '' && ($root === $host || str_ends_with($host, '.'.$root));
+    }
+
+    public function subdomainLabel(string $root, string $host): ?string
+    {
+        if ($root === '' || !str_ends_with($host, '.'.$root)) {
+            return null;
+        }
+
+        $label = substr($host, 0, -strlen($root) - 1);
+
+        return $label !== '' && !str_contains($label, '.') ? $label : null;
     }
 
     public function callback(string $domain): string
