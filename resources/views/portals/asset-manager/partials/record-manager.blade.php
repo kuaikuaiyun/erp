@@ -58,7 +58,7 @@
 </select></label>
 @endif
 
-@if($kind==='computers')<label>{{ __('asset_manager.per_page') }}<select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option @selected($rows->perPage()===$size)>{{ $size }}</option>
+@if($kind==='computers')<label>{{ __('asset_manager.per_page') }}<select class="form-control" name="per_page" onchange="this.form.submit()">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($rows->perPage()===$size)>{{ $size }}</option>
 @endforeach
 </select></label>@endif</div><div class="am-filter-actions"><button class="btn btn-primary"><i class="fa fa-search"></i> {{ __('asset_manager.search') }}</button> <a class="btn btn-default" href="{{ route($routePrefix.'.index',$kind) }}">{{ __('asset_manager.reset') }}</a></div></form>
 <div class="am-toolbar">@if($canManage && $kind!=='ipfoxy')<button class="btn btn-primary" id="am-add">{{ __('asset_manager.add') }}</button><button class="btn btn-default" id="am-import">{{ __('asset_manager.import') }}</button>

@@ -9,7 +9,7 @@
 <section class="content ar-workspace hd-workspace">
     <div class="box box-default"><div class="box-header with-border"><h3 class="box-title">{{ __('asset_accounts.filters') }}</h3></div><form class="box-body hd-filter" method="get">
         <label>{{ __('asset_accounts.department_list_search') }}<input class="form-control" name="search" maxlength="100" value="{{ $filters['search'] ?? '' }}"></label>
-        <label>{{ __('asset_accounts.department_group_size') }}<select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option @selected($rows->perPage()===$size)>{{ $size }}</option>@endforeach</select></label>
+        <label>{{ __('asset_accounts.department_group_size') }}<select class="form-control" name="per_page" onchange="this.form.submit()">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($rows->perPage()===$size)>{{ $size }}</option>@endforeach</select></label>
         <button class="btn btn-primary">{{ __('asset_accounts.query') }}</button><a class="btn btn-default" href="{{ url('/asset-manager/departments') }}">{{ __('asset_accounts.reset') }}</a>
     </form></div>
     <div class="box box-default"><div class="table-responsive"><table class="table table-hover hd-table"><thead><tr>
