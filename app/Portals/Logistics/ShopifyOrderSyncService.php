@@ -12,6 +12,7 @@ use App\Portals\Finance\FinanceLogisticsCreditOrders;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -315,16 +316,7 @@ class ShopifyOrderSyncService
         }
 
         try {
-            $body = $this->graphql($connection, <<<'GRAPHQL'
-query ExistingWebhookSubscriptions {
-  webhookSubscriptions(first: 250) {
-    nodes { id topic uri }
-  }
-}
-GRAPHQL);
-            $existing = collect(Arr::get($body, 'data.webhookSubscriptions.nodes', []))
-                ->filter(static fn ($subscription): bool => is_array($subscription))
-                ->keyBy(static fn (array $subscription): string => (string) $subscription['topic'].'|'.(string) $subscription['uri']);
+            $existing = $this->existingWebhookSubscriptions($connection);
             $subscriptionIds = [];
 
             foreach ($topics as $topic) {
@@ -347,6 +339,15 @@ GRAPHQL, [
                 ]);
                 $errors = Arr::get($created, 'data.webhookSubscriptionCreate.userErrors', []);
                 if (is_array($errors) && $errors !== []) {
+                    // A concurrent import or retry may have registered this exact
+                    // topic/address pair after the initial lookup. Refresh before
+                    // treating Shopify's duplicate response as a real failure.
+                    $existing = $this->existingWebhookSubscriptions($connection);
+                    if ($existing->has($key)) {
+                        $subscriptionIds[] = (string) Arr::get($existing->get($key), 'id');
+                        continue;
+                    }
+
                     throw new RuntimeException(collect($errors)->pluck('message')->filter()->implode('；'));
                 }
                 $id = trim((string) Arr::get($created, 'data.webhookSubscriptionCreate.webhookSubscription.id'));
@@ -374,6 +375,21 @@ GRAPHQL, [
 
             return ['webhook_active' => false, 'webhook_error' => $message];
         }
+    }
+
+    private function existingWebhookSubscriptions(LogisticsShopifyConnection $connection): Collection
+    {
+        $body = $this->graphql($connection, <<<'GRAPHQL'
+query ExistingWebhookSubscriptions {
+  webhookSubscriptions(first: 250) {
+    nodes { id topic uri }
+  }
+}
+GRAPHQL);
+
+        return collect(Arr::get($body, 'data.webhookSubscriptions.nodes', []))
+            ->filter(static fn ($subscription): bool => is_array($subscription))
+            ->keyBy(static fn (array $subscription): string => (string) $subscription['topic'].'|'.(string) $subscription['uri']);
     }
 
     /** @return array{state:'created'|'updated', order:LogisticsOrder, shopify_sku_missing:bool, item_count:int, missing_sku_count:int}|null */
