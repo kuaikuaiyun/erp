@@ -296,16 +296,41 @@ class DomainStoreController extends Controller
                         continue;
                     }
 
-                    $data = $this->normalizeValidatedData($validator->validated());
-                    $ownerRequest = new Request($data);
                     try {
-                        $ownerUserId = $this->ownerAssignmentForRequest($ownerRequest, $context['user']);
+                        $data = $this->normalizeValidatedData($validator->validated());
+                        // Imports must use the same option sources as the create form.
+                        // Even users who can maintain quick options must add the option first
+                        // instead of introducing a new value implicitly through Excel.
+                        $this->ensureQuickOptionValuesAreAllowed($data, $context['user'], null, '', false);
                     } catch (ValidationException $exception) {
-                        $errors[] = ['row' => $row['row'], 'issues' => collect($exception->errors())->map(fn ($messages, $field) => [
-                            'field' => $field, 'value' => (string) ($data[$field] ?? ''),
-                            'reason' => implode(' ', $messages), 'hint' => null,
-                        ])->values()->all()];
+                        $errors[] = [
+                            'row' => $row['row'],
+                            'issues' => $this->formatImportExceptionIssues($row['data'], $exception),
+                        ];
                         continue;
+                    }
+
+                    $ownerRequest = new Request($data);
+                    $ownerUserId = null;
+                    $ownerOperationDepartmentId = null;
+
+                    // Ownership is intentionally optional for imports. If either ownership
+                    // field is supplied, validate the complete pair using the create flow.
+                    if (filled($data['owner_user_id'] ?? null) || filled($data['operation_department_id'] ?? null)) {
+                        try {
+                            $ownerUserId = $this->ownerAssignmentForRequest($ownerRequest, $context['user']);
+                            $ownerOperationDepartmentId = $this->ownerOperationDepartmentIdForRequest(
+                                $ownerRequest,
+                                null,
+                                $ownerUserId,
+                            );
+                        } catch (ValidationException $exception) {
+                            $errors[] = [
+                                'row' => $row['row'],
+                                'issues' => $this->formatImportExceptionIssues($data, $exception),
+                            ];
+                            continue;
+                        }
                     }
                     unset($data['owner_user_id'], $data['operation_department_id']);
 
@@ -320,7 +345,7 @@ class DomainStoreController extends Controller
 
                     $store = new AssistantDomainStore($data);
                     $store->owner_user_id = $ownerUserId;
-                    $store->owner_operation_department_id = $ownerRequest->integer('operation_department_id');
+                    $store->owner_operation_department_id = $ownerOperationDepartmentId;
                     $store->owner_department_id = $departmentAccess['owner_department_id'];
                     $this->setLastOperator($store, $context['user']);
                     $store->save();
@@ -1849,9 +1874,15 @@ class DomainStoreController extends Controller
     }
 
     /** @param array<string, mixed> $data */
-    private function ensureQuickOptionValuesAreAllowed(array $data, AdminUser $user, ?AssistantDomainStore $existingStore = null, string $fieldPrefix = ''): void
+    private function ensureQuickOptionValuesAreAllowed(
+        array $data,
+        AdminUser $user,
+        ?AssistantDomainStore $existingStore = null,
+        string $fieldPrefix = '',
+        bool $allowQuickOptionManagerCustomValues = true,
+    ): void
     {
-        if ($this->authorization->canManageQuickOptions($user)) {
+        if ($allowQuickOptionManagerCustomValues && $this->authorization->canManageQuickOptions($user)) {
             return;
         }
 
@@ -2231,11 +2262,9 @@ class DomainStoreController extends Controller
     /** @return array<string, array<int, string>> */
     private function importRules(): array
     {
-        return array_replace($this->storeRules(), [
-            'team' => ['required', 'array', 'min:1', 'max:20'],
-            'project' => ['required', 'string', 'max:100'],
-            'owner_user_id' => ['required', 'integer', 'min:1'],
-            'operation_department_id' => ['required', 'integer', 'min:1'],
+        return array_replace($this->createRules(), [
+            'owner_user_id' => ['nullable', 'required_with:operation_department_id', 'integer', 'min:1'],
+            'operation_department_id' => ['nullable', 'required_with:owner_user_id', 'integer', 'min:1'],
         ]);
     }
 
@@ -2313,6 +2342,27 @@ class DomainStoreController extends Controller
         }
 
         return $issues;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return list<array{field: string, value: string, reason: string, hint: null}>
+     */
+    private function formatImportExceptionIssues(array $data, ValidationException $exception): array
+    {
+        return collect($exception->errors())
+            ->map(function (array $messages, string $attribute) use ($data): array {
+                $field = explode('.', $attribute)[0];
+
+                return [
+                    'field' => $this->importFieldLabel($field, $attribute),
+                    'value' => $this->formatImportIssueValue(data_get($data, $attribute)),
+                    'reason' => implode(' ', $messages),
+                    'hint' => null,
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     private function importFieldLabel(string $field, string $attribute): string

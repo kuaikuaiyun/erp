@@ -6,7 +6,10 @@ use App\Portals\Assistant\AssistantDomainStoreSpreadsheetService;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
 
@@ -31,7 +34,8 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         $rows = [$headers];
         foreach ($records as $record) {
             $data = array_replace([
-                'shop_name' => 'Test Store', 'domain' => 'test.example', 'domain_check_status' => 'not_checked',
+                'site_builder' => 'shopify', 'shop_name' => 'Test Store', 'domain' => 'test.example',
+                'domain_expires_at' => '2027-01-01', 'domain_check_status' => 'not_checked',
                 'email_bound' => '否', 'shop_status' => '在用', 'team' => 'Team A', 'project' => 'Project A',
                 'user_name' => 'User A', 'owner_user_id' => 1, 'operation_department_id' => 1,
             ], $record);
@@ -101,13 +105,28 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         self::assertTrue(Validator::make($row, $this->rules('importRules'))->fails());
     }
 
-    public function test_import_requires_owner_department_team_and_project(): void
+    public function test_import_matches_create_requirements_but_allows_empty_ownership(): void
     {
-        foreach (['team', 'project', 'owner_user_id', 'operation_department_id'] as $field) {
+        foreach ([
+            'site_builder', 'shop_name', 'domain', 'domain_expires_at',
+            'domain_check_status', 'email_bound', 'team', 'project', 'shop_status',
+        ] as $field) {
             $row = $this->readRows([[$field => '']])[0]['data'];
             $validator = Validator::make($row, $this->rules('importRules'));
             self::assertTrue($validator->fails(), $field);
             self::assertArrayHasKey($field, $validator->failed());
+        }
+        $row = $this->readRows([['owner_user_id' => '', 'operation_department_id' => '']])[0]['data'];
+        self::assertFalse(Validator::make($row, $this->rules('importRules'))->fails());
+
+        foreach ([
+            ['owner_user_id' => 1, 'operation_department_id' => ''],
+            ['owner_user_id' => '', 'operation_department_id' => 1],
+        ] as $ownership) {
+            self::assertTrue(Validator::make(
+                array_replace($row, $ownership),
+                $this->rules('importRules'),
+            )->fails());
         }
         $method = new \ReflectionMethod(DomainStoreController::class, 'batchRulesForFields');
         $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
@@ -128,8 +147,91 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         $headers = app(AssistantDomainStoreSpreadsheetService::class)->importHeaders();
         self::assertContains(__('assistant.domain_stores.fields.user_name'), $headers);
         self::assertNotContains(__('assistant.domain_stores.import.required_header', ['header' => __('assistant.domain_stores.fields.user_name')]), $headers);
+        foreach (['site_builder', 'domain_expires_at'] as $field) {
+            self::assertContains(
+                __('assistant.domain_stores.import.required_header', [
+                    'header' => __('assistant.domain_stores.fields.'.$field),
+                ]),
+                $headers,
+            );
+        }
+        foreach (['owner_user_id', 'operation_department_id'] as $field) {
+            $label = $field === 'owner_user_id' ? '店铺归属人ID' : '运营归属部门ID';
+            self::assertContains($label, $headers);
+            self::assertNotContains(
+                __('assistant.domain_stores.import.required_header', ['header' => $label]),
+                $headers,
+            );
+        }
         $source = file_get_contents(resource_path('views/portals/assistant/domain-stores/form.blade.php'));
         self::assertStringNotContainsString('data-store-required-field="user_name"', $source);
+    }
+
+    public function test_optional_import_columns_may_be_omitted_from_the_workbook(): void
+    {
+        $service = app(AssistantDomainStoreSpreadsheetService::class);
+        $reflection = new \ReflectionClass($service);
+        $requiredFields = $reflection->getConstant('REQUIRED_IMPORT_FIELDS');
+        $allFields = $reflection->getConstant('IMPORT_FIELDS');
+        $allHeaders = array_combine($allFields, $service->importHeaders());
+        $headers = array_map(static fn (string $field): string => $allHeaders[$field], $requiredFields);
+
+        $map = (new \ReflectionMethod($service, 'headerMap'))->invoke($service, $headers);
+
+        self::assertSame($requiredFields, array_values($map));
+        self::assertNotContains('owner_user_id', $map);
+        self::assertNotContains('operation_department_id', $map);
+    }
+
+    public function test_download_template_matches_import_validation_rules(): void
+    {
+        $response = app(AssistantDomainStoreSpreadsheetService::class)->templateResponse();
+        ob_start();
+        ($response->getCallback())();
+        $contents = ob_get_clean();
+        self::assertIsString($contents);
+
+        $path = tempnam(sys_get_temp_dir(), 'erp-domain-template-');
+        try {
+            file_put_contents($path, $contents);
+            $book = IOFactory::load($path);
+            $sheet = $book->getSheet(0);
+            $headers = app(AssistantDomainStoreSpreadsheetService::class)->importHeaders();
+            self::assertSame($headers, $sheet->rangeToArray('A1:AE1', null, true, true, false)[0]);
+
+            $optionSheet = $book->getSheetByName('_import_options');
+            self::assertNotNull($optionSheet);
+            self::assertSame(Worksheet::SHEETSTATE_HIDDEN, $optionSheet->getSheetState());
+
+            $siteBuilder = $sheet->getDataValidation('A2');
+            self::assertSame(DataValidation::TYPE_LIST, $siteBuilder->getType());
+            self::assertFalse($siteBuilder->getAllowBlank());
+            self::assertStringStartsWith('DomainStoreImportOption', $siteBuilder->getFormula1());
+
+            $team = $sheet->getDataValidation('H2');
+            self::assertSame(DataValidation::TYPE_LIST, $team->getType());
+            self::assertSame(DataValidation::STYLE_INFORMATION, $team->getErrorStyle());
+            self::assertFalse($team->getAllowBlank());
+
+            $domainExpiry = $sheet->getDataValidation('D2');
+            self::assertSame(DataValidation::TYPE_DATE, $domainExpiry->getType());
+            self::assertFalse($domainExpiry->getAllowBlank());
+            self::assertSame('DATE(2000,1,1)', $domainExpiry->getFormula1());
+
+            $planExpiry = $sheet->getDataValidation('T2');
+            self::assertSame(DataValidation::TYPE_DATE, $planExpiry->getType());
+            self::assertTrue($planExpiry->getAllowBlank());
+
+            foreach (['K2', 'L2'] as $cell) {
+                $ownership = $sheet->getDataValidation($cell);
+                self::assertSame(DataValidation::TYPE_WHOLE, $ownership->getType());
+                self::assertTrue($ownership->getAllowBlank());
+                self::assertSame('1', $ownership->getFormula1());
+            }
+            $book->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
     }
 
     public function test_forms_compile_and_batch_requirements_only_apply_to_selected_fields(): void
