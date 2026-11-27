@@ -98,7 +98,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261125-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-1">
 @endpush
 
 @push('scripts')
@@ -146,6 +146,23 @@
                             @endforeach
                         </select>
                     </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-creator" class="flt-field-label">创建人</label>
+                        <select id="aikaipin-creator" name="creator_id" data-filter-searchable>
+                            <option value="">全部创建人</option>
+                            @foreach ($creatorOptions as $creator)
+                                <option value="{{ $creator['id'] }}" @selected($filters['creator_id'] === (string) $creator['id'])>{{ $creator['name'] }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-created-date" class="flt-field-label">创建日期</label>
+                        <input id="aikaipin-created-date" type="date" name="created_date" value="{{ $filters['created_date'] }}">
+                    </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-created-month" class="flt-field-label">创建月份</label>
+                        <input id="aikaipin-created-month" type="month" name="created_month" value="{{ $filters['created_month'] }}">
+                    </div>
                     <div class="flt-filter-actions aikaipin-filter-actions">
                         <button class="flt-btn flt-primary" type="submit">
                             <i class="fa fa-search" aria-hidden="true"></i> {{ $t('filters.search') }}
@@ -156,6 +173,40 @@
                     </div>
                 </div>
     </form>
+
+    @php
+        $statCards = [
+            ['label' => '日上架数量', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_listings']],
+            ['label' => '日上品数', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_products']],
+            ['label' => '月上架数量', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_listings']],
+            ['label' => '月上品数', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_products']],
+        ];
+    @endphp
+    <div class="aikaipin-stat-grid" aria-label="产品上架统计">
+        @foreach ($statCards as $card)
+            @php
+                $metric = $card['metric'];
+            @endphp
+            <article class="aikaipin-stat-card is-{{ $metric['direction'] }}">
+                <div class="aikaipin-stat-heading">
+                    <span>{{ $card['label'] }}</span>
+                    <small>{{ $card['period'] }}</small>
+                </div>
+                <strong class="aikaipin-stat-value">{{ number_format($metric['value']) }}</strong>
+                <div class="aikaipin-stat-comparison">
+                    <span>{{ $card['comparison'] }}</span>
+                    @if ($metric['direction'] === 'up')
+                        <b class="is-up"><i class="fa fa-arrow-up" aria-hidden="true"></i> 增长 {{ number_format($metric['percentage'], 1) }}%</b>
+                    @elseif ($metric['direction'] === 'down')
+                        <b class="is-down"><i class="fa fa-arrow-down" aria-hidden="true"></i> 减少 {{ number_format($metric['percentage'], 1) }}%</b>
+                    @else
+                        <b class="is-flat"><i class="fa fa-minus" aria-hidden="true"></i> 持平 0.0%</b>
+                    @endif
+                    <small>对比值 {{ number_format($metric['previous']) }}</small>
+                </div>
+            </article>
+        @endforeach
+    </div>
 
     <div class="flt-card flt-records aikaipin-table-box">
         <div class="flt-toolbar aikaipin-list-toolbar">

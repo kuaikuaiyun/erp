@@ -12,6 +12,7 @@ use App\Models\AikaipinProductUploadSession;
 use App\Models\AikaipinSelectionProposal;
 use App\Models\AikaipinSelectionProposalImage;
 use App\Models\AikaipinSelectionProposalTag;
+use App\Models\AiProductShopifyPublication;
 use App\Models\OperationAiProductReferenceVideo;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinHistoricalVideoImporter;
@@ -22,6 +23,7 @@ use App\Portals\Operation\ShopifyProductCsvImporter;
 use App\Services\AiProductListingPushService;
 use App\Support\BrowserCompatibleVideoService;
 use App\Support\PrivateVideoResponse;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
@@ -72,6 +74,13 @@ class ProductLibraryController extends Controller
             $perPage = 20;
         }
 
+        $creatorOptions = $this->productCreatorOptions($context['user'], $canManageProductLibrary);
+        $publicationStats = $this->productPublicationStats(
+            $context['user'],
+            $canManageProductLibrary,
+            $filters,
+        );
+
         return view('portals.aikaipin.product-library.index', [
             ...$context,
             'products' => $this->productQuery($context['user'], $canManageProductLibrary, $filters)
@@ -80,6 +89,8 @@ class ProductLibraryController extends Controller
             'filters' => $filters,
             'perPage' => $perPage,
             'categories' => $this->productCategoryOptions(),
+            'creatorOptions' => $creatorOptions,
+            'publicationStats' => $publicationStats,
             'canManageProductLibrary' => $canManageProductLibrary,
             'operationVisibilitySource' => $this->authorization->operationVisibilitySource(),
             'quickAuthorizationDepartments' => $this->authorization->quickAuthorizationDepartments(),
@@ -2839,27 +2850,55 @@ class ProductLibraryController extends Controller
         return sprintf('SPR-%s-%06d', $period, $nextNumber);
     }
 
-    /** @return array{keyword:string,category:string,source:string,type:string} */
+    /** @return array{keyword:string,category:string,source:string,type:string,creator_id:string,created_date:string,created_month:string} */
     private function productFilters(Request $request): array
     {
+        $creatorId = trim((string) $request->query('creator_id', ''));
+        $createdDate = trim((string) $request->query('created_date', ''));
+        $createdMonth = trim((string) $request->query('created_month', ''));
+
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
             'category' => trim((string) $request->query('category', '')),
             'source' => trim((string) $request->query('source', '')),
             'type' => trim((string) $request->query('type', '')),
+            'creator_id' => ctype_digit($creatorId) && (int) $creatorId > 0 ? $creatorId : '',
+            'created_date' => $this->normalizeCalendarFilter($createdDate, 'Y-m-d'),
+            'created_month' => $this->normalizeCalendarFilter($createdMonth, 'Y-m'),
         ];
     }
 
+    private function normalizeCalendarFilter(string $value, string $format): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        try {
+            $date = CarbonImmutable::createFromFormat('!'.$format, $value, 'Asia/Shanghai');
+        } catch (Throwable) {
+            return '';
+        }
+
+        return $date->format($format) === $value ? $value : '';
+    }
+
     /**
-     * @param  array{keyword:string,category:string,source:string,type:string}  $filters
+     * @param  array{keyword:string,category:string,source:string,type:string,creator_id:string,created_date:string,created_month:string}  $filters
      */
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
+        $filters += [
+            'creator_id' => '',
+            'created_date' => '',
+            'created_month' => '',
+        ];
+
         $query = AikaipinProduct::query()
             ->select([
                 'id', 'product_code', 'name', 'sku', 'categories', 'source_platform', 'product_type',
                 'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids', 'is_published',
-                'created_at', 'updated_at',
+                'created_by', 'created_by_name', 'created_at', 'updated_at',
             ])
             ->with(['productPages:id,aikaipin_product_id,name,landing_page_url,is_default'])
             ->withCount('productPages')
@@ -2867,19 +2906,7 @@ class ProductLibraryController extends Controller
             ->latest('created_at')
             ->latest('id');
 
-        if (! $canManageProductLibrary) {
-            $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
-
-            if ($departmentIds === []) {
-                $query->whereRaw('1 = 0');
-            } else {
-                $query->where(function (Builder $products) use ($departmentIds): void {
-                    foreach ($departmentIds as $departmentId) {
-                        $products->orWhereJsonContains('visible_department_ids', (int) $departmentId);
-                    }
-                });
-            }
-        }
+        $this->applyProductVisibility($query, $user, $canManageProductLibrary);
 
         if ($filters['keyword'] !== '') {
             $like = '%'.$filters['keyword'].'%';
@@ -2903,7 +2930,158 @@ class ProductLibraryController extends Controller
             $query->where('product_type', $filters['type']);
         }
 
+        if ($filters['creator_id'] !== '') {
+            $query->where('created_by', (int) $filters['creator_id']);
+        }
+
+        if ($filters['created_date'] !== '') {
+            $start = CarbonImmutable::createFromFormat('!Y-m-d', $filters['created_date'], 'Asia/Shanghai');
+            $query->where('created_at', '>=', $start->utc())
+                ->where('created_at', '<', $start->addDay()->utc());
+        }
+
+        if ($filters['created_month'] !== '') {
+            $start = CarbonImmutable::createFromFormat('!Y-m', $filters['created_month'], 'Asia/Shanghai');
+            $query->where('created_at', '>=', $start->utc())
+                ->where('created_at', '<', $start->addMonth()->utc());
+        }
+
         return $query;
+    }
+
+    private function applyProductVisibility(Builder $query, AdminUser $user, bool $canManageProductLibrary): void
+    {
+        if ($canManageProductLibrary) {
+            return;
+        }
+
+        $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
+        if ($departmentIds === []) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->where(function (Builder $products) use ($departmentIds): void {
+            foreach ($departmentIds as $departmentId) {
+                $products->orWhereJsonContains('visible_department_ids', (int) $departmentId);
+            }
+        });
+    }
+
+    /** @return list<array{id:int,name:string}> */
+    private function productCreatorOptions(AdminUser $user, bool $canManageProductLibrary): array
+    {
+        $query = AikaipinProduct::query()
+            ->whereNotNull('created_by')
+            ->where('created_by', '>', 0);
+        $this->applyProductVisibility($query, $user, $canManageProductLibrary);
+
+        return $query
+            ->orderBy('created_by_name')
+            ->get(['created_by', 'created_by_name'])
+            ->unique('created_by')
+            ->map(static fn (AikaipinProduct $product): array => [
+                'id' => (int) $product->created_by,
+                'name' => trim((string) $product->created_by_name) ?: ('用户 #'.(int) $product->created_by),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array{keyword:string,category:string,source:string,type:string,creator_id:string,created_date:string,created_month:string}  $filters
+     * @return array<string,mixed>
+     */
+    private function productPublicationStats(
+        AdminUser $user,
+        bool $canManageProductLibrary,
+        array $filters,
+    ): array {
+        $now = CarbonImmutable::now('Asia/Shanghai');
+        $dayStart = $filters['created_date'] !== ''
+            ? CarbonImmutable::createFromFormat('!Y-m-d', $filters['created_date'], 'Asia/Shanghai')
+            : $now->startOfDay();
+        $monthStart = $filters['created_month'] !== ''
+            ? CarbonImmutable::createFromFormat('!Y-m', $filters['created_month'], 'Asia/Shanghai')
+            : $now->startOfMonth();
+        $creatorId = $filters['creator_id'] !== '' ? (int) $filters['creator_id'] : null;
+
+        $dayListings = $this->publicationCount($user, $canManageProductLibrary, $dayStart, $dayStart->addDay(), $creatorId);
+        $previousDayListings = $this->publicationCount($user, $canManageProductLibrary, $dayStart->subDay(), $dayStart, $creatorId);
+        $dayProducts = $this->productCreationCount($user, $canManageProductLibrary, $dayStart, $dayStart->addDay(), $creatorId);
+        $previousDayProducts = $this->productCreationCount($user, $canManageProductLibrary, $dayStart->subDay(), $dayStart, $creatorId);
+        $monthListings = $this->publicationCount($user, $canManageProductLibrary, $monthStart, $monthStart->addMonth(), $creatorId);
+        $previousMonthStart = $monthStart->subMonth();
+        $previousMonthListings = $this->publicationCount($user, $canManageProductLibrary, $previousMonthStart, $monthStart, $creatorId);
+        $monthProducts = $this->productCreationCount($user, $canManageProductLibrary, $monthStart, $monthStart->addMonth(), $creatorId);
+        $previousMonthProducts = $this->productCreationCount($user, $canManageProductLibrary, $previousMonthStart, $monthStart, $creatorId);
+
+        return [
+            'day_label' => $dayStart->format('Y-m-d'),
+            'month_label' => $monthStart->format('Y-m'),
+            'day_listings' => $this->comparisonMetric($dayListings, $previousDayListings),
+            'day_products' => $this->comparisonMetric($dayProducts, $previousDayProducts),
+            'month_listings' => $this->comparisonMetric($monthListings, $previousMonthListings),
+            'month_products' => $this->comparisonMetric($monthProducts, $previousMonthProducts),
+        ];
+    }
+
+    private function publicationCount(
+        AdminUser $user,
+        bool $canManageProductLibrary,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+        ?int $creatorId,
+    ): int {
+        $query = AiProductShopifyPublication::query()
+            ->where('status', 'success')
+            ->whereNotNull('published_at')
+            ->where('published_at', '>=', $start->utc())
+            ->where('published_at', '<', $end->utc())
+            ->whereHas('product', function (Builder $products) use ($user, $canManageProductLibrary, $creatorId): void {
+                $this->applyProductVisibility($products, $user, $canManageProductLibrary);
+                if ($creatorId !== null) {
+                    $products->where('created_by', $creatorId);
+                }
+            });
+
+        return $query->count();
+    }
+
+    private function productCreationCount(
+        AdminUser $user,
+        bool $canManageProductLibrary,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+        ?int $creatorId,
+    ): int {
+        $query = AikaipinProduct::query()
+            ->where('created_at', '>=', $start->utc())
+            ->where('created_at', '<', $end->utc());
+        $this->applyProductVisibility($query, $user, $canManageProductLibrary);
+
+        if ($creatorId !== null) {
+            $query->where('created_by', $creatorId);
+        }
+
+        return $query->count();
+    }
+
+    /** @return array{value:int,previous:int,direction:string,percentage:float} */
+    private function comparisonMetric(int $value, int $previous): array
+    {
+        $difference = $value - $previous;
+        $percentage = $previous === 0
+            ? ($value === 0 ? 0.0 : 100.0)
+            : round(abs($difference) / $previous * 100, 1);
+
+        return [
+            'value' => $value,
+            'previous' => $previous,
+            'direction' => $difference > 0 ? 'up' : ($difference < 0 ? 'down' : 'flat'),
+            'percentage' => $percentage,
+        ];
     }
 
     /** @return list<array{value:string,label:string}> */

@@ -1779,6 +1779,82 @@
     margin-bottom: 16px;
 }
 
+.aikaipin-product-library-page .aikaipin-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0 0 16px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-card {
+    background: #fff;
+    border: 1px solid #e2eaf1;
+    border-left: 4px solid #3c8dbc;
+    border-radius: 8px;
+    box-shadow: 0 3px 12px rgba(42, 69, 91, .06);
+    min-width: 0;
+    padding: 15px 17px 14px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-heading {
+    align-items: center;
+    color: #526a7e;
+    display: flex;
+    font-size: 13px;
+    font-weight: 600;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-heading small {
+    color: #98a6b3;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-value {
+    color: #183b56;
+    display: block;
+    font-size: 27px;
+    line-height: 1.15;
+    margin-bottom: 10px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison {
+    align-items: center;
+    color: #8493a2;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 5px 8px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison b {
+    border-radius: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-up {
+    background: #e8f7ef;
+    color: #169455;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-down {
+    background: #fff0ef;
+    color: #dd5148;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-flat {
+    background: #f1f4f7;
+    color: #778694;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison small {
+    color: #9aa7b3;
+    margin-left: auto;
+}
+
 .aikaipin-product-library-page .aikaipin-filter-grid {
     display: grid;
     grid-template-columns: minmax(280px, 1.6fr) repeat(3, minmax(180px, 1fr));
@@ -1935,6 +2011,10 @@
 }
 
 @media (max-width: 1280px) {
+    .aikaipin-product-library-page .aikaipin-stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .aikaipin-product-library-page .aikaipin-filter-grid {
         grid-template-columns: repeat(2, minmax(220px, 1fr));
     }
@@ -1946,6 +2026,10 @@
     }
 
     .aikaipin-product-library-page .aikaipin-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .aikaipin-product-library-page .aikaipin-stat-grid {
         grid-template-columns: 1fr;
     }
 
