@@ -27,6 +27,11 @@ return [
         'timeout' => (int) env('LOGISTICS_SKU_DATABASE_TIMEOUT', 15),
         'cache_minutes' => (int) env('LOGISTICS_SKU_DATABASE_CACHE_MINUTES', 10),
     ],
+    'tongtool_receiver' => [
+        'writer_hash' => env('LOGISTICS_TONGTOOL_WRITER_HASH', ''),
+        'path' => env('LOGISTICS_TONGTOOL_STORAGE_PATH'),
+        'local_lookup' => (bool) env('LOGISTICS_TONGTOOL_LOCAL_LOOKUP', false),
+    ],
     'paypal' => [
         'import_secret' => env('LOGISTICS_PAYPAL_IMPORT_SECRET', ''),
         'import_max_bytes' => (int) env('LOGISTICS_PAYPAL_IMPORT_MAX_BYTES', 20 * 1024 * 1024),
