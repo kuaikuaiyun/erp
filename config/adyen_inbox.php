@@ -10,4 +10,5 @@ return [
     'password' => env('ADYEN_INBOX_WEBHOOK_PASSWORD', $file['password'] ?? null),
     'hmac_keys' => array_filter(array_map('trim', explode(',', (string) env('ADYEN_INBOX_HMAC_KEYS', $file['hmac_keys'] ?? '')))),
     'pull_token' => env('ADYEN_INBOX_PULL_TOKEN', $file['pull_token'] ?? null),
+    'report_api_key' => env('ADYEN_INBOX_REPORT_API_KEY', $file['report_api_key'] ?? null),
 ];

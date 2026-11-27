@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdyenInboxController extends Controller
 {
     private const TABLE = 'adyen_webhook_inbox';
+    private const MAX_REPORT_BYTES = 100 * 1024 * 1024;
 
     public function receive(Request $request): Response
     {
@@ -113,6 +115,69 @@ class AdyenInboxController extends Controller
         }
 
         return response('', 204)->header('Cache-Control', 'private, no-store');
+    }
+
+    public function report(Request $request, string $merchant, string $filename): Response
+    {
+        if (!$this->canPull($request)) {
+            return $this->failure('Authentication required.', 401);
+        }
+        if ($merchant !== config('adyen_inbox.merchant')) {
+            return $this->failure('Report not found.', 404);
+        }
+
+        $key = config('adyen_inbox.report_api_key');
+        if (!is_string($key) || $key === '') {
+            return $this->failure('Report source unavailable.', 503);
+        }
+
+        $file = tmpfile();
+        if ($file === false) {
+            return $this->failure('Report source unavailable.', 503);
+        }
+
+        try {
+            $upstream = Http::withHeaders(['X-API-Key' => $key])->connectTimeout(5)->timeout(90)->withoutRedirecting()
+                ->withOptions([
+                    'sink' => $file,
+                    'progress' => static function ($total, $downloaded): void {
+                        if (max($total, $downloaded) > self::MAX_REPORT_BYTES) {
+                            throw new \LengthException('Adyen report exceeds the transfer limit.');
+                        }
+                    },
+                ])->get('https://ca-live.adyen.com/reports/download/MerchantAccount/'.$merchant.'/'.$filename);
+            if (!$upstream->ok()) {
+                fclose($file);
+                return match ($upstream->status()) {
+                    404 => $this->failure('Report not available yet.', 404),
+                    429 => $this->failure('Report source rate limited.', 429),
+                    default => $this->failure('Report source unavailable.', 502),
+                };
+            }
+
+            $size = fstat($file)['size'] ?? 0;
+            if ($size < 1 || $size > self::MAX_REPORT_BYTES || !rewind($file)) {
+                fclose($file);
+                return $this->failure('Invalid upstream report.', 502);
+            }
+        } catch (\Throwable $error) {
+            fclose($file);
+            Log::warning('Unable to read Adyen report', ['type' => $error::class]);
+
+            return $this->failure('Report source unavailable.', 502);
+        }
+
+        return response()->stream(static function () use ($file): void {
+            try {
+                fpassthru($file);
+            } finally {
+                fclose($file);
+            }
+        }, 200, [
+            'Content-Type' => 'text/csv',
+            'Content-Length' => (string) $size,
+            'Cache-Control' => 'private, no-store',
+        ]);
     }
 
     private function canPull(Request $request): bool

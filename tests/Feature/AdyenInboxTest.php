@@ -3,10 +3,36 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AdyenInboxTest extends TestCase
 {
+    public function test_report_download_is_read_only_and_scoped_to_the_inbox_merchant(): void
+    {
+        config(['adyen_inbox.merchant' => 'TestMerchant', 'adyen_inbox.report_api_key' => 'fixture-report-key',
+            'adyen_inbox.pull_token' => str_repeat('r', 40)]);
+        $filename = 'received_payments_report_2026_11_26.csv';
+        $endpoint = '/api/adyen/reports/TestMerchant/'.$filename;
+        $official = 'https://ca-live.adyen.com/reports/download/MerchantAccount/TestMerchant/'.$filename;
+        $csv = "Merchant Account,Psp Reference\nTestMerchant,PSP-1\n";
+        $auth = ['Authorization' => 'Bearer '.str_repeat('r', 40)];
+        Http::preventStrayRequests();
+        Http::fake([$official => Http::response($csv, 200, ['Content-Type' => 'text/csv'])]);
+
+        $this->getJson($endpoint)->assertUnauthorized();
+        $this->getJson('/api/adyen/reports/OtherMerchant/'.$filename, $auth)->assertNotFound();
+        $this->getJson('/api/adyen/reports/TestMerchant/unknown.csv', $auth)->assertNotFound();
+        Http::assertNothingSent();
+
+        $response = $this->get($endpoint, $auth)->assertOk()
+            ->assertHeader('Content-Length', (string) strlen($csv));
+        self::assertStringStartsWith('text/csv', $response->headers->get('Content-Type'));
+        self::assertSame($csv, $response->streamedContent());
+        Http::assertSent(fn ($request) => $request->url() === $official && $request->method() === 'GET'
+            && $request->hasHeader('X-API-Key', 'fixture-report-key') && !$request->hasHeader('Authorization'));
+    }
+
     public function test_verified_delivery_survives_pulls_until_matching_acknowledgement(): void
     {
         config([
