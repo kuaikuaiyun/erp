@@ -17,7 +17,7 @@
 <div class="box review-box review-filter-box"><div class="box-body"><form class="filters" method="get">
 @include('portals.assistant.partials.operation-department-multi-filter',['departments'=>$departmentOptions,'selectedIds'=>$selectedDepartmentIds,'inputName'=>'department_ids','label'=>'运营部门'])
 <div class="form-group"><label>累计消耗范围($)</label><div class="spend-range-inputs"><input class="form-control" type="number" min="0" step="0.01" name="min_spend" value="{{ $minSpend }}" placeholder="最低金额"><span>至</span><input class="form-control" type="number" min="0" step="0.01" name="max_spend" value="{{ $maxSpend }}" placeholder="最高金额"></div></div>
-<div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $operator }}"></div>
+<div class="form-group"><label>{{ $portal->code === 'zhuli' ? '人名搜索' : '运营人员' }}</label><input class="form-control" name="operator" value="{{ $operator }}" placeholder="输入人名搜索" autocomplete="off"></div>
 <div class="form-group"><label>账号编号</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
 @if($canViewBillingStatus)<div class="form-group"><label>账单情况</label><select class="form-control" name="billing_status"><option value="">全部</option><option value="filled" @selected($billingStatus==='filled')>已填写</option><option value="empty" @selected($billingStatus==='empty')>未填写</option></select></div>@endif
 <div class="form-group"><label>账户限额/风控等因素</label><select class="form-control" name="risk_status"><option value="">全部</option><option value="filled" @selected($riskStatus==='filled')>已填写</option><option value="empty" @selected($riskStatus==='empty')>未填写</option></select></div>
