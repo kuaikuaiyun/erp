@@ -35,15 +35,23 @@ class ProductOrderStatisticsController extends Controller
 
         $filters = $this->filters($request);
         $query = $this->publicationQuery($filters);
-        $publicationIds = (clone $query)->pluck('ai_product_shopify_publications.id')->map(fn ($id): int => (int) $id)->all();
+        $publicationIndex = (clone $query)->get([
+            'ai_product_shopify_publications.id',
+            'ai_product_shopify_publications.aikaipin_product_id',
+        ]);
+        $publicationIds = $publicationIndex->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $productPublicationIds = $publicationIndex
+            ->groupBy('aikaipin_product_id')
+            ->map(fn (Collection $rows): array => $rows->pluck('id')->map(fn ($id): int => (int) $id)->all());
         $from = CarbonImmutable::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc();
         $to = CarbonImmutable::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc();
-        $allStatistics = $this->statistics->forPublications($publicationIds, $from, $to);
+        $productStatistics = $this->statistics->forProducts($publicationIds, $from, $to);
 
-        $orderedPublicationIds = collect($publicationIds)
-            ->sort(function (int $leftId, int $rightId) use ($allStatistics): int {
-                $left = $allStatistics->get($leftId, $this->emptyStatistics());
-                $right = $allStatistics->get($rightId, $this->emptyStatistics());
+        $orderedProductIds = $productPublicationIds->keys()
+            ->map(fn ($id): int => (int) $id)
+            ->sort(function (int $leftId, int $rightId) use ($productStatistics): int {
+                $left = $productStatistics->get($leftId, $this->emptyStatistics());
+                $right = $productStatistics->get($rightId, $this->emptyStatistics());
 
                 return ($right['order_count'] <=> $left['order_count'])
                     ?: ($right['revenue'] <=> $left['revenue'])
@@ -51,42 +59,116 @@ class ProductOrderStatisticsController extends Controller
             })
             ->values();
         $currentPage = max(1, LengthAwarePaginator::resolveCurrentPage());
-        $lastPage = max(1, (int) ceil($orderedPublicationIds->count() / $filters['per_page']));
+        $lastPage = max(1, (int) ceil($orderedProductIds->count() / $filters['per_page']));
         $currentPage = min($currentPage, $lastPage);
-        $pageIds = $orderedPublicationIds
+        $pageProductIds = $orderedProductIds
             ->slice(($currentPage - 1) * $filters['per_page'], $filters['per_page'])
             ->values();
-        $pagePositions = $pageIds->flip();
+        $pagePositions = $pageProductIds->flip();
         $pagePublications = $query
             ->with([
                 'product:id,product_code,name,images,updated_at',
-                'productPage:id,aikaipin_product_id,name',
-                'store:id,shop_name,domain',
             ])
-            ->whereIn('ai_product_shopify_publications.id', $pageIds->all())
+            ->whereIn('ai_product_shopify_publications.aikaipin_product_id', $pageProductIds->all())
             ->get()
-            ->sortBy(fn (AiProductShopifyPublication $publication): int => (int) $pagePositions->get((int) $publication->getKey()))
-            ->values();
+            ->groupBy('aikaipin_product_id');
 
-        $publications = new LengthAwarePaginator(
-            $pagePublications,
-            $orderedPublicationIds->count(),
+        $pageProducts = $pageProductIds->map(function (int $productId) use ($pagePublications, $pagePositions, $productStatistics) {
+            /** @var Collection<int, AiProductShopifyPublication> $group */
+            $group = $pagePublications->get($productId, collect());
+            /** @var AiProductShopifyPublication|null $productRow */
+            $productRow = $group->sortBy([
+                ['published_at', 'desc'],
+                ['id', 'desc'],
+            ])->first();
+            if (! $productRow) return null;
+
+            $productRow->setAttribute('order_statistics', $productStatistics->get($productId, $this->emptyStatistics()));
+            $productRow->setAttribute('publication_count', $group->count());
+            $productRow->setAttribute('product_sort_position', (int) $pagePositions->get($productId));
+
+            return $productRow;
+        })->filter()->sortBy('product_sort_position')->values();
+
+        $products = new LengthAwarePaginator(
+            $pageProducts,
+            $orderedProductIds->count(),
             $filters['per_page'],
             $currentPage,
             ['path' => $request->url(), 'query' => $request->query()],
         );
 
-        foreach ($publications as $publication) {
-            $publication->setAttribute('order_statistics', $allStatistics->get((int) $publication->getKey(), $this->emptyStatistics()));
-        }
-
         return view('portals.aikaipin.product-order-statistics.index', [
             ...$context,
-            'publications' => $publications,
+            'products' => $products,
             'filters' => $filters,
             'publisherOptions' => $this->publisherOptions(),
             'storeOptions' => $this->storeOptions(),
-            'summary' => $this->summary($allStatistics, count($publicationIds)),
+            'summary' => $this->summary($productStatistics, $orderedProductIds->count(), count($publicationIds)),
+        ]);
+    }
+
+    public function productDetails(Request $request, int $product): Response
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->authorization->assertPortal($context['portal']);
+
+        $filters = $this->filters($request);
+        $publications = $this->publicationQuery($filters)
+            ->where('aikaipin_product_id', $product)
+            ->with(['store:id,shop_name,domain', 'productPage:id,aikaipin_product_id,name'])
+            ->orderBy('published_at')
+            ->orderBy('id')
+            ->get();
+        abort_if($publications->isEmpty(), 404);
+
+        $from = CarbonImmutable::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc();
+        $to = CarbonImmutable::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc();
+        $orders = $this->statistics->ordersForPublications(
+            $publications->pluck('id')->map(fn ($id): int => (int) $id)->all(),
+            $from,
+            $to,
+        );
+
+        return new JsonResponse([
+            'publications' => $publications->map(function (AiProductShopifyPublication $publication) use ($orders): array {
+                $publicationId = (int) $publication->getKey();
+                $publicationOrders = $orders->filter(
+                    fn (array $order): bool => in_array($publicationId, $order['publication_ids'] ?? [], true)
+                );
+                $publicationItems = $publicationOrders->flatMap(
+                    fn (array $order): array => collect($order['items'] ?? [])
+                        ->where('publication_id', $publicationId)
+                        ->values()
+                        ->all()
+                );
+
+                return [
+                    'id' => $publicationId,
+                    'publisher' => (string) ($publication->published_by_name ?: '未知用户'),
+                    'store_id' => (int) $publication->assistant_domain_store_id,
+                    'store' => (string) ($publication->store?->domain ?: $publication->store?->shop_name ?: '—'),
+                    'sku' => (string) ($publication->sku ?: '—'),
+                    'page' => (string) ($publication->productPage?->name ?: '—'),
+                    'published_at' => $publication->published_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i'),
+                    'order_count' => $publicationOrders->count(),
+                    'item_quantity' => (float) $publicationItems->sum('quantity'),
+                    'revenue' => (float) $publicationItems->sum('revenue'),
+                ];
+            })->sortBy([
+                ['order_count', 'desc'],
+                ['revenue', 'desc'],
+                ['published_at', 'desc'],
+            ])->values(),
+            'orders' => $orders,
+            'summary' => [
+                'publication_count' => $publications->count(),
+                'store_count' => $publications->pluck('assistant_domain_store_id')->unique()->count(),
+                'order_count' => $orders->count(),
+                'item_quantity' => (float) $orders->sum('item_quantity'),
+                'revenue' => (float) $orders->sum('revenue'),
+            ],
         ]);
     }
 
@@ -192,9 +274,10 @@ class ProductOrderStatisticsController extends Controller
     }
 
     /** @param Collection<int, array{order_count:int,item_quantity:float,revenue:float,first_order_at:?string,last_order_at:?string}> $statistics */
-    private function summary(Collection $statistics, int $publicationCount): array
+    private function summary(Collection $statistics, int $productCount, int $publicationCount): array
     {
         return [
+            'product_count' => $productCount,
             'publication_count' => $publicationCount,
             'converted_count' => $statistics->filter(fn (array $row): bool => $row['order_count'] > 0)->count(),
             'order_count' => (int) $statistics->sum('order_count'),
@@ -208,4 +291,5 @@ class ProductOrderStatisticsController extends Controller
     {
         return ['order_count' => 0, 'item_quantity' => 0.0, 'revenue' => 0.0, 'first_order_at' => null, 'last_order_at' => null];
     }
+
 }

@@ -545,6 +545,9 @@ Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExcepti
 Route::post('/warehouse-weight-exceptions/{id}/approve', [WarehouseWeightExceptionController::class, 'approve'])->name('caigou.warehouse-weight-exceptions.approve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/product-order-statistics', [ProductOrderStatisticsController::class, 'index'])->name('aikaipin.product-order-statistics.index');
+Route::get('/product-order-statistics/products/{product}/details', [ProductOrderStatisticsController::class, 'productDetails'])
+    ->whereNumber('product')
+    ->name('aikaipin.product-order-statistics.products.details');
 Route::get('/product-order-statistics/{publication}/orders', [ProductOrderStatisticsController::class, 'orders'])
     ->whereNumber('publication')
     ->name('aikaipin.product-order-statistics.orders');
