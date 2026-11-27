@@ -85,7 +85,8 @@ class AppLovinAccountStoreBindingService
                 ->whereRaw('LOWER(TRIM(account_number)) = ?', [$number])
                 ->update(['assistant_domain_store_id' => $store->getKey(), 'store_domain' => $store->domain]);
 
-            OperationReport::query()->orderBy('id')->chunkById(100, function (Collection $reports) use ($number, $store, $boundBy): void {
+            OperationReport::query()->where('advertising_rows', 'like', '%'.$number.'%')
+                ->orderBy('id')->chunkById(100, function (Collection $reports) use ($number, $store, $boundBy): void {
                 foreach ($reports as $report) {
                     $rows = $report->advertising_rows ?: [];
                     $changed = false;
@@ -122,7 +123,8 @@ class AppLovinAccountStoreBindingService
             FashionAdSpendEntry::query()->whereRaw("LOWER(TRIM(media)) = 'applovin'")
                 ->whereRaw('LOWER(TRIM(account_number)) = ?', [$number])
                 ->update(['assistant_domain_store_id' => null, 'store_domain' => null]);
-            OperationReport::query()->orderBy('id')->chunkById(100, function (Collection $reports) use ($number): void {
+            OperationReport::query()->where('advertising_rows', 'like', '%'.$number.'%')
+                ->orderBy('id')->chunkById(100, function (Collection $reports) use ($number): void {
                 foreach ($reports as $report) {
                     $rows = $report->advertising_rows ?: [];
                     $changed = false;
