@@ -54,8 +54,12 @@ class AppLovinSpendReviewController extends Controller
         $allowedDepartmentIds = $context['user']->isAdministrator()
             ? Department::business()->pluck('id')->map(fn ($id): int => (int) $id)->all()
             : $visibleIds;
+        if ($request->has('attachment_status')) {
+            $request->merge(['attachment_status' => (array) $request->input('attachment_status')]);
+        }
         $filters = $request->validate([
             'operator' => ['nullable', 'string', 'max:100'],
+            'agency' => ['nullable', 'string', 'max:191'],
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($allowedDepartmentIds)],
             'over_threshold' => ['nullable', 'in:1'],
@@ -64,7 +68,8 @@ class AppLovinSpendReviewController extends Controller
             'billing_status' => ['nullable', Rule::in(['filled', 'empty'])],
             'risk_status' => ['nullable', Rule::in(['filled', 'empty'])],
             'account_number' => ['nullable', 'string', 'max:191'],
-            'attachment_status' => ['nullable', Rule::in(['1', '0', 'unset'])],
+            'attachment_status' => ['nullable', 'array'],
+            'attachment_status.*' => ['string', 'distinct', Rule::in(['1', '0', 'unset'])],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
@@ -212,6 +217,13 @@ class AppLovinSpendReviewController extends Controller
                     'details' => $ordered,
                 ];
             })->sortByDesc('total')->values();
+        $agencyOptions = $accounts->pluck('agency')
+            ->map(fn ($agency): string => trim((string) $agency))
+            ->filter()->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values();
+        $agency = trim((string) ($filters['agency'] ?? ''));
+        if ($agency !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => trim((string) $account['agency']) === $agency)->values();
+        }
         if ($selectedDepartmentIds !== []) {
             $accounts = $accounts->filter(fn (array $account): bool => collect($account['department_ids'])
                 ->intersect($selectedDepartmentIds)->isNotEmpty())->values();
@@ -305,11 +317,13 @@ class AppLovinSpendReviewController extends Controller
                 ? trim((string) $account['risk_factors']) !== ''
                 : trim((string) $account['risk_factors']) === '')->values();
         }
-        $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
-        if ($attachmentStatus !== '') {
-            $accounts = $accounts->filter(fn (array $account): bool => $attachmentStatus === 'unset'
-                ? $account['is_attached'] === null
-                : $account['is_attached'] === ($attachmentStatus === '1'))->values();
+        $attachmentStatuses = array_values($filters['attachment_status'] ?? []);
+        if ($attachmentStatuses !== []) {
+            $accounts = $accounts->filter(fn (array $account): bool =>
+                ($account['is_attached'] === null && in_array('unset', $attachmentStatuses, true))
+                || ($account['is_attached'] === true && in_array('1', $attachmentStatuses, true))
+                || ($account['is_attached'] === false && in_array('0', $attachmentStatuses, true))
+            )->values();
         }
         $page = max(1, (int) $request->query('page', 1));
         $perPage = (int) ($filters['per_page'] ?? 20);
@@ -319,7 +333,7 @@ class AppLovinSpendReviewController extends Controller
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'billingStatus' => $billingStatus, 'riskStatus' => $riskStatus, 'accountNumber' => $accountNumber, 'attachmentStatus' => $attachmentStatus, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $operator, 'agency' => $agency, 'agencyOptions' => $agencyOptions, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'billingStatus' => $billingStatus, 'riskStatus' => $riskStatus, 'accountNumber' => $accountNumber, 'attachmentStatuses' => $attachmentStatuses, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',
