@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
+use App\Models\Department;
 use App\Portals\Assistant\AssistantDomainStoreSpreadsheetService;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -132,6 +136,46 @@ class AssistantDomainStoreRequiredFieldsTest extends TestCase
         $controller = (new \ReflectionClass(DomainStoreController::class))->newInstanceWithoutConstructor();
         self::assertFalse(Validator::make(['user_name' => null], $method->invoke($controller, ['user_name']))->fails());
         self::assertArrayNotHasKey('team', $method->invoke($controller, ['remark']));
+    }
+
+    public function test_import_resolves_owner_and_department_display_names_to_ids(): void
+    {
+        DB::beginTransaction();
+
+        try {
+            $suffix = Str::lower(Str::random(10));
+            $department = Department::query()->create([
+                'name' => 'Import Department '.$suffix,
+                'slug' => 'import-department-'.$suffix,
+                'sort' => 0,
+            ]);
+            $userId = DB::table(config('admin.database.users_table'))->insertGetId([
+                'username' => 'import-owner-'.$suffix,
+                'password' => bcrypt(Str::random(20)),
+                'status' => AdminUser::STATUS_ACTIVE,
+                'name' => 'Import Owner '.$suffix,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            $department->departmentMembers()->attach($userId, [
+                'position' => Department::POSITION_MEMBER,
+                'position_slot' => 1,
+                'is_primary' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $row = $this->readRows([[
+                'owner_user_id' => 'Import Owner '.$suffix,
+                'operation_department_id' => 'Import Department '.$suffix,
+            ]])[0]['data'];
+
+            self::assertSame($userId, $row['owner_user_id']);
+            self::assertSame((int) $department->getKey(), $row['operation_department_id']);
+            self::assertFalse(Validator::make($row, $this->rules('importRules'))->fails());
+        } finally {
+            DB::rollBack();
+        }
     }
 
     public function test_user_is_optional_for_save_and_import(): void

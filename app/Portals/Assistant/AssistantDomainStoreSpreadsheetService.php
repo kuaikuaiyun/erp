@@ -2,8 +2,10 @@
 
 namespace App\Portals\Assistant;
 
+use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreQuickOption;
+use App\Models\Department;
 use DateTimeInterface;
 use Illuminate\Http\UploadedFile;
 use InvalidArgumentException;
@@ -214,7 +216,108 @@ class AssistantDomainStoreSpreadsheetService
             throw new InvalidArgumentException(__('assistant.domain_stores.import.too_many_records'));
         }
 
-        return $importRows;
+        return $this->resolveOwnershipReferences($importRows);
+    }
+
+    /**
+     * Import templates are maintained by people, so ownership columns commonly
+     * contain the visible user/department names instead of database IDs. Resolve
+     * both forms here and leave unknown or ambiguous values untouched so the
+     * normal row validation can report them without aborting the whole import.
+     *
+     * @param  list<array{row: int, data: array<string, mixed>}>  $rows
+     *
+     * @return list<array{row: int, data: array<string, mixed>}>
+     */
+    private function resolveOwnershipReferences(array $rows): array
+    {
+        $departmentNames = collect($rows)
+            ->pluck('data.operation_department_id')
+            ->filter(fn (mixed $value): bool => $this->isTextReference($value))
+            ->map(fn (mixed $value): string => trim((string) $value))
+            ->unique(fn (string $value): string => $this->normalizeReference($value))
+            ->values();
+        $ownerNames = collect($rows)
+            ->pluck('data.owner_user_id')
+            ->filter(fn (mixed $value): bool => $this->isTextReference($value))
+            ->map(fn (mixed $value): string => trim((string) $value))
+            ->unique(fn (string $value): string => $this->normalizeReference($value))
+            ->values();
+
+        $departmentsByName = $departmentNames->isEmpty()
+            ? collect()
+            : Department::business()
+                ->whereIn('name', $departmentNames->all())
+                ->get(['id', 'name'])
+                ->groupBy(fn (Department $department): string => $this->normalizeReference($department->name));
+        $owners = $ownerNames->isEmpty()
+            ? collect()
+            : AdminUser::query()
+                ->with('departments:id,name')
+                ->where(function ($query) use ($ownerNames): void {
+                    $query->whereIn('name', $ownerNames->all())
+                        ->orWhereIn('username', $ownerNames->all());
+                })
+                ->get(['id', 'name', 'username']);
+        $ownersByName = collect();
+        foreach ($owners as $owner) {
+            foreach (array_unique([$owner->name, $owner->username]) as $reference) {
+                if (filled($reference)) {
+                    $key = $this->normalizeReference($reference);
+                    $ownersByName->put($key, $ownersByName->get($key, collect())->push($owner));
+                }
+            }
+        }
+
+        return collect($rows)->map(function (array $row) use ($departmentsByName, $ownersByName): array {
+            $data = $row['data'];
+            $departmentId = null;
+            $departmentReference = $data['operation_department_id'] ?? null;
+
+            if ($this->isTextReference($departmentReference)) {
+                $matches = $departmentsByName->get($this->normalizeReference($departmentReference), collect());
+                if ($matches->count() === 1) {
+                    $departmentId = (int) $matches->first()->getKey();
+                    $data['operation_department_id'] = $departmentId;
+                }
+            } elseif (filled($departmentReference) && is_numeric($departmentReference)) {
+                $departmentId = (int) $departmentReference;
+            }
+
+            $ownerReference = $data['owner_user_id'] ?? null;
+            if ($this->isTextReference($ownerReference)) {
+                $reference = $this->normalizeReference($ownerReference);
+                $matches = $ownersByName->get($reference, collect())
+                    ->filter(function (AdminUser $owner) use ($reference): bool {
+                        return $this->normalizeReference($owner->name) === $reference
+                            || $this->normalizeReference($owner->username) === $reference;
+                    });
+
+                if ($departmentId !== null) {
+                    $matches = $matches->filter(
+                        fn (AdminUser $owner): bool => $owner->departments->contains('id', $departmentId),
+                    );
+                }
+
+                if ($matches->count() === 1) {
+                    $data['owner_user_id'] = (int) $matches->first()->getKey();
+                }
+            }
+
+            $row['data'] = $data;
+
+            return $row;
+        })->all();
+    }
+
+    private function isTextReference(mixed $value): bool
+    {
+        return is_string($value) && trim($value) !== '' && !ctype_digit(trim($value));
+    }
+
+    private function normalizeReference(mixed $value): string
+    {
+        return mb_strtolower(trim((string) $value));
     }
 
     /** @return list<mixed> */
