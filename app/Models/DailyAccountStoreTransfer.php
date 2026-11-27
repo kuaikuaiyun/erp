@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class DailyAccountStoreTransfer extends Model
 {
+    public const ACTION_DISCARD = 'discard';
+    public const ACTION_TRANSFER = 'transfer';
+    public const ACTION_RESET_APPEAL = 'reset_appeal';
     public const STATUS_PENDING = 'pending';
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_PROCESSED = 'processed';
@@ -15,5 +18,5 @@ class DailyAccountStoreTransfer extends Model
     protected function casts():array{return['operator_user_id'=>'integer','operation_department_id'=>'integer','assistant_department_id'=>'integer','agency_id'=>'integer','project_id'=>'integer','website_system_id'=>'integer','processed_by'=>'integer','processed_at'=>'datetime','reason_images'=>'array'];}
     public function statusLabel():string{return match($this->status){self::STATUS_PROCESSING=>'处理中',self::STATUS_PROCESSED=>'已处理',self::STATUS_REJECTED=>'已驳回',default=>'未处理'};}
     public function targetLabel():string{return $this->target_type==='store'?'店铺':'账号';}
-    public function actionLabel():string{return $this->action_type==='transfer'?'转让':'弃用';}
+    public function actionLabel():string{return match($this->action_type){self::ACTION_TRANSFER=>'转让',self::ACTION_RESET_APPEAL=>'清零申诉',default=>'弃用'};}
 }
