@@ -323,7 +323,7 @@ class AppLovinSpendReviewController extends Controller
         AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], $updates);
 
         $message = $request->exists('account_status_note')
-            ? '账号情况已保存。'
+            ? '账单情况已保存。'
             : ($request->exists('gift_granted_at') ? '有赠金时间已保存。' : '下户时间已保存。');
 
         return back()->with('success', $message);
