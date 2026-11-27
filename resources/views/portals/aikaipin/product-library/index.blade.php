@@ -177,6 +177,7 @@
     @php
         $creatorFilter = $filters['creator_id'] !== '' ? $filters['creator_id'] : null;
         $statCards = [
+            ['type' => 'total_products', 'label' => '总上品数', 'period' => '全部', 'comparison' => '全部历史产品', 'metric' => $publicationStats['total_products']],
             ['type' => 'day_listings', 'label' => '日上架数量', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_listings']],
             ['type' => 'day_products', 'label' => '日上品数', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_products']],
             ['type' => 'month_listings', 'label' => '月上架数量', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_listings']],
@@ -204,15 +205,20 @@
                 </div>
                 <strong class="aikaipin-stat-value">{{ number_format($metric['value']) }}</strong>
                 <div class="aikaipin-stat-comparison">
-                    <span>{{ $card['comparison'] }}</span>
-                    @if ($metric['direction'] === 'up')
-                        <b class="is-up"><i class="fa fa-arrow-up" aria-hidden="true"></i> 增长 {{ number_format($metric['percentage'], 1) }}%</b>
-                    @elseif ($metric['direction'] === 'down')
-                        <b class="is-down"><i class="fa fa-arrow-down" aria-hidden="true"></i> 减少 {{ number_format($metric['percentage'], 1) }}%</b>
+                    @if ($card['type'] === 'total_products')
+                        <span>{{ $card['comparison'] }}</span>
+                        <b class="is-flat"><i class="fa fa-list-alt" aria-hidden="true"></i> 点击查看明细</b>
                     @else
-                        <b class="is-flat"><i class="fa fa-minus" aria-hidden="true"></i> 持平 0.0%</b>
+                        <span>{{ $card['comparison'] }}</span>
+                        @if ($metric['direction'] === 'up')
+                            <b class="is-up"><i class="fa fa-arrow-up" aria-hidden="true"></i> 增长 {{ number_format($metric['percentage'], 1) }}%</b>
+                        @elseif ($metric['direction'] === 'down')
+                            <b class="is-down"><i class="fa fa-arrow-down" aria-hidden="true"></i> 减少 {{ number_format($metric['percentage'], 1) }}%</b>
+                        @else
+                            <b class="is-flat"><i class="fa fa-minus" aria-hidden="true"></i> 持平 0.0%</b>
+                        @endif
+                        <small>对比值 {{ number_format($metric['previous']) }}</small>
                     @endif
-                    <small>对比值 {{ number_format($metric['previous']) }}</small>
                 </div>
             </button>
         @endforeach

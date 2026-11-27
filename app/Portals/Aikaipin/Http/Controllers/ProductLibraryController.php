@@ -105,23 +105,27 @@ class ProductLibraryController extends Controller
         }
 
         $validated = $request->validate([
-            'type' => ['required', Rule::in(['day_listings', 'day_products', 'month_listings', 'month_products'])],
+            'type' => ['required', Rule::in(['total_products', 'day_listings', 'day_products', 'month_listings', 'month_products'])],
             'period' => ['required', 'string', 'max:10'],
             'creator_id' => ['nullable', 'integer', 'min:1'],
         ]);
         $type = (string) $validated['type'];
         $creatorId = isset($validated['creator_id']) ? (int) $validated['creator_id'] : null;
         $isMonth = str_starts_with($type, 'month_');
+        $isTotal = $type === 'total_products';
 
-        try {
-            $start = CarbonImmutable::createFromFormat($isMonth ? '!Y-m' : '!Y-m-d', (string) $validated['period'], 'Asia/Shanghai');
-        } catch (Throwable) {
-            throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
+        $start = null;
+        if (! $isTotal) {
+            try {
+                $start = CarbonImmutable::createFromFormat($isMonth ? '!Y-m' : '!Y-m-d', (string) $validated['period'], 'Asia/Shanghai');
+            } catch (Throwable) {
+                throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
+            }
+            if ($start === false) {
+                throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
+            }
         }
-        if ($start === false) {
-            throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
-        }
-        $end = $isMonth ? $start->addMonth() : $start->addDay();
+        $end = $isTotal ? null : ($isMonth ? $start->addMonth() : $start->addDay());
         $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
 
         if (str_ends_with($type, '_listings')) {
@@ -156,9 +160,11 @@ class ProductLibraryController extends Controller
             })->values();
             $kind = 'listings';
         } else {
-            $query = AikaipinProduct::query()
-                ->where('created_at', '>=', $start->utc())
-                ->where('created_at', '<', $end->utc());
+            $query = AikaipinProduct::query();
+            if (! $isTotal) {
+                $query->where('created_at', '>=', $start->utc())
+                    ->where('created_at', '<', $end->utc());
+            }
             $this->applyProductVisibility($query, $context['user'], $canManageProductLibrary);
             if ($creatorId !== null) {
                 $query->where('created_by', $creatorId);
@@ -177,6 +183,7 @@ class ProductLibraryController extends Controller
         }
 
         $titles = [
+            'total_products' => '总上品数明细',
             'day_listings' => '日上架数量明细',
             'day_products' => '日上品数明细',
             'month_listings' => '月上架数量明细',
@@ -185,7 +192,7 @@ class ProductLibraryController extends Controller
 
         return new JsonResponse([
             'title' => $titles[$type],
-            'period' => (string) $validated['period'],
+            'period' => $isTotal ? '全部历史数据' : (string) $validated['period'],
             'kind' => $kind,
             'items' => $items,
             'pagination' => [
@@ -3109,6 +3116,7 @@ class ProductLibraryController extends Controller
             ? CarbonImmutable::createFromFormat('!Y-m', $filters['created_month'], 'Asia/Shanghai')
             : $now->startOfMonth();
         $creatorId = $filters['creator_id'] !== '' ? (int) $filters['creator_id'] : null;
+        $totalProducts = $this->productCreationTotal($user, $canManageProductLibrary, $creatorId);
 
         $dayListings = $this->publicationCount($user, $canManageProductLibrary, $dayStart, $dayStart->addDay(), $creatorId);
         $previousDayListings = $this->publicationCount($user, $canManageProductLibrary, $dayStart->subDay(), $dayStart, $creatorId);
@@ -3123,6 +3131,12 @@ class ProductLibraryController extends Controller
         return [
             'day_label' => $dayStart->format('Y-m-d'),
             'month_label' => $monthStart->format('Y-m'),
+            'total_products' => [
+                'value' => $totalProducts,
+                'previous' => 0,
+                'direction' => 'flat',
+                'percentage' => 0.0,
+            ],
             'day_listings' => $this->comparisonMetric($dayListings, $previousDayListings),
             'day_products' => $this->comparisonMetric($dayProducts, $previousDayProducts),
             'month_listings' => $this->comparisonMetric($monthListings, $previousMonthListings),
@@ -3162,6 +3176,21 @@ class ProductLibraryController extends Controller
         $query = AikaipinProduct::query()
             ->where('created_at', '>=', $start->utc())
             ->where('created_at', '<', $end->utc());
+        $this->applyProductVisibility($query, $user, $canManageProductLibrary);
+
+        if ($creatorId !== null) {
+            $query->where('created_by', $creatorId);
+        }
+
+        return $query->count();
+    }
+
+    private function productCreationTotal(
+        AdminUser $user,
+        bool $canManageProductLibrary,
+        ?int $creatorId,
+    ): int {
+        $query = AikaipinProduct::query();
         $this->applyProductVisibility($query, $user, $canManageProductLibrary);
 
         if ($creatorId !== null) {
