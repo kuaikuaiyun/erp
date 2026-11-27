@@ -5,7 +5,7 @@ return [
     'heading' => '欢迎登录',
     'account' => '请输入账号',
     'invalid_credentials' => '账号或密码错误。',
-    'tencent_security_notice' => '已接入腾讯云天御安全验证，请按页面提示完成腾讯验证码验证。',
+    'tencent_security_notice' => '腾讯云天御验证码 · 安全守护',
     'password_prompt' => '请输入密码',
     'scan_hint' => '请使用钉钉扫一扫。',
     'refresh_scan' => '刷新二维码',
