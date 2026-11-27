@@ -98,12 +98,12 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-4">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261125-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261127-6"></script>
 @endpush
 
 @section('content')
@@ -175,11 +175,12 @@
     </form>
 
     @php
+        $creatorFilter = $filters['creator_id'] !== '' ? $filters['creator_id'] : null;
         $statCards = [
-            ['label' => '日上架数量', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_listings']],
-            ['label' => '日上品数', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_products']],
-            ['label' => '月上架数量', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_listings']],
-            ['label' => '月上品数', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_products']],
+            ['type' => 'day_listings', 'label' => '日上架数量', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_listings']],
+            ['type' => 'day_products', 'label' => '日上品数', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_products']],
+            ['type' => 'month_listings', 'label' => '月上架数量', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_listings']],
+            ['type' => 'month_products', 'label' => '月上品数', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_products']],
         ];
     @endphp
     <div class="aikaipin-stat-grid" aria-label="产品上架统计">
@@ -187,10 +188,19 @@
             @php
                 $metric = $card['metric'];
             @endphp
-            <article class="aikaipin-stat-card is-{{ $metric['direction'] }}">
+            @php
+                $detailUrl = route('aikaipin.product-library.stat-details', array_filter([
+                    'type' => $card['type'],
+                    'period' => $card['period'],
+                    'creator_id' => $creatorFilter,
+                ], static fn ($value) => $value !== null && $value !== ''));
+            @endphp
+            <button class="aikaipin-stat-card is-{{ $metric['direction'] }}" type="button"
+                data-aikaipin-stat-detail data-stat-detail-url="{{ $detailUrl }}"
+                title="点击查看{{ $card['label'] }}明细">
                 <div class="aikaipin-stat-heading">
                     <span>{{ $card['label'] }}</span>
-                    <small>{{ $card['period'] }}</small>
+                    <small>{{ $card['period'] }} <i class="fa fa-angle-right" aria-hidden="true"></i></small>
                 </div>
                 <strong class="aikaipin-stat-value">{{ number_format($metric['value']) }}</strong>
                 <div class="aikaipin-stat-comparison">
@@ -204,11 +214,11 @@
                     @endif
                     <small>对比值 {{ number_format($metric['previous']) }}</small>
                 </div>
-            </article>
+            </button>
         @endforeach
     </div>
 
-    <div class="flt-card flt-records aikaipin-table-box">
+    <div class="flt-card flt-records aikaipin-table-box" id="aikaipin-product-list">
         <div class="flt-toolbar aikaipin-list-toolbar">
             <div class="flt-selection aikaipin-list-toolbar-summary">
                     <i class="fa fa-cubes" aria-hidden="true"></i>
@@ -461,6 +471,42 @@
         @endif
     </div>
 </section>
+
+<div id="aikaipin-stat-detail-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg aikaipin-stat-detail-dialog" role="document">
+        <div class="modal-content aikaipin-stat-detail-content">
+            <div class="modal-header aikaipin-stat-detail-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+                <div class="aikaipin-stat-detail-heading">
+                    <span class="aikaipin-stat-detail-icon" aria-hidden="true"><i class="fa fa-bar-chart"></i></span>
+                    <div>
+                        <h4 class="modal-title" data-aikaipin-stat-detail-title>统计明细</h4>
+                        <p class="aikaipin-stat-detail-subtitle" data-aikaipin-stat-detail-summary></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body aikaipin-stat-detail-body">
+                <div class="aikaipin-stat-detail-state" data-aikaipin-stat-detail-loading>
+                    <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在加载明细...
+                </div>
+                <div class="alert alert-danger" hidden data-aikaipin-stat-detail-error></div>
+                <div class="table-responsive aikaipin-stat-detail-table-wrap" hidden data-aikaipin-stat-detail-table>
+                    <table class="table table-bordered table-hover aikaipin-stat-detail-table">
+                        <thead data-aikaipin-stat-detail-head></thead>
+                        <tbody data-aikaipin-stat-detail-body></tbody>
+                    </table>
+                </div>
+                <div class="aikaipin-stat-detail-empty" hidden data-aikaipin-stat-detail-empty>
+                    <i class="fa fa-inbox" aria-hidden="true"></i><span>当前统计范围暂无明细</span>
+                </div>
+            </div>
+            <div class="modal-footer aikaipin-stat-detail-footer">
+                <div class="aikaipin-stat-detail-pagination" data-aikaipin-stat-detail-pagination></div>
+                <button type="button" class="btn btn-default aikaipin-stat-detail-close" data-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="aikaipin-image-preview-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">

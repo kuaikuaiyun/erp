@@ -97,6 +97,109 @@ class ProductLibraryController extends Controller
         ]);
     }
 
+    public function statDetails(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $validated = $request->validate([
+            'type' => ['required', Rule::in(['day_listings', 'day_products', 'month_listings', 'month_products'])],
+            'period' => ['required', 'string', 'max:10'],
+            'creator_id' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $type = (string) $validated['type'];
+        $creatorId = isset($validated['creator_id']) ? (int) $validated['creator_id'] : null;
+        $isMonth = str_starts_with($type, 'month_');
+
+        try {
+            $start = CarbonImmutable::createFromFormat($isMonth ? '!Y-m' : '!Y-m-d', (string) $validated['period'], 'Asia/Shanghai');
+        } catch (Throwable) {
+            throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
+        }
+        if ($start === false) {
+            throw ValidationException::withMessages(['period' => '统计日期格式不正确。']);
+        }
+        $end = $isMonth ? $start->addMonth() : $start->addDay();
+        $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
+
+        if (str_ends_with($type, '_listings')) {
+            $query = AiProductShopifyPublication::query()
+                ->where('status', 'success')
+                ->whereNotNull('published_at')
+                ->where('published_at', '>=', $start->utc())
+                ->where('published_at', '<', $end->utc())
+                ->whereHas('product', function (Builder $products) use ($context, $canManageProductLibrary, $creatorId): void {
+                    $this->applyProductVisibility($products, $context['user'], $canManageProductLibrary);
+                    if ($creatorId !== null) {
+                        $products->where('created_by', $creatorId);
+                    }
+                })
+                ->with(['product:id,product_code,name,sku,created_by,created_by_name', 'store:id,shop_name,domain'])
+                ->orderByDesc('published_at')
+                ->orderByDesc('id');
+            $paginator = $query->paginate(20)->withQueryString();
+            $items = collect($paginator->items())->map(function (AiProductShopifyPublication $publication): array {
+                $product = $publication->product;
+
+                return [
+                    'product_code' => (string) ($product?->product_code ?: '—'),
+                    'product_name' => (string) ($product?->name ?: '—'),
+                    'sku' => (string) ($publication->sku ?: (($product && $product->skuValues() !== []) ? implode('、', $product->skuValues()) : '—')),
+                    'creator' => (string) ($product?->created_by_name ?: ($product?->created_by ? '用户 #'.$product->created_by : '—')),
+                    'publisher' => (string) ($publication->published_by_name ?: ($publication->published_by ? '用户 #'.$publication->published_by : '—')),
+                    'store_name' => (string) ($publication->store?->shop_name ?: '—'),
+                    'domain' => (string) ($publication->store?->domain ?: '—'),
+                    'occurred_at' => $publication->published_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: '—',
+                ];
+            })->values();
+            $kind = 'listings';
+        } else {
+            $query = AikaipinProduct::query()
+                ->where('created_at', '>=', $start->utc())
+                ->where('created_at', '<', $end->utc());
+            $this->applyProductVisibility($query, $context['user'], $canManageProductLibrary);
+            if ($creatorId !== null) {
+                $query->where('created_by', $creatorId);
+            }
+            $paginator = $query->orderByDesc('created_at')->orderByDesc('id')->paginate(20)->withQueryString();
+            $items = collect($paginator->items())->map(function (AikaipinProduct $product): array {
+                return [
+                    'product_code' => (string) ($product->product_code ?: '—'),
+                    'product_name' => (string) ($product->name ?: '—'),
+                    'sku' => $product->skuValues() !== [] ? implode('、', $product->skuValues()) : '—',
+                    'creator' => (string) ($product->created_by_name ?: ($product->created_by ? '用户 #'.$product->created_by : '—')),
+                    'occurred_at' => $product->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: '—',
+                ];
+            })->values();
+            $kind = 'products';
+        }
+
+        $titles = [
+            'day_listings' => '日上架数量明细',
+            'day_products' => '日上品数明细',
+            'month_listings' => '月上架数量明细',
+            'month_products' => '月上品数明细',
+        ];
+
+        return new JsonResponse([
+            'title' => $titles[$type],
+            'period' => (string) $validated['period'],
+            'kind' => $kind,
+            'items' => $items,
+            'pagination' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+                'total' => $paginator->total(),
+                'prev_page_url' => $paginator->previousPageUrl(),
+                'next_page_url' => $paginator->nextPageUrl(),
+            ],
+        ]);
+    }
+
     public function initializePackageUpload(Request $request): JsonResponse|Response
     {
         $context = $this->pageContext($request);
