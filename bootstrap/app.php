@@ -12,6 +12,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
         then: function (): void {
             require __DIR__.'/../routes/dingtalk.php';
             require __DIR__.'/../routes/finance_sync.php';
+            require __DIR__.'/../routes/adyen_inbox.php';
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
