@@ -4,6 +4,7 @@ namespace App\Portals\Aikaipin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AiProductShopifyPublication;
+use App\Models\AikaipinProduct;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AiProductOrderStatisticsService;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
@@ -67,7 +68,7 @@ class ProductOrderStatisticsController extends Controller
         $pagePositions = $pageProductIds->flip();
         $pagePublications = $query
             ->with([
-                'product:id,product_code,name,images,updated_at',
+                'product:id,product_code,name,images,created_by,created_by_name,updated_at',
             ])
             ->whereIn('ai_product_shopify_publications.aikaipin_product_id', $pageProductIds->all())
             ->get()
@@ -102,6 +103,7 @@ class ProductOrderStatisticsController extends Controller
             ...$context,
             'products' => $products,
             'filters' => $filters,
+            'productCreatorOptions' => $this->productCreatorOptions(),
             'publisherOptions' => $this->publisherOptions(),
             'storeOptions' => $this->storeOptions(),
             'summary' => $this->summary($productStatistics, $orderedProductIds->count(), count($publicationIds)),
@@ -148,7 +150,7 @@ class ProductOrderStatisticsController extends Controller
                     'id' => $publicationId,
                     'publisher' => (string) ($publication->published_by_name ?: '未知用户'),
                     'store_id' => (int) $publication->assistant_domain_store_id,
-                    'store' => (string) ($publication->store?->domain ?: $publication->store?->shop_name ?: '—'),
+                    'store' => $this->storeLabel($publication->store?->shop_name, $publication->store?->domain),
                     'sku' => (string) ($publication->sku ?: '—'),
                     'page' => (string) ($publication->productPage?->name ?: '—'),
                     'published_at' => $publication->published_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i'),
@@ -197,7 +199,7 @@ class ProductOrderStatisticsController extends Controller
         ]);
     }
 
-    /** @return array{keyword:string,published_by:string,store_id:int,date_from:string,date_to:string,per_page:int} */
+    /** @return array{keyword:string,created_by:string,published_by:string,store_id:int,date_from:string,date_to:string,per_page:int} */
     private function filters(Request $request): array
     {
         $today = now('Asia/Shanghai')->toDateString();
@@ -212,6 +214,7 @@ class ProductOrderStatisticsController extends Controller
 
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
+            'created_by' => trim((string) $request->query('created_by', '')),
             'published_by' => trim((string) $request->query('published_by', '')),
             'store_id' => max(0, (int) $request->query('store_id', 0)),
             'date_from' => $dateFrom,
@@ -220,7 +223,7 @@ class ProductOrderStatisticsController extends Controller
         ];
     }
 
-    /** @param array{keyword:string,published_by:string,store_id:int,date_from:string,date_to:string,per_page:int} $filters */
+    /** @param array{keyword:string,created_by:string,published_by:string,store_id:int,date_from:string,date_to:string,per_page:int} $filters */
     private function publicationQuery(array $filters): Builder
     {
         $query = AiProductShopifyPublication::query()
@@ -240,10 +243,38 @@ class ProductOrderStatisticsController extends Controller
                         ->orWhere('shop_name', 'like', $like));
             });
         }
+        if ($filters['created_by'] !== '') {
+            $query->whereHas('product', fn (Builder $product) => $product
+                ->where('created_by', (int) $filters['created_by']));
+        }
         if ($filters['published_by'] !== '') $query->where('published_by', (int) $filters['published_by']);
         if ($filters['store_id'] > 0) $query->where('assistant_domain_store_id', $filters['store_id']);
 
         return $query;
+    }
+
+    /** @return Collection<int, string> */
+    private function productCreatorOptions(): Collection
+    {
+        $productIds = AiProductShopifyPublication::query()
+            ->where('status', 'success')
+            ->whereNotNull('published_at')
+            ->pluck('aikaipin_product_id')
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        return AikaipinProduct::query()
+            ->whereIn('id', $productIds->all())
+            ->whereNotNull('created_by')
+            ->orderBy('created_by_name')
+            ->get(['created_by', 'created_by_name'])
+            ->filter(fn (AikaipinProduct $product): bool => (int) $product->created_by > 0)
+            ->unique('created_by')
+            ->mapWithKeys(fn (AikaipinProduct $product): array => [
+                (int) $product->created_by => trim((string) $product->created_by_name) ?: ('用户 #'.(int) $product->created_by),
+            ]);
     }
 
     /** @return Collection<int, string> */
@@ -267,10 +298,22 @@ class ProductOrderStatisticsController extends Controller
             ->with('store:id,domain,shop_name')
             ->get(['assistant_domain_store_id'])
             ->mapWithKeys(function ($row): array {
-                $label = trim((string) ($row->store?->domain ?: $row->store?->shop_name));
+                $label = $this->storeLabel($row->store?->shop_name, $row->store?->domain);
                 return $label === '' ? [] : [(int) $row->assistant_domain_store_id => $label];
             })
             ->sort();
+    }
+
+    private function storeLabel(?string $shopName, ?string $domain): string
+    {
+        $shopName = trim((string) $shopName);
+        $domain = trim((string) $domain);
+
+        if ($shopName !== '' && $domain !== '' && strcasecmp($shopName, $domain) !== 0) {
+            return $shopName.'（'.$domain.'）';
+        }
+
+        return $shopName !== '' ? $shopName : ($domain !== '' ? $domain : '—');
     }
 
     /** @param Collection<int, array{order_count:int,item_quantity:float,revenue:float,first_order_at:?string,last_order_at:?string}> $statistics */
