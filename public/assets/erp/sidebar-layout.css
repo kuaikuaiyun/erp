@@ -7,6 +7,12 @@
     color: #ffffff !important;
 }
 
+.main-header .logo .logo-lg--enterprise {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .main-header .logo:hover {
     background: #193442 !important;
 }

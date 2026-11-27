@@ -20,7 +20,7 @@
 
 Ladmin\Form::forget(['map', 'editor']);
 
-Ladmin\Admin::css('/assets/erp/sidebar-layout.css?v=20261006-2');
+Ladmin\Admin::css('/assets/erp/sidebar-layout.css?v=20261127-1');
 Ladmin\Admin::css('/assets/erp/system-font.css?v=20260928-1');
 Ladmin\Admin::css('/assets/erp/admin-notifications.css?v=20260929-2');
 Ladmin\Admin::css('/assets/erp/admin-navigation.css?v=20260929-1');

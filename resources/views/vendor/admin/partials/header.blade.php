@@ -10,7 +10,11 @@
 <header class="main-header">
     <a href="{{ admin_url('/') }}" class="logo">
         <span class="logo-mini">{!! config('admin.logo-mini', config('admin.name')) !!}</span>
-        <span class="logo-lg">{!! config('admin.logo', config('admin.name')) !!}</span>
+        @if ($enterpriseDisplayName ?? null)
+            <span class="logo-lg logo-lg--enterprise" title="{{ $enterpriseDisplayName }}">{{ $enterpriseDisplayName }}</span>
+        @else
+            <span class="logo-lg">{!! config('admin.logo', config('admin.name')) !!}</span>
+        @endif
     </a>
 
     <nav class="navbar navbar-static-top" role="navigation">

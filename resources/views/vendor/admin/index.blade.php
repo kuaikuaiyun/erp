@@ -1,3 +1,6 @@
+@php
+    $enterpriseDisplayName = app(\App\Services\Authentication\LoginSiteService::class)->forRequest(request())?->display_name;
+@endphp
 <!DOCTYPE html>
 <html lang="{{ config('app.locale') }}">
 <head>
@@ -5,7 +8,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
     <meta name="renderer" content="webkit">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ Admin::title() }} @if($header) | {{ $header }}@endif</title>
+    <title>{{ $enterpriseDisplayName ?? Admin::title() }} @if($header) | {{ $header }}@endif</title>
     <meta content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" name="viewport">
 
     @if(!is_null($favicon = Admin::favicon()))

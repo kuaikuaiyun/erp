@@ -56,6 +56,9 @@ class DingTalkCompanyTest extends TestCase
             'id' => null, 'name' => 'Internal company name', 'archived' => false,
         ])->assertJsonMissing(['app_secret' => 'secret-test']);
         $this->get('http://admin.test/kky/configuration/dingtalk')->assertOk()
+            ->assertSee('<title>Test admin  | '.__('dingtalk.company.title').'</title>', false)
+            ->assertSee('class="logo-lg logo-lg--enterprise" title="Test admin">Test admin</span>', false)
+            ->assertSee('class="logo-mini">', false)
             ->assertSee('name="domain"', false)->assertDontSee('href="http://admin.test/kky/configuration/enterprise-login"', false);
         $this->get('http://admin.test/kky/configuration/enterprise-login?site='.$site->id)
             ->assertRedirect('http://admin.test/kky/configuration/dingtalk?site='.$site->id);
@@ -87,6 +90,9 @@ class DingTalkCompanyTest extends TestCase
         ])->assertRedirect('http://erp.test/kky');
 
         $list = 'http://erp.test/kky/configuration/dingtalk';
+        $this->get($list)->assertOk()
+            ->assertSee('<title>'.config('admin.title').'  | '.__('dingtalk.company.title').'</title>', false)
+            ->assertSee('class="logo-lg">'.config('admin.logo').'</span>', false);
         $this->postJson($list.'/companies', array_replace($this->enterpriseInputs(), ['domain' => 'erp.test']))
             ->assertOk()->assertJsonPath('redirect_url', $list);
         $this->get($list)->assertRedirect('http://erp.test/kky/auth/login');
