@@ -73,6 +73,7 @@ Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, '
 Route::get('/fashion/applovin-spends/pending-count', [FashionAppLovinSpendController::class, 'pendingCount'])->name('fashion.applovin-spends.pending-count');
 Route::post('/fashion/applovin-spends/screenshot', [FashionAppLovinSpendController::class, 'uploadScreenshot'])->name('fashion.applovin-spends.screenshot.upload');
 Route::post('/fashion/applovin-spends/risk-note', [FashionAppLovinSpendController::class, 'saveRiskNote'])->name('fashion.applovin-spends.risk-note.save');
+Route::post('/fashion/applovin-spends/attachment-status', [FashionAppLovinSpendController::class, 'saveAttachmentStatus'])->name('fashion.applovin-spends.attachment-status.save');
 Route::get('/fashion/applovin-spends/screenshots/{screenshot}', [FashionAppLovinSpendController::class, 'screenshot'])->whereNumber('screenshot')->name('fashion.applovin-spends.screenshot');
 Route::get('/fashion/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('fashion.applovin-account-statistics.index');
 Route::get('/fashion/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])->name('fashion.applovin-account-statistics.spend-band');
@@ -338,6 +339,8 @@ Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovin
     ->name('operation.applovin-spends.screenshot.upload');
 Route::post('/operation/daily-submissions/applovin-spends/risk-note', [AppLovinSpendController::class, 'saveRiskNote'])
     ->name('operation.applovin-spends.risk-note.save');
+Route::post('/operation/daily-submissions/applovin-spends/attachment-status', [AppLovinSpendController::class, 'saveAttachmentStatus'])
+    ->name('operation.applovin-spends.attachment-status.save');
 Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
 Route::get('/operation/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('operation.applovin-account-statistics.index');
@@ -358,6 +361,8 @@ Route::get('/assistant/fashion-applovin-performance-reports', [FashionAppLovinPe
     ->name('assistant.fashion-applovin-performance-reports.index');
 Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
     ->name('assistant.applovin-spends.store-binding');
+Route::post('/assistant/daily-submissions/applovin-spends/account-details', [AppLovinSpendReviewController::class, 'saveAccountDetails'])
+    ->name('assistant.applovin-spends.account-details.save');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('assistant.applovin-spends.screenshot');
 Route::get('/operation/reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation.reports.order-details');
@@ -545,6 +550,9 @@ Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExcepti
 Route::post('/warehouse-weight-exceptions/{id}/approve', [WarehouseWeightExceptionController::class, 'approve'])->name('caigou.warehouse-weight-exceptions.approve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/product-order-statistics', [ProductOrderStatisticsController::class, 'index'])->name('aikaipin.product-order-statistics.index');
+Route::get('/product-order-statistics/products/{product}/details', [ProductOrderStatisticsController::class, 'productDetails'])
+    ->whereNumber('product')
+    ->name('aikaipin.product-order-statistics.products.details');
 Route::get('/product-order-statistics/{publication}/orders', [ProductOrderStatisticsController::class, 'orders'])
     ->whereNumber('publication')
     ->name('aikaipin.product-order-statistics.orders');

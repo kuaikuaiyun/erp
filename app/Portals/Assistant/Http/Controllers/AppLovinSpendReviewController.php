@@ -60,6 +60,7 @@ class AppLovinSpendReviewController extends Controller
             'department_ids.*' => ['integer', 'distinct', Rule::in($allowedDepartmentIds)],
             'over_threshold' => ['nullable', 'in:1'],
             'account_number' => ['nullable', 'string', 'max:191'],
+            'attachment_status' => ['nullable', Rule::in(['1', '0', 'unset'])],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
@@ -234,7 +235,7 @@ class AppLovinSpendReviewController extends Controller
             ->filter()->unique()->values();
         $riskNotes = AppLovinAccountRiskNote::query()
             ->whereIn('account_number', $accountNumbers)
-            ->pluck('risk_factors', 'account_number');
+            ->get()->keyBy('account_number');
         $eligibleOperatorIds = $accounts->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
         $stores = $eligibleOperatorIds->isEmpty()
             ? collect()
@@ -257,13 +258,30 @@ class AppLovinSpendReviewController extends Controller
                 ->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
             $store->setAttribute('eligible_owner_ids', $ownerIds);
         });
-        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings, $riskNotes): array {
-            $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()->first();
+        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings, $riskNotes, $isDashboard): array {
+            $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()
+                ->sortByDesc(fn (AppLovinSpendScreenshot $item) => $item->updated_at?->getTimestamp() ?? 0)->first();
             $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
             $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+            $note = $riskNotes->get($number);
 
-            return [...$account, 'uploaded_screenshot' => $screenshot, 'store_binding' => $binding, 'risk_factors' => (string) ($riskNotes->get($number) ?: '')];
+            return [
+                ...$account,
+                'uploaded_screenshot' => $screenshot,
+                'gift_uploaded_at' => $note?->gift_granted_at ?: $screenshot?->updated_at,
+                'store_binding' => $binding,
+                'risk_factors' => (string) ($note?->risk_factors ?: ''),
+                'closed_at' => $note?->closed_at,
+                'account_status_note' => $isDashboard ? '' : (string) ($note?->account_status_note ?: ''),
+                'is_attached' => $note?->is_attached,
+            ];
         });
+        $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
+        if ($attachmentStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $attachmentStatus === 'unset'
+                ? $account['is_attached'] === null
+                : $account['is_attached'] === ($attachmentStatus === '1'))->values();
+        }
         $page = max(1, (int) $request->query('page', 1));
         $perPage = (int) ($filters['per_page'] ?? 20);
         $accounts = new LengthAwarePaginator($accounts->forPage($page, $perPage)->values(), $accounts->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
@@ -272,12 +290,60 @@ class AppLovinSpendReviewController extends Controller
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'attachmentStatus' => $attachmentStatus, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',
+            'canEditAccountDetails' => ! $isDashboard,
+            'canViewBillingStatus' => ! $isDashboard,
+            'canEditAttachmentStatus' => ! $isDashboard,
             'stores' => $stores,
         ]);
+    }
+
+    public function saveAccountDetails(Request $request): RedirectResponse
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) {
+            abort($context->getStatusCode());
+        }
+        $this->authorization->assertAssistantPortal($context['portal']);
+        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+
+        $validated = $request->validate([
+            'account_number' => ['required', 'string', 'max:191'],
+            'closed_at' => ['nullable', 'date'],
+            'gift_granted_at' => ['nullable', 'date'],
+            'account_status_note' => ['nullable', 'string', 'max:2000'],
+            'is_attached' => ['nullable', 'boolean'],
+        ]);
+        abort_unless($request->exists('closed_at') || $request->exists('gift_granted_at') || $request->exists('account_status_note') || $request->exists('is_attached'), 422, '没有需要保存的账号信息。');
+        $number = AppLovinAccountRiskNote::normalizeAccountNumber($validated['account_number']);
+        abort_if($number === '', 422, '账号编号为空，无法保存账号信息。');
+
+        $updates = ['updated_by' => $context['user']->getKey()];
+        if ($request->exists('closed_at')) {
+            $updates['closed_at'] = ($validated['closed_at'] ?? null) ?: null;
+        }
+        if ($request->exists('gift_granted_at')) {
+            $updates['gift_granted_at'] = ($validated['gift_granted_at'] ?? null) ?: null;
+        }
+        if ($request->exists('account_status_note')) {
+            $updates['account_status_note'] = trim((string) ($validated['account_status_note'] ?? '')) ?: null;
+        }
+        if ($request->exists('is_attached')) {
+            $updates['is_attached'] = $request->input('is_attached') === null || $request->input('is_attached') === ''
+                ? null : $request->boolean('is_attached');
+        }
+        AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], $updates);
+
+        $message = $request->exists('is_attached')
+            ? '是否挂户已保存。'
+            : ($request->exists('account_status_note')
+            ? '账单情况已保存。'
+            : ($request->exists('gift_granted_at') ? '有赠金时间已保存。' : '下户时间已保存。'));
+
+        return back()->with('success', $message);
     }
 
     public function bindStore(Request $request): RedirectResponse
