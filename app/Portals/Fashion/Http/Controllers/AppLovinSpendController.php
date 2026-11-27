@@ -43,6 +43,7 @@ class AppLovinSpendController extends Controller
             'account_number' => ['nullable', 'string', 'max:150'],
             'department_id' => ['nullable', 'integer'],
             'operator_id' => ['nullable', 'integer'],
+            'attachment_status' => ['nullable', 'in:1,0,unset'],
         ]);
         $accounts = $this->withScreenshots($this->summarize($this->reportsFor($context['user'])));
         $departmentId = (int) ($filters['department_id'] ?? 0);
@@ -70,6 +71,11 @@ class AppLovinSpendController extends Controller
         if ($accountNumber !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => mb_stripos((string) $account['account_number'], $accountNumber) !== false)->values();
         }
+        $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
+        if ($attachmentStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $attachmentStatus === 'unset'
+                ? $account['is_attached'] === null : $account['is_attached'] === ($attachmentStatus === '1'))->values();
+        }
 
         return view('portals.fashion.applovin-spend.index', [
             ...$context,
@@ -83,6 +89,7 @@ class AppLovinSpendController extends Controller
             'operators' => $operators,
             'departmentId' => $departmentId,
             'operatorId' => $operatorId,
+            'attachmentStatus' => $attachmentStatus,
         ]);
     }
 
@@ -139,7 +146,7 @@ class AppLovinSpendController extends Controller
             if ($note) {
                 $note->risk_factors = null;
                 $note->updated_by = $context['user']->getKey();
-                if ($note->closed_at || $note->gift_granted_at || trim((string) $note->account_status_note) !== '') {
+                if ($note->closed_at || $note->gift_granted_at || trim((string) $note->account_status_note) !== '' || $note->is_attached !== null) {
                     $note->save();
                 } else {
                     $note->delete();
@@ -152,6 +159,22 @@ class AppLovinSpendController extends Controller
         }
 
         return back()->with('success', '账户限额/风控等因素已保存。');
+    }
+
+    public function saveAttachmentStatus(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $validated = $request->validate(['account_key' => ['required', 'string', 'size:64'], 'is_attached' => ['nullable', 'boolean']]);
+        $account = $this->summarize($this->reportsFor($context['user'], false))->firstWhere('account_key', $validated['account_key']);
+        abort_unless($account, 403);
+        $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+        abort_if($number === '', 422, '账号编号为空，无法保存是否挂户。');
+        AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], [
+            'is_attached' => $request->input('is_attached') === null || $request->input('is_attached') === '' ? null : $request->boolean('is_attached'),
+            'updated_by' => $context['user']->getKey(),
+        ]);
+        return back()->with('success', '是否挂户已保存。');
     }
 
     public function pendingCount(Request $request): JsonResponse
@@ -260,7 +283,7 @@ class AppLovinSpendController extends Controller
                 'gift_uploaded_at' => $note?->gift_granted_at ?: $screenshot?->updated_at,
                 'risk_factors' => (string) ($note?->risk_factors ?: ''),
                 'closed_at' => $note?->closed_at,
-                'account_status_note' => (string) ($note?->account_status_note ?: ''),
+                'is_attached' => $note?->is_attached,
             ];
         });
     }

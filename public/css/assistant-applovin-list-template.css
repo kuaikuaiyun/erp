@@ -412,3 +412,60 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* AppLovin 账号消耗字段较多，桌面端优先在首屏完整展示，窄屏再使用横向滚动。 */
+.applovin-list-template .applovin-spend-overview {
+    width: 100%;
+    min-width: 1420px;
+    font-size: 11px;
+}
+.applovin-list-template .applovin-spend-overview > thead > tr > th,
+.applovin-list-template .applovin-spend-overview > tbody > tr > td {
+    padding: 7px 5px !important;
+    line-height: 1.35;
+}
+.applovin-list-template .applovin-spend-overview .usage-history { min-width: 175px; }
+.applovin-list-template .applovin-spend-overview .usage-head { align-items: flex-start; gap: 5px; }
+.applovin-list-template .applovin-spend-overview .store-binding-form { min-width: 190px; }
+.applovin-list-template .applovin-spend-overview .store-binding-form .select2-container { min-width: 155px; }
+.applovin-list-template .applovin-spend-overview .account-closed-form {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 135px;
+    margin: 0;
+}
+.applovin-list-template .applovin-spend-overview .account-detail-input { min-width: 110px; width: 125px; }
+.applovin-list-template .applovin-spend-overview .applovin-risk-cell { min-width: 180px; }
+.applovin-list-template .applovin-spend-overview .applovin-risk-form { min-width: 170px; }
+.applovin-list-template .applovin-spend-overview .applovin-risk-form textarea { min-width: 125px; }
+.applovin-list-template .applovin-spend-overview .applovin-risk-readonly { min-width: 135px; max-width: 220px; }
+.applovin-list-template .applovin-spend-overview .form-control { font-size: 11px; }
+@media (min-width: 1600px) {
+    .applovin-list-template .applovin-spend-overview { min-width: 100%; }
+}
+
+.applovin-list-template.applovin-spend-page .applovin-data-table {
+    width: 100%;
+    min-width: 1420px;
+    font-size: 11px;
+}
+.applovin-list-template.applovin-spend-page .applovin-data-table > thead > tr > th,
+.applovin-list-template.applovin-spend-page .applovin-data-table > tbody > tr > td {
+    padding: 7px 5px !important;
+    line-height: 1.35;
+}
+.applovin-list-template.applovin-spend-page .account-closed-form {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 135px;
+    margin: 0;
+}
+.applovin-list-template.applovin-spend-page .applovin-risk-cell { min-width: 180px; }
+.applovin-list-template.applovin-spend-page .applovin-risk-form { min-width: 170px; }
+.applovin-list-template.applovin-spend-page .applovin-risk-form textarea { min-width: 125px; }
+.applovin-list-template.applovin-spend-page .applovin-risk-readonly { min-width: 135px; max-width: 220px; }
+@media (min-width: 1600px) {
+    .applovin-list-template.applovin-spend-page .applovin-data-table { min-width: 100%; }
+}
