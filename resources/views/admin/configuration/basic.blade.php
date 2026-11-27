@@ -93,7 +93,7 @@
                                 @elseif($change->key === 'system.maintenance.enabled')
                                     {{ $change->new_value === '1' ? __('configuration.status.enabled') : __('configuration.status.disabled') }}
                                 @else
-                                    {{ IlluminateSupportStr::limit($change->new_value ?: __('configuration.basic.changes.empty_value'), 28) }}
+                                    {{ \Illuminate\Support\Str::limit($change->new_value ?: __('configuration.basic.changes.empty_value'), 28) }}
                                 @endif
                             </td>
                         </tr>
