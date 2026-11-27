@@ -140,16 +140,9 @@ class PaymentProductRiskService
             return;
         }
 
-        $filters['per_page'] = 100;
-        for ($page = 1; ; $page++) {
-            $result = $this->productList([...$filters, 'page' => $page]);
-            if ($result['pagination']['current_page'] !== $page) {
-                return;
-            }
-            yield from $result['products'];
-            if ($page >= $result['pagination']['last_page']) {
-                return;
-            }
+        [$filters, $ranges, $extraMetrics, $addMetrics] = $this->productListOptions($filters);
+        foreach ($this->statistics->paymentExportBatches($filters, $ranges, $extraMetrics, $addMetrics) as $batch) {
+            yield from $this->withPaymentProductNames(['products' => $batch], includeGlobalDisputeShare: false)['products'];
         }
     }
 
@@ -202,6 +195,16 @@ class PaymentProductRiskService
 
     private function productList(array $filters, bool $keysOnly = false): array
     {
+        [$filters, $ranges, $extraMetrics, $addMetrics] = $this->productListOptions($filters);
+        $data = $addMetrics === null
+            ? $this->statistics->page([...$filters, 'skip_refund_report' => true], $keysOnly, includeSummary: false)
+            : $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, $addMetrics, $keysOnly, includeSummary: false);
+
+        return $keysOnly ? $data : $this->withPaymentProductNames($data);
+    }
+
+    private function productListOptions(array $filters): array
+    {
         $ranges = (array) ($filters['metric_ranges'] ?? []);
         $sort = (string) ($filters['sort'] ?? '');
         $filters['skip_product_store_aggregates'] = $sort !== 'shop_count';
@@ -210,12 +213,10 @@ class PaymentProductRiskService
             [...array_keys($ranges), $sort],
         ));
         if ($ranges === [] && !in_array($sort, self::LIST_METRICS, true)) {
-            $data = $this->statistics->page([...$filters, 'skip_refund_report' => true], $keysOnly, includeSummary: false);
-
-            return $keysOnly ? $data : $this->withPaymentProductNames($data);
+            return [$filters, $ranges, $extraMetrics, null];
         }
 
-        $data = $this->statistics->pageWithMetrics($filters, $ranges, $extraMetrics, function (Builder $query, Builder $candidateKeys) use ($extraMetrics, $filters): void {
+        $addMetrics = function (Builder $query, Builder $candidateKeys) use ($extraMetrics, $filters): void {
             if (in_array('order_count', $extraMetrics, true)) {
                 $query->leftJoinSub($this->statistics->relatedOrderCountsQuery($filters, clone $candidateKeys), 'related_orders', 'related_orders.product_key', '=', 'base.product_key')
                     ->selectRaw('COALESCE(related_orders.order_count, 0) as order_count');
@@ -227,13 +228,13 @@ class PaymentProductRiskService
                     $query->selectRaw("COALESCE(payment_rates.{$rate}, 0) as {$rate}");
                 }
             }
-        }, $keysOnly, includeSummary: false);
+        };
 
-        return $keysOnly ? $data : $this->withPaymentProductNames($data);
+        return [$filters, $ranges, $extraMetrics, $addMetrics];
     }
 
     /** @param array<string,mixed> $data @return array<string,mixed> */
-    private function withPaymentProductNames(array $data): array
+    private function withPaymentProductNames(array $data, bool $includeGlobalDisputeShare = true): array
     {
         $products = $data['products'] ?? [];
         $keys = collect($products)->mapWithKeys(function (array $product): array {
@@ -261,7 +262,7 @@ class PaymentProductRiskService
             ->get(['payment_product_facts.product_key', 'source_item.product_title', 'source_item.tongtu_product_name', 'payment_product_facts.first_paid_at', 'payment_product_facts.latest_paid_at'])
             ->keyBy('product_key');
 
-        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), usePaymentType: true);
+        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), usePaymentType: true, includeGlobalDisputeShare: $includeGlobalDisputeShare);
         $data['products'] = collect($products)->map(function (array $product) use ($factsByProduct, $riskMetrics): array {
             $encoded = substr((string) $product['id'], 8);
             $encoded = strtr($encoded, '-_', '+/').str_repeat('=', (4 - strlen($encoded) % 4) % 4);

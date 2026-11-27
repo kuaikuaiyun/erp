@@ -126,6 +126,86 @@ class LogisticsProductStatisticsService
     public function pageWithMetrics(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics, bool $keysOnly = false, bool $includeSummary = true): array
     {
         $sort = (string) $filters['sort'];
+        [$selection, $baseMetrics] = $this->paymentMetricSelection($filters, $ranges, $extraMetrics, $addMetrics, $includeSummary);
+
+        $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
+        if ($keysOnly) {
+            return $candidates->pluck('product_key')->all();
+        }
+        $total = $candidates->count();
+        $perPage = (int) $filters['per_page'];
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($lastPage, max(1, (int) $filters['page']));
+        $offset = ($page - 1) * $perPage;
+        $keys = $this->sortLightweightCandidates($candidates, $sort, $filters['direction'], [...$baseMetrics, ...$extraMetrics])
+            ->slice($offset, $perPage)->pluck('product_key')->all();
+        $rows = $this->productRowsByKeys($filters, $keys);
+        $this->hydrateTongtuProductMetadata($rows);
+        $products = $rows->map(fn (object $row): array => $this->listProduct($row))->all();
+        $this->fillVariantSkuWeights($products);
+
+        return [
+            'products' => $products,
+            'summary' => $selection['summary'],
+            'pagination' => [
+                'current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total,
+                'from' => $total === 0 ? 0 : $offset + 1, 'to' => min($offset + $perPage, $total),
+            ],
+        ];
+    }
+
+    /**
+     * Select and order the matching items once, then hydrate only the keys for each output batch.
+     *
+     * @param Closure(Builder, Builder): void|null $addMetrics
+     * @return \Generator<int,list<array<string,mixed>>>
+     */
+    public function paymentExportBatches(array $filters, array $ranges, array $extraMetrics, ?Closure $addMetrics): \Generator
+    {
+        $sort = (string) $filters['sort'];
+        $direction = (string) $filters['direction'];
+        $lightweight = $addMetrics === null && $this->canUseLightweightPageQuery($filters);
+        $omitVariantDetails = $lightweight && ($filters['date_mode'] ?? '') === 'placed';
+
+        if ($addMetrics !== null) {
+            [$selection, $baseMetrics] = $this->paymentMetricSelection($filters, $ranges, $extraMetrics, $addMetrics, false);
+            $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
+            $ordered = $this->sortLightweightCandidates($candidates, $sort, $direction, [...$baseMetrics, ...$extraMetrics]);
+            unset($selection, $candidates);
+        } elseif ($lightweight) {
+            $ordered = $this->sortLightweightCandidates($this->lightweightProductCandidates($filters, $omitVariantDetails), $sort, $direction);
+        } else {
+            $query = $this->productStatisticsQuery($filters, false);
+            $this->applyDatabaseSort($query, $sort, $direction);
+            $ordered = $query->select('product_statistics.product_key')->get();
+        }
+
+        for ($offset = 0, $total = $ordered->count(); $offset < $total; $offset += 100) {
+            $batch = $ordered->slice($offset, 100)->values();
+            $keys = $batch->pluck('product_key')->map(static fn ($key): string => (string) $key)->all();
+            $rows = $omitVariantDetails
+                ? $this->fillPagePaymentStatistics($batch, $filters, $keys)
+                : $this->productRowsByKeys($filters, $keys);
+            $this->hydrateTongtuProductMetadata($rows);
+            yield $rows->map(fn (object $row): array => $this->listProduct($row))->all();
+        }
+    }
+
+    /** @param list<string> $keys */
+    private function productRowsByKeys(array $filters, array $keys): Collection
+    {
+        if ($keys === []) {
+            return collect();
+        }
+
+        $fullRows = $this->productStatisticsQuery($filters, false, $keys)->get()->keyBy('product_key');
+
+        return collect($keys)->map(static fn (string $key) => $fullRows->get($key))->filter()->values();
+    }
+
+    private function paymentMetricSelection(array $filters, array $ranges, array $extraMetrics, Closure $addMetrics, bool $includeSummary): array
+    {
+        $sort = (string) $filters['sort'];
         $baseSort = in_array($sort, $extraMetrics, true) ? '' : $sort;
         $useFullQuery = !$this->canUseLightweightPageQuery([...$filters, 'sort' => $baseSort])
             || array_diff(array_keys($ranges), $extraMetrics) !== [];
@@ -189,34 +269,7 @@ class LogisticsProductStatisticsService
             return $selection;
         });
 
-        $candidates = collect($selection['rows'])->map(static fn (array $row): object => (object) $row);
-        if ($keysOnly) {
-            return $candidates->pluck('product_key')->all();
-        }
-        $total = $candidates->count();
-        $perPage = (int) $filters['per_page'];
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min($lastPage, max(1, (int) $filters['page']));
-        $offset = ($page - 1) * $perPage;
-        $keys = $this->sortLightweightCandidates($candidates, $sort, $filters['direction'], [...$baseMetrics, ...$extraMetrics])
-            ->slice($offset, $perPage)->pluck('product_key')->all();
-        $rows = collect();
-        if ($keys !== []) {
-            $fullRows = $this->productStatisticsQuery($filters, false, $keys)->get()->keyBy('product_key');
-            $rows = collect($keys)->map(static fn (string $key) => $fullRows->get($key))->filter()->values();
-        }
-        $this->hydrateTongtuProductMetadata($rows);
-        $products = $rows->map(fn (object $row): array => $this->listProduct($row))->all();
-        $this->fillVariantSkuWeights($products);
-
-        return [
-            'products' => $products,
-            'summary' => $selection['summary'],
-            'pagination' => [
-                'current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total,
-                'from' => $total === 0 ? 0 : $offset + 1, 'to' => min($offset + $perPage, $total),
-            ],
-        ];
+        return [$selection, $baseMetrics];
     }
 
     /**

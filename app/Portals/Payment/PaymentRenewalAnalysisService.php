@@ -9,6 +9,7 @@ use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalTransaction;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
@@ -81,10 +82,67 @@ class PaymentRenewalAnalysisService
 
     public function exportData(array $filters): array
     {
-        $data=$this->combinedData($filters);
+        $rootIndex = null;
+        $resolveRoots = function (array $module, array $window) use (&$rootIndex): array {
+            return $rootIndex ??= $this->rootIndex($module, $window);
+        };
+        $data=$this->combinedData($filters, $resolveRoots);
         $data['initial_rows']=LazyCollection::make(fn ()=>$this->firstRows($this->moduleFilters($filters,'initial'),true,true));
-        $data['rows']=LazyCollection::make(fn ()=>$this->renewalRows($this->moduleFilters($filters,'renewal')));
+        $data['rows']=LazyCollection::make(fn ()=>$this->renewalRows($this->moduleFilters($filters,'renewal'), $resolveRoots));
         return $data;
+    }
+
+    public function initialOrderExport(array $filters, array $detail): array
+    {
+        $module = $this->moduleFilters($filters, 'initial');
+        $window = $this->window($module);
+        $totals = null;
+        $searchIdentifiers = trim((string) ($detail['detail_keyword'] ?? '')) !== '';
+
+        // The scope sheet follows the detail sheet, so totals can be collected while writing the rows.
+        $rows = LazyCollection::make(function () use ($module, $window, $detail, $searchIdentifiers, &$totals): \Generator {
+            $scope = $summary = $this->emptyRiskTotal();
+            foreach ($this->orderedBatches($this->firstQuery($module, $window), true) as $orders) {
+                $ids = $orders->modelKeys();
+                $risk = $this->riskMaps($ids, ['timezone' => $module['timezone']], $window['from'], $window['to'], false);
+                $references = $searchIdentifiers ? $this->paymentIdentifiers($ids) : [];
+                $matched = [];
+                foreach ($orders as $order) {
+                    $id = (int) $order->id;
+                    $purchase = $order->subscription_type === '无订阅' ? 'non_subscription' : 'subscription';
+                    $row = $this->paymentRow($order, $order, 0, $module['timezone'], $risk, $purchase, $references[$id] ?? []);
+                    if (!$this->detailMatches($row, $detail, false)) {
+                        continue;
+                    }
+                    $this->addTotal($scope, $row, true);
+                    if ($this->detailMatches($row, $detail, true)) {
+                        $this->addTotal($summary, $row, true);
+                        $matched[$id] = [$order, $row];
+                    }
+                }
+
+                if (!$searchIdentifiers && $matched !== []) {
+                    $references = $this->paymentIdentifiers(array_keys($matched));
+                }
+                foreach ($matched as $id => [$order, $row]) {
+                    if (!$searchIdentifiers && isset($references[$id])) {
+                        $row = $this->paymentRow($order, $order, 0, $module['timezone'], $risk, $row['purchase_type'], $references[$id]);
+                    }
+                    yield $row;
+                }
+            }
+            $totals = ['scope' => $this->finishTotal($scope), 'summary' => $this->finishTotal($summary)];
+        });
+
+        return [
+            'rows' => $rows,
+            'totals' => static function () use (&$totals): array {
+                return $totals ?? throw new \LogicException('The export rows must be consumed before reading totals.');
+            },
+            'calculation' => $window['calculation'],
+            'parent_store' => $module['store'],
+            'filters' => $detail,
+        ];
     }
 
     public function initialOrderDetails(array $filters, array $detail, bool $paginate=true): array
@@ -184,10 +242,10 @@ class PaymentRenewalAnalysisService
             ...($module==='renewal' && ($filters['renewal_mode'] ?? '')==='linked' ? ['linked'=>true] : [])];
     }
 
-    private function combinedData(array $filters): array
+    private function combinedData(array $filters, ?Closure $resolveRoots = null): array
     {
         $initial=$this->initialData($filters);
-        $renewal=$this->renewalData($filters);
+        $renewal=$this->renewalData($filters, $resolveRoots);
         return [...$initial,...$renewal,'summary'=>[...$renewal['summary'],...$initial['summary']]];
     }
 
@@ -211,9 +269,9 @@ class PaymentRenewalAnalysisService
             'initial_calculation'=>$initial['calculation']];
     }
 
-    private function renewalData(array $filters): array
+    private function renewalData(array $filters, ?Closure $resolveRoots = null): array
     {
-        $renewal=$this->dataset($this->moduleFilters($filters,'renewal'));
+        $renewal=$this->dataset($this->moduleFilters($filters,'renewal'), $resolveRoots);
         $stageFilter=($filters['stage'] ?? '')==='initial' ? '' : ($filters['stage'] ?? '');
         $stages=array_values(array_filter($renewal['stages'],static fn ($stage)=>$stage['number']>0 && ($stageFilter==='' || $stage['key']===$stageFilter)));
         $summary=$this->emptyRiskTotal();
@@ -232,14 +290,14 @@ class PaymentRenewalAnalysisService
             'risk_by_channel'=>$channels];
     }
 
-    private function dataset(array $filters): array
+    private function dataset(array $filters, ?Closure $resolveRoots = null): array
     {
         $cache=$filters;
         unset($cache['stage'],$cache['stage_page']);
         if ($cache['linked'] ?? false) $cache['as_of']=now($cache['timezone'])->toDateString();
         $version=$cache['first_only'] ? 'v26' : 'v30';
         return Cache::remember('payment:renewal-summary:'.$version.':'.sha1(json_encode($cache)),now()->addMinutes(5),
-            fn ()=>$this->buildSummary($cache));
+            fn ()=>$this->buildSummary($cache, $resolveRoots));
     }
 
     private function window(array $filters): array
@@ -424,10 +482,10 @@ class PaymentRenewalAnalysisService
         }
     }
 
-    private function renewalRows(array $filters): \Generator
+    private function renewalRows(array $filters, Closure $resolveRoots): \Generator
     {
         $w=$this->window($filters);
-        $index=$this->rootIndex($filters,$w);
+        $index=$resolveRoots($filters,$w);
         $linked=$filters['linked'] ?? false;
         foreach ($this->lifecycleBatches($filters,$index,$w) as $entries) {
             $current=array_values(array_filter($entries,static fn ($entry)=>$entry['number']>0
@@ -479,7 +537,7 @@ class PaymentRenewalAnalysisService
         return max(0, $months - (int) ($asOf->day < $billingDay));
     }
 
-    private function buildSummary(array $filters): array
+    private function buildSummary(array $filters, ?Closure $resolveRoots = null): array
     {
         $w=$this->window($filters);
         $linked=$filters['linked'] ?? false;
@@ -501,7 +559,7 @@ class PaymentRenewalAnalysisService
             }
         }
         $current=$previous=$pending=$renewedWhenDue=$lastRateOrder=$lastBaseOrder=$dueNumbers=$missingPrevious=[];
-        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$this->rootIndex($filters,$w),$w,includeOrderDate:$linked) as $entries) {
+        if (!$filters['first_only']) foreach ($this->lifecycleBatches($filters,$resolveRoots ? $resolveRoots($filters,$w) : $this->rootIndex($filters,$w),$w,includeOrderDate:$linked) as $entries) {
             $now=[];
             foreach ($entries as $entry) {
                 $order=$entry['order'];

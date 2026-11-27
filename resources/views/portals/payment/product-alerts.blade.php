@@ -3,6 +3,19 @@
 @php
     $translationPrefix = 'payment.product_alerts';
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
+    $filters = $dashboard['filters'];
+    $pagination = $dashboard['pagination'];
+    $listUrl = route('payment.product-alerts.index');
+    $pageUrl = static fn (int $page) => route('payment.product-alerts.index', [
+        ...$filters, 'per_page' => $pagination['per_page'], 'page' => $page,
+    ]);
+    $filterOptions = [
+        'flow_status' => ['flows', ['open', 'completed', 'all'], null],
+        'processing_status' => ['statuses', ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'], 'all_statuses'],
+        'channel' => ['channels', ['paypal', 'credit_card'], 'all_channels'],
+        'severity' => ['severities', ['warning', 'critical'], 'all_severities'],
+        'sample' => ['sample_ranges', ['all', 'under_50', '50_500', 'over_500'], null],
+    ];
     $kpiPresentation = [
         'pending' => ['icon' => 'fa-clock-o', 'tone' => 'orange'],
         'processing' => ['icon' => 'fa-cogs', 'tone' => 'orange'],
@@ -13,31 +26,58 @@
 @section('page_title', __($translationPrefix.'.page_title'))
 
 @push('styles')
+    <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-alert1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-product-alerts.css?v=1">
 @endpush
 
 @section('content')
 <section class="content-header payment-page-heading">
     <h1>{{ __($translationPrefix.'.page_title') }} <small>{{ __($translationPrefix.'.page_subtitle') }}</small></h1>
 </section>
-<section class="content payment-portal-page payment-product-alerts-page">
+<section class="content payment-portal-page payment-product-alerts-page flt"
+    data-alert-list data-alert-selection-key="payment:product-alerts:selection:{{ $user->getKey() }}"
+    data-alert-selection-label="{{ __('frontend_list_template.selected_records') }}">
     @if (session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if ($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
 
-    <div class="box box-solid payment-filter-box">
-        <div class="box-body"><form class="payment-operation-filter-form" method="get" action="{{ route('payment.product-alerts.index') }}" data-payment-filter-form data-payment-server-filter-form>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.flow_status') }}</span><select class="form-control" name="flow_status"><option value="open" @selected(($dashboard['filters']['flow_status'] ?? 'open') === 'open')>{{ __($translationPrefix.'.flows.open') }}</option><option value="completed" @selected(($dashboard['filters']['flow_status'] ?? '') === 'completed')>{{ __($translationPrefix.'.flows.completed') }}</option><option value="all" @selected(($dashboard['filters']['flow_status'] ?? '') === 'all')>{{ __($translationPrefix.'.flows.all') }}</option></select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.processing_status') }}</span><select class="form-control" name="processing_status"><option value="">{{ __($translationPrefix.'.filters.all_statuses') }}</option>@foreach (['pending','stopped','observing','backend_optimized','other','completed'] as $status)<option value="{{ $status }}" @selected(($dashboard['filters']['processing_status'] ?? '') === $status)>{{ __($translationPrefix.'.statuses.'.$status) }}</option>@endforeach</select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.channel') }}</span><select class="form-control" name="channel"><option value="">{{ __($translationPrefix.'.filters.all_channels') }}</option>@foreach(['paypal','credit_card'] as $channel)<option value="{{ $channel }}" @selected(($dashboard['filters']['channel'] ?? '') === $channel)>{{ __($translationPrefix.'.channels.'.$channel) }}</option>@endforeach</select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.severity') }}</span><select class="form-control" name="severity"><option value="">{{ __($translationPrefix.'.filters.all_severities') }}</option>@foreach(['warning','critical'] as $severity)<option value="{{ $severity }}" @selected(($dashboard['filters']['severity'] ?? '') === $severity)>{{ __($translationPrefix.'.severities.'.$severity) }}</option>@endforeach</select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.sample') }}</span><select class="form-control" name="sample"><option value="">{{ __($translationPrefix.'.filters.all_samples') }}</option>@foreach(['under_50','50_500','over_500'] as $sample)<option value="{{ $sample }}" @selected(($dashboard['filters']['sample'] ?? '') === $sample)>{{ __($translationPrefix.'.sample_ranges.'.$sample) }}</option>@endforeach</select></label>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="product" value="{{ $dashboard['filters']['product'] ?? '' }}" data-payment-filter="product" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
-            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><button class="btn btn-default" type="button" onclick="window.location.href=@json(route('payment.product-alerts.index'))">{{ __('payment.common.reset') }}</button><button class="btn btn-success" type="button" data-payment-product-export data-export-url="{{ route('payment.product-alerts.export') }}"><i class="fa fa-file-excel-o"></i> {{ __($translationPrefix.'.export.button') }}</button></div>
-        </form></div>
-    </div>
-
-    <aside class="payment-alert-guidance"><div><i class="fa fa-lightbulb-o" aria-hidden="true"></i><p><strong>{{ __($translationPrefix.'.guidance.title') }}</strong><span>{{ __($translationPrefix.'.guidance.description') }}</span><small>{{ __($translationPrefix.'.guidance.fixed_rule') }}</small></p></div></aside>
+    <form class="flt-card flt-filters" method="get" action="{{ $listUrl }}"
+        data-logistics-filters data-loading="region" data-loading-target="#payment-alert-records"
+        data-search-options="{{ __('frontend_list_template.search_options') }}"
+        data-no-options="{{ __('frontend_list_template.no_options') }}"
+        data-clear-choice="{{ __('frontend_list_template.clear_choice') }}"
+        data-selected-options="{{ __('frontend_list_template.selected_options', ['names' => '__names__', 'count' => '__count__']) }}">
+        <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
+        <div class="flt-filter-grid">
+            @foreach ($filterOptions as $field => [$group, $options, $placeholder])
+                <div>
+                    <label class="flt-field-label" for="payment-alert-filter-{{ $field }}">{{ __($translationPrefix.'.filters.'.$field) }}</label>
+                    <select id="payment-alert-filter-{{ $field }}" name="{{ $field }}{{ $placeholder !== null ? '[]' : '' }}"
+                        @if ($placeholder !== null) multiple @else data-filter-fixed-choice @endif
+                        @if ($field === 'processing_status') data-filter-searchable @endif>
+                        @if ($placeholder !== null)
+                            <option value="" disabled>{{ __($translationPrefix.'.filters.'.$placeholder) }}</option>
+                        @endif
+                        @foreach ($options as $option)
+                            <option value="{{ $option }}" @selected(in_array($option, (array) $filters[$field], true))>
+                                {{ __($translationPrefix.'.'.$group.'.'.$option) }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+            @endforeach
+            <label>{{ __($translationPrefix.'.filters.product') }}
+                <input type="search" name="product" maxlength="191" value="{{ $filters['product'] }}"
+                    placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}">
+            </label>
+        </div>
+        <div class="flt-filter-actions">
+            <button class="flt-btn flt-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __('frontend_list_template.query') }}</button>
+            <a class="flt-btn" href="{{ route('payment.product-alerts.index', ['per_page' => $pagination['per_page']]) }}"
+                data-alert-reset data-loading="region" data-loading-target="#payment-alert-records">{{ __('frontend_list_template.reset') }}</a>
+        </div>
+    </form>
 
     <div class="payment-kpi-grid payment-kpi-grid-three">
         @foreach ($dashboard['kpis'] as $kpi)
@@ -46,11 +86,43 @@
         @endforeach
     </div>
 
-    <article class="payment-panel payment-alert-list-panel">
-        <h2>{{ __($translationPrefix.'.list_title') }}</h2>
-        <div class="table-responsive payment-alert-scroll-table"><table class="table payment-data-table payment-alert-table"><thead><tr>@foreach (['pcl', 'alert_data', 'threshold', 'status', 'status_message', 'action'] as $column)<th>{{ __($translationPrefix.'.table.'.($column === 'pcl' ? 'product_information' : $column)) }}</th>@endforeach</tr></thead><tbody>
+    <details class="flt-guidance">
+        <summary><i class="fa fa-info-circle" aria-hidden="true"></i><strong>{{ __('frontend_list_template.guidance_title', ['count' => 2]) }}</strong>
+            <span class="flt-guidance-toggle"><span class="flt-guidance-expand">{{ __('frontend_list_template.guidance_expand') }}</span><span class="flt-guidance-collapse">{{ __('frontend_list_template.guidance_collapse') }}</span></span>
+        </summary>
+        <ul class="flt-guidance-items">
+            <li>{{ __($translationPrefix.'.guidance.description') }}</li>
+            <li>{{ __($translationPrefix.'.guidance.fixed_rule') }}</li>
+        </ul>
+    </details>
+
+    <article class="flt-card flt-records" id="payment-alert-records">
+        <div class="flt-toolbar">
+            <div class="flt-selection">
+                <span>{{ __('frontend_list_template.records', ['count' => $pagination['total']]) }}</span>
+                <span class="flt-toolbar-divider" aria-hidden="true"></span>
+                <span data-alert-selected-count aria-live="polite">{{ __('frontend_list_template.selected_records', ['count' => 0]) }}</span>
+                <button type="button" data-alert-clear-selection disabled>{{ __('frontend_list_template.clear_selected') }}</button>
+            </div>
+            <div class="flt-toolbar-actions">
+                <a class="flt-btn" href="{{ route('payment.product-alerts.export') }}" data-loading="off"><i class="fa fa-file-excel-o" aria-hidden="true"></i> {{ __($translationPrefix.'.export.button') }}</a>
+            </div>
+        </div>
+        <div class="flt-table-region">
+            <div class="flt-table-scroll payment-alert-scroll-table" tabindex="0" aria-label="{{ __($translationPrefix.'.list_title') }}">
+                <table class="payment-alert-table">
+                    <caption class="flt-sr-only">{{ __($translationPrefix.'.list_title') }}</caption>
+                    <thead><tr>
+                        <th scope="col" class="flt-check"><input type="checkbox" data-alert-check-page aria-label="{{ __('frontend_list_template.check_page') }}" disabled></th>
+                        @foreach (['product_information', 'alert_data', 'threshold', 'status', 'status_message', 'action'] as $column)
+                            <th scope="col">{{ __($translationPrefix.'.table.'.$column) }}</th>
+                        @endforeach
+                    </tr></thead>
+                    <tbody>
         @foreach ($dashboard['alerts'] as $alert)
             <tr class="payment-alert-severity-{{ $alert['severity_key'] }}" tabindex="0" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
+                <td data-alert-selection-cell><input type="checkbox" data-alert-check-row value="{{ $alert['code'] }}"
+                    aria-label="{{ __('frontend_list_template.check_record', ['id' => $alert['code']]) }}" disabled></td>
                 <td><div class="payment-alert-product-information">
                     @if(!empty($alert['product_image_url']))
                         <img src="{{ $alert['product_image_url'] }}" alt="{{ $alert['product_name'] }}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false;">
@@ -66,17 +138,57 @@
                 <td><span class="payment-table-status payment-table-status-{{ $alert['workflow_status_key'] }}" data-payment-alert-workflow-status>{{ __($translationPrefix.'.statuses.'.$alert['workflow_status_key']) }}</span></td>
                 <td data-payment-alert-status-history>@forelse($alert['status_history'] as $history)<div class="payment-alert-history-line">{{ __($translationPrefix.'.history.line', ['status' => __($translationPrefix.'.statuses.'.$history['status']), 'remark' => $history['remark'], 'actor' => $history['actor'], 'time' => $history['time']]) }}</div>@empty<span data-payment-alert-history-empty>-</span>@endforelse</td>
                 <td class="payment-alert-actions-cell">
-                    <button type="button" class="btn btn-primary btn-sm payment-alert-action-button" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
+                    <button type="button" class="flt-row-action" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
                         {{ __($translationPrefix.'.actions.'.$alert['action_key']) }} <i class="fa fa-angle-right"></i>
                     </button>
-                    <button type="button" class="btn btn-default btn-sm" data-payment-alert-status data-action="{{ route('payment.product-alerts.status.update', ['alert' => $alert['code']]) }}" data-product="{{ $alert['sku'] }}" data-current-status="{{ $alert['status_key'] }}">{{ __($translationPrefix.'.operations.process') }}</button>
+                    <button type="button" class="flt-row-action" data-payment-alert-status data-action="{{ route('payment.product-alerts.status.update', ['alert' => $alert['code']]) }}" data-product="{{ $alert['sku'] }}" data-current-status="{{ $alert['status_key'] }}">{{ __($translationPrefix.'.operations.process') }}</button>
                 </td>
             </tr>
         @endforeach
-        </tbody></table></div>
-        @if ($dashboard['pagination']['total'] === 0)<p class="payment-empty-filter">{{ __('payment.common.empty_filter') }}</p>@endif
+                    </tbody>
+                </table>
+            </div>
+            @if ($pagination['total'] === 0)
+                <div class="flt-empty"><i class="fa fa-search" aria-hidden="true"></i><h4>{{ __('frontend_list_template.empty_title') }}</h4><p>{{ __('frontend_list_template.empty_hint') }}</p></div>
+            @endif
+        </div>
+        <nav class="flt-pagination" aria-label="{{ __('frontend_list_template.pagination') }}">
+            <label>{{ __('frontend_list_template.per_page') }}
+                <select name="per_page" form="payment-alert-pagination" data-alert-page-size aria-label="{{ __('frontend_list_template.page_size') }}">
+                    @foreach ([20, 50, 100] as $size)
+                        <option value="{{ $size }}" @selected($size === $pagination['per_page'])>{{ $size }}</option>
+                    @endforeach
+                </select>
+            </label>
+            @if ($pagination['current_page'] > 1)
+                <a class="flt-btn" href="{{ $pageUrl($pagination['current_page'] - 1) }}" data-loading="region" data-loading-target="#payment-alert-records">{{ __('frontend_list_template.previous') }}</a>
+            @else
+                <button type="button" class="flt-btn" disabled>{{ __('frontend_list_template.previous') }}</button>
+            @endif
+            <strong>{{ __('frontend_list_template.page_label', ['page' => $pagination['current_page'], 'pages' => $pagination['last_page']]) }}</strong>
+            @if ($pagination['current_page'] < $pagination['last_page'])
+                <a class="flt-btn" href="{{ $pageUrl($pagination['current_page'] + 1) }}" data-loading="region" data-loading-target="#payment-alert-records">{{ __('frontend_list_template.next') }}</a>
+            @else
+                <button type="button" class="flt-btn" disabled>{{ __('frontend_list_template.next') }}</button>
+            @endif
+            <form id="payment-alert-pagination" method="get" action="{{ $listUrl }}" data-loading="region" data-loading-target="#payment-alert-records">
+                @foreach ($filters as $field => $value)
+                    @if (is_array($value))
+                        @foreach ($value as $choice)
+                            <input type="hidden" name="{{ $field }}[]" value="{{ $choice }}">
+                        @endforeach
+                    @else
+                        <input type="hidden" name="{{ $field }}" value="{{ $value }}">
+                    @endif
+                @endforeach
+                <label>{{ __('frontend_list_template.jump_to') }}
+                    <input type="number" name="page" min="1" max="{{ $pagination['last_page'] }}" step="1" required placeholder="{{ __('frontend_list_template.page_placeholder') }}"
+                        data-alert-invalid-page="{{ __('frontend_list_template.invalid_page', ['pages' => $pagination['last_page']]) }}">
+                </label>
+                <button class="flt-btn flt-primary" type="submit">{{ __('frontend_list_template.jump') }}</button>
+            </form>
+        </nav>
     </article>
-    @include('portals.payment.partials.pagination', ['pagination' => $dashboard['pagination'], 'routeName' => 'payment.product-alerts.index'])
 
     <div class="modal fade payment-alert-detail-modal" id="payment-alert-detail-modal" tabindex="-1" role="dialog" aria-labelledby="payment-alert-detail-modal-title" aria-hidden="true"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.modals.close') }}"><span>&times;</span></button><h4 id="payment-alert-detail-modal-title">{{ __($translationPrefix.'.detail_modal.title') }}</h4><p>{{ __($translationPrefix.'.detail_modal.subtitle') }}</p></div><div class="modal-body"><div class="payment-detail-state" data-payment-alert-detail-loading><i class="fa fa-spinner fa-spin"></i> {{ __($translationPrefix.'.detail_modal.loading') }}</div><div class="payment-detail-state payment-detail-error" data-payment-alert-detail-error hidden></div><div data-payment-alert-detail-body></div></div><div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">{{ __($translationPrefix.'.modals.close') }}</button></div></div></div></div>
     @include('portals.payment.partials.product-alert-status-modal')
@@ -86,5 +198,7 @@
 
 @push('scripts')
 <script>window.PaymentPortal = { actionTitle: @json(__('payment.common.mock_action_title')), actionMessage: @json(__('payment.common.mock_action_message')), alertModal: @json(__($translationPrefix.'.modals')), alertDetail: @json(__($translationPrefix.'.detail_modal')), productAlerts: { submit_timeout: @json(__($translationPrefix.'.status_update.timeout')) }, productExport: @json(__($translationPrefix.'.export')) };</script>
+<script src="{{ $portalOrigin }}/assets/erp/shopify-orders-filters.js?v=5"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-1"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-product-alerts.js?v=1"></script>
 @endpush

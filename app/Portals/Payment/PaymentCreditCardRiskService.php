@@ -9,13 +9,10 @@ use Illuminate\Support\Facades\DB;
 
 class PaymentCreditCardRiskService
 {
-    /** @var list<string> */
-    private const GATEWAYS = ['Fintrix', 'FintrixV2', 'manual'];
-
     /** @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:credit-card-risk:v2:'.sha1(json_encode($filters));
+        $cacheKey = 'payment:credit-card-risk:v3:'.sha1(json_encode($filters));
 
         return Cache::flexible($cacheKey, [60, 300], fn (): array => $this->buildDashboard($filters));
     }
@@ -25,7 +22,7 @@ class PaymentCreditCardRiskService
     {
         $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
         $eligibleOrders = $connection->table('logistics_orders as orders')
-            ->whereIn('orders.payment_gateway', self::GATEWAYS)
+            ->where('orders.payment_type', 'credit_card')
             ->whereNotNull('orders.paid_at');
         $orders = clone $eligibleOrders;
         $this->applyRange($orders, 'orders.paid_at', $filters);
@@ -107,7 +104,6 @@ class PaymentCreditCardRiskService
 
         return [
             'module' => 'credit_card', 'period_start' => $filters['period_start'], 'period_end' => $filters['period_end'], 'filters' => $filters,
-            'gateways' => self::GATEWAYS,
             'reason_options' => $reasonOptions,
             'kpis' => [
                 ['key' => 'paid_orders', 'value' => number_format($orderCount).' / $'.number_format($paidAmount, 2), 'note_key' => 'paid_orders_note'],

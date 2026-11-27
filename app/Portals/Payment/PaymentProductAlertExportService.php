@@ -2,6 +2,8 @@
 
 namespace App\Portals\Payment;
 
+use App\Portals\Logistics\StreamedXlsxWriter;
+use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -13,6 +15,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentProductAlertExportService
 {
+    public function __construct(private readonly StreamedXlsxWriter $writer = new StreamedXlsxWriter())
+    {
+    }
+
     /** @param list<array<string,mixed>> $rows */
     public function download(array $rows): StreamedResponse
     {
@@ -33,28 +39,11 @@ class PaymentProductAlertExportService
     /** @param iterable<array<string,mixed>> $products */
     public function downloadRiskList(iterable $products): StreamedResponse
     {
-        $filename = __('payment.product_risk_profit.layout.export_filename', [
+        $prefix = 'payment.product_risk_profit.';
+        $filename = __($prefix.'layout.export_filename', [
             'time' => now('Asia/Shanghai')->format('Ymd_His'),
         ]);
-
-        return response()->streamDownload(function () use ($products): void {
-            $spreadsheet = $this->riskListSpreadsheet($products);
-            try {
-                (new Xlsx($spreadsheet))->save('php://output');
-            } finally {
-                $spreadsheet->disconnectWorksheets();
-            }
-        }, $filename, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Cache-Control' => 'max-age=0, must-revalidate',
-        ]);
-    }
-
-    /** @param iterable<array<string,mixed>> $products */
-    private function riskListSpreadsheet(iterable $products): Spreadsheet
-    {
-        $prefix = 'payment.product_risk_profit.';
-        $columns = [
+        $columnLabels = [
             'display_name' => 'sort.product_name',
             'pcl' => 'layout.product_pcl',
             'latest_paid_at' => 'layout.latest_paid',
@@ -73,48 +62,87 @@ class PaymentProductAlertExportService
             'credit_card_delivered_dispute_rate' => 'compact.delivered_dispute_rate',
             'credit_card_initial_refund_amount_rate' => 'compact.initial_refund_amount_rate',
         ];
-        $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle(__($prefix.'export.sheet_name'));
-        $sheet->freezePane('A3');
-        foreach (['A:G' => 'product_info', 'H:M' => 'paypal_fee_info', 'N:Q' => 'card_fee_info'] as $range => $group) {
-            [$start, $end] = explode(':', $range);
-            $sheet->mergeCells($start.'1:'.$end.'1');
-            $sheet->setCellValue($start.'1', __($prefix.'table.'.$group));
-        }
-        $header = array_map(static fn (string $key): string => __($prefix.$key), array_values($columns));
-        $sheet->fromArray($header, null, 'A2');
-        $sheet->getStyle('A1:Q2')->getFont()->setBold(true);
-        $sheet->getStyle('A1:Q2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('A1:Q2')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E3EFF8');
-        foreach (range('A', 'Q') as $letter) {
-            $sheet->getColumnDimension($letter)->setWidth($letter === 'A' ? 34 : 25);
+
+        $columns = [];
+        $index = 0;
+        foreach ($columnLabels as $label) {
+            [$group, $fill] = match (true) {
+                $index < 7 => ['product_info', 'E3EFF8'],
+                $index < 13 => ['paypal_fee_info', 'D7E8FA'],
+                default => ['card_fee_info', 'E8DDF8'],
+            };
+            $columns[] = [
+                'label' => __($prefix.$label),
+                'width' => $index === 0 ? 34 : 25,
+                'group' => __($prefix.'table.'.$group),
+                'headerFill' => $fill,
+            ];
+            $index++;
         }
 
-        $rowNumber = 3;
-        foreach ($products as $product) {
-            $product['display_name'] = trim((string) $product['tongtu_product_name']) !== ''
-                ? $product['tongtu_product_name']
-                : (trim((string) $product['source_product_name']) !== '' ? $product['source_product_name'] : $product['name']);
-            $product['pcl'] = $product['product_code'] ?: $product['sku'];
-            foreach (array_keys($columns) as $index => $key) {
-                $cell = Coordinate::stringFromColumnIndex($index + 1).$rowNumber;
-                if ($index < 3) {
-                    $sheet->setCellValueExplicit($cell, (string) $product[$key], DataType::TYPE_STRING);
-                } elseif ($index < 5) {
-                    $sheet->setCellValue($cell, round((float) $product[$key], 2));
-                } else {
-                    $sheet->setCellValue($cell, round((float) $product[$key], 2) / 100);
+        $rowsWritten = 0;
+        $dataElapsed = 0;
+        $keys = array_keys($columnLabels);
+        $rows = function () use ($products, $keys, &$rowsWritten, &$dataElapsed): \Generator {
+            $readStarted = hrtime(true);
+            try {
+                foreach ($products as $product) {
+                    $dataElapsed += hrtime(true) - $readStarted;
+                    $readStarted = null;
+                    yield $this->riskListRow($product, $keys);
+                    $rowsWritten++;
+                    $readStarted = hrtime(true);
+                }
+            } finally {
+                if ($readStarted !== null) {
+                    $dataElapsed += hrtime(true) - $readStarted;
                 }
             }
-            $rowNumber++;
-        }
-        if ($rowNumber > 3) {
-            $sheet->getStyle('E3:E'.($rowNumber - 1))->getNumberFormat()->setFormatCode('"$"#,##0.00');
-            $sheet->getStyle('F3:Q'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00%');
+        };
+
+        $response = $this->writer->response($filename, __($prefix.'export.sheet_name'), $columns, $rows,
+            streamDirectly: true, compressionLevel: 3);
+        $write = $response->getCallback();
+        $response->setCallback(static function () use ($write, &$rowsWritten, &$dataElapsed): void {
+            $started = hrtime(true);
+            $completed = false;
+            try {
+                $write();
+                $completed = true;
+            } finally {
+                $elapsed = hrtime(true) - $started;
+                Log::log($completed ? 'info' : 'warning', 'Payment product risk export.', [
+                    'completed' => $completed,
+                    'rows' => $rowsWritten,
+                    'data_ms' => round($dataElapsed / 1_000_000, 2),
+                    'xlsx_ms' => round(max(0, $elapsed - $dataElapsed) / 1_000_000, 2),
+                    'total_ms' => round($elapsed / 1_000_000, 2),
+                ]);
+            }
+        });
+
+        return $response;
+    }
+
+    /** @param list<string> $keys */
+    private function riskListRow(array $product, array $keys): array
+    {
+        $product['display_name'] = trim((string) $product['tongtu_product_name']) !== ''
+            ? $product['tongtu_product_name']
+            : (trim((string) $product['source_product_name']) !== '' ? $product['source_product_name'] : $product['name']);
+        $product['pcl'] = $product['product_code'] ?: $product['sku'];
+
+        $cells = [];
+        foreach ($keys as $index => $key) {
+            $cells[] = match (true) {
+                $index < 3 => ['value' => (string) $product[$key]],
+                $index === 3 => ['value' => (int) $product[$key], 'type' => 'quantity'],
+                $index === 4 => ['value' => round((float) $product[$key], 2), 'type' => 'money'],
+                default => ['value' => round((float) $product[$key], 2) / 100, 'type' => 'percentage'],
+            };
         }
 
-        return $spreadsheet;
+        return ['cells' => $cells];
     }
 
     /** @param list<array<string,mixed>> $rows */

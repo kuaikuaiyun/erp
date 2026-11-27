@@ -2,6 +2,8 @@
 
 return [
     'saved' => '企业登录配置已保存。',
+    'session_expired_title' => '登录已过期',
+    'session_expired' => '登录已过期，请重新登录。',
     'heading' => '欢迎登录',
     'account' => '请输入账号',
     'invalid_credentials' => '账号或密码错误。',

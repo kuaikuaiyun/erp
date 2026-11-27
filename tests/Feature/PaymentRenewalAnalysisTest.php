@@ -616,6 +616,8 @@ class PaymentRenewalAnalysisTest extends TestCase
 <?php
 require getcwd().'/vendor/autoload.php';
 $app=new Illuminate\Foundation\Application(getcwd());
+$app->instance('log', new Psr\Log\NullLogger());
+Illuminate\Support\Facades\Facade::setFacadeApplication($app);
 $loader=new Illuminate\Translation\FileLoader(new Illuminate\Filesystem\Filesystem,getcwd().'/lang');
 $app->instance('translator',new Illuminate\Translation\Translator($loader,'zh-CN'));
 $factory=Mockery::mock(Illuminate\Contracts\Routing\ResponseFactory::class);
@@ -635,7 +637,10 @@ if($kind==='main'){
 $analysis=new class($data) extends App\Portals\Payment\PaymentRenewalAnalysisService{
     public function __construct(private array $fixture){}
     public function exportData(array $filters):array{return $this->fixture['main'];}
-    public function initialOrderDetails(array $filters,array $detail,bool $paginate=true):array{return $this->fixture['detail'];}
+    public function initialOrderExport(array $filters,array $detail):array{
+        $data=$this->fixture['detail'];
+        return [...$data,'totals'=>static fn()=>['scope'=>$data['scope'],'summary'=>$data['summary']]];
+    }
 };
 $export=new App\Portals\Payment\PaymentRenewalAnalysisExportService($analysis);
 $before=memory_get_usage(true);
@@ -664,11 +669,57 @@ PHP;
                 $result=json_decode($process->getOutput(),true,512,JSON_THROW_ON_ERROR);
                 self::assertSame($result['expected'],$result['rows']);
                 self::assertLessThan(96*1024*1024,$result['peak']);
-                self::assertLessThan(16*1024*1024,$result['growth']);
+                // Direct ZIP output reads worksheet XML in fixed 16 MiB blocks.
+                self::assertLessThan(32*1024*1024,$result['growth']);
             }
         } finally {
             unlink($fixture);
             unlink($script);
+        }
+    }
+
+    public function test_refund_detail_export_reads_the_first_order_population_once_and_keeps_both_totals(): void
+    {
+        $filters = $this->filters(['initial_date_from' => '2026-10-01', 'initial_date_to' => '2026-11-30']);
+        $detail = $this->detailFilters(['detail_kind' => 'refunds', 'detail_keyword' => 'TX-5']);
+        $service = app(PaymentRenewalAnalysisService::class);
+        $expected = $service->initialOrderDetails($filters, $detail);
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            if (str_contains($query->sql, 'from "logistics_orders"')
+                && str_contains($query->sql, 'order by "paid_at" desc')) {
+                $queries[] = $query->sql;
+            }
+        });
+
+        $export = $service->initialOrderExport($filters, $detail);
+        self::assertSame([], $queries);
+        $rows = $export['rows']->all();
+        self::assertCount(1, $queries);
+        self::assertSame([5], array_column($rows, 'erp_order_id'));
+        self::assertSame([10.0], array_column($rows, 'raw_refund_amount'));
+        self::assertSame(['scope' => $expected['scope'], 'summary' => $expected['summary']], $export['totals']());
+    }
+
+    public function test_cold_main_export_discovers_each_renewal_root_index_once(): void
+    {
+        $service = app(PaymentRenewalAnalysisService::class);
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            $sql = $query->sql;
+            if (str_starts_with($sql, 'select "id", "subscription_origin_order_id", "subscription_type" from "logistics_orders"')
+                || (str_starts_with($sql, 'select "id", "paid_at", "transaction_id", "shopify_order_id"') && str_contains($sql, 'order by "paid_at" asc'))) {
+                $queries[] = $sql;
+            }
+        });
+
+        foreach (['normal', 'linked'] as $mode) {
+            $queries = [];
+            $filters = $this->filters(['renewal_date_from' => '2026-10-01', 'renewal_date_to' => '2026-11-30', 'renewal_mode' => $mode]);
+            $export = $service->exportData($filters);
+            self::assertCount(1, $queries);
+            self::assertSame([3, 4, 11], array_column($export['rows']->all(), 'erp_order_id'));
+            self::assertCount(1, $queries);
         }
     }
 

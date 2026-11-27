@@ -3,6 +3,7 @@
 namespace App\Portals\Payment;
 
 use App\Portals\Logistics\StreamedXlsxWriter;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentRenewalAnalysisExportService
@@ -15,14 +16,16 @@ class PaymentRenewalAnalysisExportService
 
     public function downloadOrderDetails(array $filters, array $detailFilters): StreamedResponse
     {
-        $data = $this->analysis->initialOrderDetails($filters, $detailFilters, false);
+        $started = hrtime(true);
+        $data = $this->analysis->initialOrderExport($filters, $detailFilters);
+        $timing = ['data_ns' => hrtime(true) - $started, 'rows' => 0];
         $dt = static fn (string $key) => __('payment.renewal_details.'.$key);
         $pt = static fn (string $key) => __('payment.renewal_two_sections.'.$key);
         $methodName = static fn (string $method) => $method === 'unknown' ? $dt('unknown') : $pt('method_names.'.$method);
         $f = $data['filters'];
         $columns = ['erp_id','order','tongtu_order_number','transaction','bill_number','upsell_bill_number','paypal_transactions','collection_account','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount','delivery_state'];
-        $rows = function () use ($data, $dt, $pt, $methodName): \Generator {
-            foreach ($data['rows'] as $row) {
+        $rows = function () use ($data, $dt, $pt, $methodName, &$timing): \Generator {
+            foreach ($this->measureRows($data['rows'], $timing) as $row) {
                 yield $this->row([
                     (string)$row['erp_order_id'], $row['initial_order'], $row['tongtu_order_number'], $row['transaction_id'], implode("\n", $row['primary_bill_numbers']),
                     implode("\n", $row['upsell_bill_numbers']), implode("\n", $row['transaction_ids']), implode("\n", $row['collection_accounts']),
@@ -49,24 +52,27 @@ class PaymentRenewalAnalysisExportService
             if ($key === 'detail_refund' && $value !== '') $value = $dt($value === 'yes' ? 'refund_yes' : 'refund_no');
             $metadata[] = [__('payment.renewal_details.fields.'.$key), $value === '' ? $dt('all') : $value];
         }
-        foreach (['scope','summary'] as $section) {
-            foreach (['orders'=>'order_count','revenue'=>'revenue','refund_order_count'=>'refund_orders','refund_amount'=>'refund_amount'] as $key=>$label) {
-                $metadata[] = [($section === 'scope' ? $dt('original_scope') : $dt('filtered')).' / '.$dt($label), (string)$data[$section][$key]];
-            }
-        }
-        $scopeRows = function () use ($metadata): \Generator {
+        $scopeRows = function () use ($metadata, $data, $dt): \Generator {
             foreach (array_slice($metadata, 1) as $values) yield $this->row($values, [], [0,1]);
+            $totals = $data['totals']();
+            foreach (['scope' => 'original_scope', 'summary' => 'filtered'] as $section => $title) {
+                foreach (['orders' => 'order_count', 'revenue' => 'revenue', 'refund_order_count' => 'refund_orders', 'refund_amount' => 'refund_amount'] as $key => $label) {
+                    yield $this->row([$dt($title).' / '.$dt($label), (string) $totals[$section][$key]], [], [0, 1]);
+                }
+            }
         };
         return $this->response(__('payment.renewal_details.export_filename',['time'=>now()->format('Ymd_His')]), [
             [$dt('export_sheet'), $this->columns(array_map($dt,$columns), [12,22,26,30,32,32,32,32,30,24,18,22,24,18,16,18,18]), $rows],
             [$dt('export_scope_sheet'), $this->columns([$metadata[0][0],''], [40,70]), $scopeRows],
-        ]);
+        ], 'order_details', $started, $timing);
     }
 
     /** @param array<string,mixed> $filters */
     public function download(array $filters): StreamedResponse
     {
+        $started = hrtime(true);
         $data = $this->analysis->exportData($filters);
+        $timing = ['data_ns' => hrtime(true) - $started, 'rows' => 0];
         $text = static fn (string $key) => __('payment.renewal_two_sections.'.$key);
         $channels = ['total'=>$text('total'),'paypal'=>__('payment.renewal_analysis.channels.paypal'),'credit_card'=>__('payment.renewal_analysis.channels.credit_card'),'unknown'=>$text('unknown')];
         $allGroups = PaymentRenewalAnalysisService::breakdownGroups();
@@ -136,10 +142,10 @@ class PaymentRenewalAnalysisExportService
                 }
             }
         };
-        $detailRows = function () use ($data,$text,$channels): \Generator {
+        $detailRows = function () use ($data, $text, $channels, &$timing): \Generator {
             // Iterate the two existing populations without copying them into a merged array.
             foreach (['initial_rows','rows'] as $population) {
-                foreach ($data[$population] as $row) {
+                foreach ($this->measureRows($data[$population], $timing) as $row) {
                     $stageLabel=$row['stage_number']===0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]);
                     if ($row['missing_previous'] ?? false) $stageLabel.='（'.__('payment-renewal.linked_missing_previous_detail').'）';
                     yield $this->row([
@@ -161,7 +167,7 @@ class PaymentRenewalAnalysisExportService
             [$text('refund_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['initial_calculation']['timezone']],17,''),[22,48,24,20,18,20,20,20,18,18,18,18,22,22,22,22,22]),$refundRows],
             [$text('renewal_sheet'),$this->columns(array_pad([__('payment.renewal_analysis.export.timezone'),$data['calculation']['timezone']],$linked ? 12 : 10,''),[22,48,28,28,22,20,20,20,20,20,...($linked ? [20,30] : [])]),$renewalRows],
             [__('payment.renewal_analysis.export.detail_sheet'),$this->columns([...array_values(__('payment.renewal_analysis.export.columns')),$text('payment_method'),__('payment.renewal_analysis.export.detail_timezone'),__('payment.renewal_details.delivery_state')],[24,18,18,24,24,26,24,30,32,32,32,32,30,24,18,16,18,24,16,18,24,20,20,18]),$detailRows],
-        ]);
+        ], 'report', $started, $timing);
     }
 
     private function columns(array $labels, array $widths): array
@@ -193,10 +199,48 @@ class PaymentRenewalAnalysisExportService
         return implode("\n",$times);
     }
 
-    private function response(string $filename, array $sheets): StreamedResponse
+    private function measureRows(iterable $rows, array &$timing): \Generator
+    {
+        $readStarted = hrtime(true);
+        try {
+            foreach ($rows as $row) {
+                $timing['data_ns'] += hrtime(true) - $readStarted;
+                $readStarted = null;
+                yield $row;
+                $timing['rows']++;
+                $readStarted = hrtime(true);
+            }
+        } finally {
+            if ($readStarted !== null) {
+                $timing['data_ns'] += hrtime(true) - $readStarted;
+            }
+        }
+    }
+
+    private function response(string $filename, array $sheets, string $kind, int $started, array &$timing): StreamedResponse
     {
         [$name,$columns,$rows]=$sheets[0];
-        return $this->writer->response($filename,$name,$columns,$rows,
-            additionalSheets: array_slice($sheets,1));
+        $response = $this->writer->response($filename, $name, $columns, $rows,
+            additionalSheets: array_slice($sheets, 1), streamDirectly: true, compressionLevel: 3);
+        $write = $response->getCallback();
+        $response->setCallback(static function () use ($write, $kind, $started, &$timing): void {
+            $completed = false;
+            try {
+                $write();
+                $completed = true;
+            } finally {
+                $elapsed = hrtime(true) - $started;
+                Log::log($completed ? 'info' : 'warning', 'Payment renewal export.', [
+                    'kind' => $kind,
+                    'completed' => $completed,
+                    'rows' => $timing['rows'],
+                    'data_ms' => round($timing['data_ns'] / 1_000_000, 2),
+                    'xlsx_ms' => round(max(0, $elapsed - $timing['data_ns']) / 1_000_000, 2),
+                    'total_ms' => round($elapsed / 1_000_000, 2),
+                ]);
+            }
+        });
+
+        return $response;
     }
 }

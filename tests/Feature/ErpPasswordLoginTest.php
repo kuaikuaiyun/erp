@@ -37,6 +37,48 @@ class ErpPasswordLoginTest extends TestCase
         self::assertTrue(Admin::guard()->guest());
     }
 
+    public function test_session_status_does_not_renew_idle_lifetime_or_set_a_cookie(): void
+    {
+        config(['session.driver' => 'database', 'session.lifetime' => 360, 'portals.scheme' => 'http']);
+        app('session')->forgetDrivers();
+        \Illuminate\Support\Facades\Schema::create('sessions', function (\Illuminate\Database\Schema\Blueprint $table): void {
+            $table->string('id')->primary();
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->string('ip_address', 45)->nullable();
+            $table->text('user_agent')->nullable();
+            $table->text('payload');
+            $table->integer('last_activity');
+        });
+        \App\Models\ErpLoginSite::query()->create([
+            'domain' => 'erp.example.test', 'root_domain' => 'example.test', 'display_name' => 'Test ERP', 'password_enabled' => true,
+        ]);
+        $account = $this->account();
+        $signedIn = $this->post('http://erp.example.test/kky/auth/login', [
+            'username' => $account->username, 'password' => 'test-password-123',
+        ])->assertRedirect('http://erp.example.test/kky');
+        $cookieName = config('session.cookie');
+        $cookie = $signedIn->getCookie($cookieName, false);
+        $stored = \Illuminate\Support\Facades\DB::table('sessions')->where('user_id', $account->id)->first();
+        self::assertNotNull($stored);
+        $this->travel(10)->seconds();
+
+        $status = 'http://wuliu.example.test/auth/session-status';
+        $this->withCredentials()->withUnencryptedCookie($cookieName, $cookie->getValue())->getJson($status)
+            ->assertOk()->assertJsonPath('state', 'active')->assertHeaderMissing('Set-Cookie');
+        self::assertEquals($stored, \Illuminate\Support\Facades\DB::table('sessions')->where('id', $stored->id)->first());
+
+        \Illuminate\Support\Facades\DB::table('sessions')->where('id', $stored->id)
+            ->update(['last_activity' => now()->subMinutes(361)->timestamp]);
+        $this->getJson($status)->assertUnauthorized()->assertJsonPath('state', 'expired')
+            ->assertJsonPath('login_url', 'http://erp.example.test/kky/auth/login')->assertHeaderMissing('Set-Cookie');
+        self::assertSame(1, \Illuminate\Support\Facades\DB::table('sessions')->where('id', $stored->id)->count());
+
+        $this->travel(30)->days();
+        \Illuminate\Support\Facades\DB::table('sessions')->where('id', $stored->id)
+            ->update(['last_activity' => now()->timestamp]);
+        $this->getJson($status)->assertUnauthorized()->assertJsonPath('message', '登录已过期，请重新登录。');
+    }
+
     public function test_wrong_password_is_rejected(): void
     {
         $account = $this->account();

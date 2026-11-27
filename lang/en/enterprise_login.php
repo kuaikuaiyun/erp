@@ -2,6 +2,8 @@
 
 return [
     'saved' => 'Enterprise sign-in settings saved.',
+    'session_expired_title' => 'Session expired',
+    'session_expired' => 'Your session has expired. Please sign in again.',
     'heading' => 'Welcome back',
     'account' => 'Enter your username',
     'invalid_credentials' => 'The username or password is incorrect.',

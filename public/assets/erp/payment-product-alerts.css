@@ -1,0 +1,86 @@
+.payment-product-alerts-page .flt-field-label {
+    margin-bottom: 8px;
+}
+
+.payment-product-alerts-page .flt-btn:hover,
+.payment-product-alerts-page .flt-btn:focus {
+    text-decoration: none;
+}
+
+.payment-product-alerts-page .payment-alert-scroll-table {
+    height: auto;
+    max-height: clamp(300px, 58vh, 640px);
+    overflow: auto;
+    scrollbar-gutter: stable;
+}
+
+.payment-product-alerts-page .payment-alert-scroll-table .payment-alert-table {
+    min-width: 1320px !important;
+}
+
+.payment-product-alerts-page .payment-alert-table th.flt-check { width: 44px; }
+.payment-product-alerts-page .payment-alert-table th:nth-child(2) { width: 190px; }
+.payment-product-alerts-page .payment-alert-table th:nth-child(3) { width: 388px; }
+.payment-product-alerts-page .payment-alert-table th:nth-child(4) { width: 190px; }
+.payment-product-alerts-page .payment-alert-table th:nth-child(5) { width: 96px; }
+.payment-product-alerts-page .payment-alert-table th:nth-child(6) { width: auto; }
+.payment-product-alerts-page .payment-alert-table th:last-child { width: 145px; }
+
+.payment-product-alerts-page .payment-alert-scroll-table .payment-alert-table thead th {
+    position: sticky;
+    z-index: 4;
+}
+.payment-product-alerts-page .payment-alert-scroll-table .payment-alert-table thead th:first-child,
+.payment-product-alerts-page .payment-alert-scroll-table .payment-alert-table thead th:last-child { z-index: 6; }
+
+.payment-product-alerts-page .payment-alert-table tbody tr[data-selected="1"] > td {
+    background: #edf7fe;
+}
+
+.payment-product-alerts-page .payment-alert-table [data-alert-selection-cell] {
+    vertical-align: middle !important;
+    cursor: default;
+}
+
+.payment-product-alerts-page .payment-alert-actions-cell .flt-row-action {
+    padding-inline: 5px;
+    white-space: nowrap;
+}
+
+.payment-product-alerts-page .payment-alert-status-modal .modal-content,
+.payment-product-alerts-page .payment-alert-detail-modal .modal-content {
+    border: 1px solid #d4e3ef;
+    border-radius: 12px;
+    color: var(--flt-ink);
+    box-shadow: 0 22px 90px #17364c40;
+}
+
+.payment-product-alerts-page .payment-alert-status-modal .modal-header,
+.payment-product-alerts-page .payment-alert-detail-modal .modal-header {
+    background: #f6faff;
+    border-radius: 12px 12px 0 0;
+    border-bottom: 1px solid #e5edf5;
+}
+
+.payment-product-alerts-page .payment-alert-status-modal .modal-footer,
+.payment-product-alerts-page .payment-alert-detail-modal .modal-footer {
+    background: #fbfdff;
+    border-radius: 0 0 12px 12px;
+    border-top: 1px solid #e8eff5;
+}
+
+.payment-product-alerts-page .payment-alert-status-remark textarea {
+    min-height: 85px;
+    border: 1px solid #cfdeea;
+    border-radius: 5px;
+    color: var(--flt-ink);
+    resize: vertical;
+}
+
+.payment-product-alerts-page .payment-alert-status-modal .modal-footer .btn,
+.payment-product-alerts-page .payment-alert-detail-modal .modal-footer .btn {
+    min-height: 34px;
+    padding: 6px 14px;
+    border-radius: 5px;
+    font-size: 12px;
+}

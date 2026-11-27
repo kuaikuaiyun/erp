@@ -629,4 +629,11 @@ Route::post('/ai-product-reviews/{submission}/reject', [AiProductController::cla
 Route::get('auth/enterprise-logo/{file}', \App\Http\Controllers\LoginSiteLogoController::class)
     ->where('file', \App\Services\Authentication\LoginSiteLogo::FILE_PATTERN)->name('enterprise-login.logo');
 
+Route::get('auth/session-status', \App\Http\Controllers\SessionStatusController::class)->withoutMiddleware([
+    \Illuminate\Session\Middleware\StartSession::class,
+    \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+    \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+    \App\Http\Middleware\EnforceDingTalkSession::class,
+]);
+
 Route::fallback([PortalEntryController::class, 'fallback']);

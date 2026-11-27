@@ -348,7 +348,7 @@ class PaymentPortalController extends Controller
             'dashboard' => $this->productAlerts->dashboard(
                 $filters,
                 max(1, $request->integer('page', 1)),
-                in_array($request->integer('per_page', 50), [50, 100], true) ? $request->integer('per_page', 50) : 50,
+                in_array($request->integer('per_page', 50), [20, 50, 100], true) ? $request->integer('per_page', 50) : 50,
             ),
         ]);
     }
@@ -843,19 +843,24 @@ class PaymentPortalController extends Controller
     /** @return array<string,mixed> */
     private function productAlertFilters(Request $request): array
     {
-        $flowStatus = trim((string) $request->query('flow_status', 'open'));
-        $processingStatus = trim((string) $request->query('processing_status', ''));
-        $channel = trim((string) $request->query('channel', ''));
-        $severity = trim((string) $request->query('severity', ''));
-        $sample = trim((string) $request->query('sample', '50_500'));
+        $flowStatus = $request->query('flow_status', 'open');
+        $sample = $request->query('sample', '50_500');
+        $product = $request->query('product', '');
+
         return [
             'flow_status' => in_array($flowStatus, ['open', 'completed', 'all'], true) ? $flowStatus : 'open',
-            'processing_status' => in_array($processingStatus, ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'], true) ? $processingStatus : '',
-            'channel' => in_array($channel, ['paypal', 'credit_card'], true) ? $channel : '',
-            'severity' => in_array($severity, ['warning', 'critical'], true) ? $severity : '',
-            'sample' => in_array($sample, ['under_50', '50_500', 'over_500'], true) ? $sample : '50_500',
-            'product' => mb_substr(trim((string) $request->query('product', '')), 0, 191),
+            'processing_status' => $this->productAlertChoices($request->query('processing_status'), ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed']),
+            'channel' => $this->productAlertChoices($request->query('channel'), ['paypal', 'credit_card']),
+            'severity' => $this->productAlertChoices($request->query('severity'), ['warning', 'critical']),
+            'sample' => in_array($sample, ['all', 'under_50', '50_500', 'over_500'], true) ? $sample : '50_500',
+            'product' => is_string($product) ? mb_substr(trim($product), 0, 191) : '',
         ];
     }
 
+    private function productAlertChoices(mixed $input, array $allowed): array
+    {
+        $choices = array_map('trim', array_filter(is_array($input) ? $input : [$input], 'is_string'));
+
+        return array_values(array_intersect($allowed, $choices));
+    }
 }

@@ -11,7 +11,7 @@ use ZipStream\ZipStream;
 class StreamedXlsxWriter
 {
     /**
-     * @param list<array{label:string,width:float|int,headerFill?:string}> $columns
+     * @param list<array{label:string,width:float|int,headerFill?:string,group?:string}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
     public function response(
@@ -99,11 +99,21 @@ class StreamedXlsxWriter
         foreach ($columns as $index => $column) {
             $columnNames[$index] = $this->columnName($index + 1);
         }
+        $groups = [];
+        foreach ($columns as $index => $column) {
+            $label = $column['group'] ?? '';
+            if ($label !== '' && $label === ($columns[$index - 1]['group'] ?? '')) {
+                $groups[array_key_last($groups)]['end'] = $index;
+            } elseif ($label !== '') {
+                $groups[$index] = ['label' => $label, 'end' => $index];
+            }
+        }
+        $headerRow = $groups === [] ? 1 : 2;
         yield '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
         yield '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
         if (! $plain) {
             yield '<sheetViews><sheetView workbookViewId="0" showGridLines="'.($showGridlines ? '1' : '0').'">';
-            yield '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>';
+            yield '<pane ySplit="'.$headerRow.'" topLeftCell="A'.($headerRow + 1).'" activePane="bottomLeft" state="frozen"/>';
             yield '</sheetView></sheetViews>';
         }
         yield '<cols>';
@@ -114,16 +124,28 @@ class StreamedXlsxWriter
         }
         yield '</cols>';
 
-        yield $plain ? '<sheetData><row r="1">' : '<sheetData><row r="1" ht="26" customHeight="1">';
+        yield '<sheetData>';
+        $mergedRanges = [];
+        if ($groups !== []) {
+            yield '<row r="1" ht="24" customHeight="1">';
+            foreach ($groups as $start => $group) {
+                $fillIndex = array_search($columns[$start]['headerFill'] ?? '', $headerFills, true);
+                yield $this->stringCell($columnNames[$start].'1', $group['label'], $fillIndex === false ? 1 : 19 + $fillIndex);
+                if ($group['end'] > $start) {
+                    $mergedRanges[] = $columnNames[$start].'1:'.$columnNames[$group['end']].'1';
+                }
+            }
+            yield '</row>';
+        }
+        yield '<row r="'.$headerRow.'"'.($plain ? '' : ' ht="26" customHeight="1"').'>';
         foreach ($columns as $index => $column) {
             $fillIndex = array_search($column['headerFill'] ?? '', $headerFills, true);
             $style = $fillIndex === false ? ($plain ? 0 : 1) : 19 + $fillIndex;
-            yield $this->stringCell($columnNames[$index].'1', (string) $column['label'], $style);
+            yield $this->stringCell($columnNames[$index].$headerRow, (string) $column['label'], $style);
         }
         yield '</row>';
 
-        $rowNumber = 2;
-        $mergedRanges = [];
+        $rowNumber = $headerRow + 1;
         foreach (($rows)() as $row) {
             $kind = in_array(($row['kind'] ?? 'normal'), ['normal', 'parent', 'variant'], true)
                 ? (string) ($row['kind'] ?? 'normal')
@@ -166,11 +188,14 @@ class StreamedXlsxWriter
                     (string) ($cell['align'] ?? 'left'),
                     (bool) ($cell['wrap'] ?? false),
                 ));
+                if ($type === 'percentage') {
+                    $style = 21 + count($headerFills);
+                }
                 if ($protectSheet && ($cell['unlocked'] ?? false)) {
                     $style = 19 + count($headerFills) + ($type === 'datetime' ? 1 : 0);
                 }
                 $value = $cell['value'] ?? null;
-                if (in_array($type, ['money', 'rate', 'number', 'decimal', 'quantity', 'datetime'], true) && $value !== null && $value !== '' && is_numeric($value)) {
+                if (in_array($type, ['money', 'rate', 'percentage', 'number', 'decimal', 'quantity', 'datetime'], true) && $value !== null && $value !== '' && is_numeric($value)) {
                     $rowXml .= '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>';
                 } else {
                     $rowXml .= $this->stringCell($reference, $this->displayValue($value), $style);
@@ -186,6 +211,7 @@ class StreamedXlsxWriter
         if ($protectSheet) {
             yield '<sheetProtection sheet="1" autoFilter="0"/>';
         }
+        yield '<autoFilter ref="A'.$headerRow.':'.$lastColumn.$lastRow.'"/>';
         if ($mergedRanges !== []) {
             yield '<mergeCells count="'.count($mergedRanges).'">';
             foreach ($mergedRanges as $range) {
@@ -193,7 +219,6 @@ class StreamedXlsxWriter
             }
             yield '</mergeCells>';
         }
-        yield '<autoFilter ref="A1:'.$lastColumn.$lastRow.'"/>';
         yield '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>';
         yield '</worksheet>';
     }
@@ -415,7 +440,7 @@ class StreamedXlsxWriter
             .'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border><left/><right/><top style="thin"><color rgb="FFBDD8F1"/></top><bottom/><diagonal/></border></borders>'
             .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            .'<cellXfs count="'.(21 + count($headerFills)).'">'
+            .'<cellXfs count="'.(22 + count($headerFills)).'">'
             .$this->xf(0, 0, 0, 0, $alignLeft).$this->xf(0, 1, 2, 0, $alignCenter)
             .$this->xf(164, 0, 0, 0, $alignRight).$this->xf(165, 0, 0, 0, $alignRight)
             .$this->xf(0, 0, 0, 0, $alignWrap).$this->xf(0, 0, 0, 0, $alignCenter)
@@ -427,6 +452,7 @@ class StreamedXlsxWriter
             .$this->xf(168, 0, 0, 0, $alignRight).$extraStyles
             .'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection locked="0"/></xf>'
             .'<xf numFmtId="168" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyProtection="1"><protection locked="0"/></xf>'
+            .$this->xf(10, 0, 0, 0, $alignRight)
             .'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             .'</styleSheet>';
     }

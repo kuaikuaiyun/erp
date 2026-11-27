@@ -38,6 +38,8 @@ Ladmin\Admin::js('/assets/erp/admin-navigation.js?v=20260929-1');
 Ladmin\Admin::js('/assets/erp/portal-workspace.js?v=20261125-2');
 Ladmin\Admin::js('/assets/erp/portal-home-folders-20261106-1.js?v=20261106-2');
 Ladmin\Admin::js('/assets/erp/interaction-loading-20261011-1.js?v=20261012-1');
+Ladmin\Admin::css('/assets/erp/session-status.css?v=2');
+Ladmin\Admin::js('/assets/erp/session-status.js?v=2');
 // Feature scripts live outside the PJAX fragment in the admin layout.
 // Register once with the shell so the first sidebar visit can initialize them.
 Ladmin\Admin::js(asset('js/erp-account-labels.js').'?v=20261116-2');

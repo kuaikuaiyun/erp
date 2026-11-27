@@ -5,7 +5,7 @@
 .payment-account-risk-page .payment-account-filter-box .box-title { font-size: 13px; font-weight: 600; }
 .payment-account-risk-page .payment-account-filter-box .box-body { position: relative; padding: 13px 14px; border-radius: 7px; background: #fff; }
 
-.payment-account-filter-form { display: grid; grid-template-columns: minmax(250px, 1.08fr) minmax(250px, 1.12fr) minmax(180px, .86fr) minmax(150px, .72fr) minmax(150px, .72fr) minmax(175px, .82fr) auto; gap: 11px; align-items: end; }
+.payment-account-filter-form { display: grid; grid-template-columns: minmax(250px, 1.08fr) minmax(250px, 1.12fr) minmax(175px, .82fr) auto; gap: 11px; align-items: end; }
 .payment-account-filter-field { min-width: 0; margin: 0; }
 .payment-account-filter-field > span,
 .payment-account-filter-field > label { display: block; margin-bottom: 6px; color: #5e7891; font-size: 12px; font-weight: 600; }

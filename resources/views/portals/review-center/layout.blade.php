@@ -27,6 +27,8 @@
     <script>window.ErpInteractionLoadingConfig = @json(__('loading'));</script>
     @stack('styles')
     <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/plugins/jQuery/jQuery-2.1.4.min.js"></script>
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/session-status.css?v=2">
+    <script defer src="{{ $portalOrigin }}/assets/erp/session-status.js?v=2"></script>
 </head>
 <body class="hold-transition {{ config('admin.skin', 'skin-blue-light') }} {{ implode(' ', config('admin.layout', [])) }} portal-admin-shell @yield('body_class')">
 @php

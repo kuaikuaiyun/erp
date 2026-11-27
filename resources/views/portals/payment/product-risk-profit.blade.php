@@ -23,6 +23,8 @@
     }
     $metricErrors = collect($metricFields)->flatMap(fn ($field) => $errors->get($field));
     $exportFilters = array_intersect_key($filters, array_flip(['date_from', 'date_to', 'name', 'keyword', 'only_abnormal', 'sort', 'direction']));
+    $exportFilters['page'] = $pagination['current_page'];
+    $exportFilters['per_page'] = $pagination['per_page'];
     foreach ($filters['metric_ranges'] ?? [] as $metric => $bounds) {
         foreach ($bounds as $bound => $value) {
             $exportFilters[$metric.'_'.$bound] = $value;
@@ -167,7 +169,7 @@
 
     <div class="modal fade" id="payment-risk-export-modal" tabindex="-1" role="dialog" aria-labelledby="payment-risk-export-title">
         <div class="modal-dialog modal-sm" role="document">
-            <form class="modal-content" method="post" action="{{ route('payment.product-risk-profit.export-list') }}" data-payment-risk-export-form>
+            <form class="modal-content" method="post" action="{{ route('payment.product-risk-profit.export-list') }}" data-payment-risk-export-form data-loading="off">
                 @csrf
                 <div data-payment-risk-export-filters>
                     @foreach($exportFilters as $field => $value)

@@ -181,9 +181,9 @@ class PaymentProductAlertService
     }
 
     /** @return array<string,array<string,mixed>> */
-    public function metricsByProductKey(array $productKeys = [], array $filters = [], bool $usePaymentType = false): array
+    public function metricsByProductKey(array $productKeys = [], array $filters = [], bool $usePaymentType = false, bool $includeGlobalDisputeShare = true): array
     {
-        return $this->cachedMetricRows(false, $productKeys, $filters, $usePaymentType)->groupBy('product_key')->map(
+        return $this->cachedMetricRows(false, $productKeys, $filters, $usePaymentType, $includeGlobalDisputeShare)->groupBy('product_key')->map(
             fn (Collection $rows): array => $rows->keyBy('channel_type')->all()
         )->all();
     }
@@ -490,7 +490,7 @@ class PaymentProductAlertService
         return $productKeys === [] ? (object) [] : ($this->metricRows(false, $productKeys, acrossProducts: true, usePaymentType: $usePaymentType)->first() ?? (object) []);
     }
 
-    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $acrossProducts = false, bool $usePaymentType = false): Collection
+    private function metricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $acrossProducts = false, bool $usePaymentType = false, bool $includeGlobalDisputeShare = true): Collection
     {
         $database = $this->database();
         $productKey = $this->productKeyExpression('items');
@@ -604,7 +604,7 @@ class PaymentProductAlertService
             return $rows;
         }
 
-        $globalDisputeAmount = $this->globalInitialPayPalDisputeAmount($disputes, $usePaymentType);
+        $globalDisputeAmount = $includeGlobalDisputeShare ? $this->globalInitialPayPalDisputeAmount($disputes, $usePaymentType) : 0.0;
 
         return $rows->flatMap(function (object $row) use ($globalDisputeAmount, $onlyQualified): array {
             $eligibleOrders = (int) $row->paypal_order_count;
@@ -795,7 +795,7 @@ class PaymentProductAlertService
     }
 
     /** @return Collection<int,array<string,mixed>> */
-    private function cachedMetricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $usePaymentType = false): Collection
+    private function cachedMetricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = [], bool $usePaymentType = false, bool $includeGlobalDisputeShare = true): Collection
     {
         $productKeys = array_values(array_unique(array_filter(array_map(
             static fn (mixed $value): string => trim((string) $value),
@@ -814,11 +814,14 @@ class PaymentProductAlertService
             'products' => $productKeys,
             'filters' => $metricFilters,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        if (!$includeGlobalDisputeShare) {
+            $cacheKey .= ':without-global-dispute-share';
+        }
 
         $rows = Cache::flexible(
             $cacheKey,
             [self::METRIC_CACHE_SECONDS, self::METRIC_CACHE_STALE_SECONDS],
-            fn (): array => $this->metricRows($onlyQualified, $productKeys, $metricFilters, usePaymentType: $usePaymentType)->values()->all(),
+            fn (): array => $this->metricRows($onlyQualified, $productKeys, $metricFilters, usePaymentType: $usePaymentType, includeGlobalDisputeShare: $includeGlobalDisputeShare)->values()->all(),
         );
 
         return collect($rows);
@@ -884,20 +887,20 @@ class PaymentProductAlertService
     private function filterRows(Collection $alerts, array $filters): Collection
     {
         $flowStatus = trim((string) ($filters['flow_status'] ?? 'open'));
-        $processingStatus = trim((string) ($filters['processing_status'] ?? ''));
+        $processingStatuses = (array) ($filters['processing_status'] ?? []);
         $product = mb_strtolower(trim((string) ($filters['product'] ?? '')));
-        $channel = trim((string) ($filters['channel'] ?? ''));
-        $severity = trim((string) ($filters['severity'] ?? ''));
+        $channels = (array) ($filters['channel'] ?? []);
+        $severities = (array) ($filters['severity'] ?? []);
         $sample = trim((string) ($filters['sample'] ?? ''));
 
-        return $alerts->filter(function (array $row) use ($flowStatus, $processingStatus, $product, $channel, $severity, $sample): bool {
+        return $alerts->filter(function (array $row) use ($flowStatus, $processingStatuses, $product, $channels, $severities, $sample): bool {
             if ($flowStatus === 'open' && $row['workflow_status_key'] === 'completed') {
                 return false;
             }
             if ($flowStatus === 'completed' && $row['workflow_status_key'] !== 'completed') {
                 return false;
             }
-            if ($processingStatus !== '' && $row['status_key'] !== $processingStatus) {
+            if ($processingStatuses !== [] && !in_array($row['status_key'], $processingStatuses, true)) {
                 return false;
             }
             if ($product !== '') {
@@ -906,10 +909,10 @@ class PaymentProductAlertService
                     return false;
                 }
             }
-            if ($channel !== '' && ($row['channel_type'] ?? '') !== $channel) {
+            if ($channels !== [] && !in_array($row['channel_type'] ?? '', $channels, true)) {
                 return false;
             }
-            if ($severity !== '' && ($row['severity_key'] ?? '') !== $severity) {
+            if ($severities !== [] && !in_array($row['severity_key'] ?? '', $severities, true)) {
                 return false;
             }
             $count = (int) ($row['eligible_order_count'] ?? 0);
