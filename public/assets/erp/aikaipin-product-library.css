@@ -75,7 +75,7 @@
 }
 
 .aikaipin-product-table {
-    min-width: 1210px;
+    min-width: 1380px;
     margin-bottom: 0;
     table-layout: fixed;
     width: 100%;
@@ -110,6 +110,21 @@
 .aikaipin-source-column,
 .aikaipin-source-cell {
     width: 136px;
+}
+
+.aikaipin-creator-column,
+.aikaipin-creator-cell {
+    width: 126px;
+}
+
+.aikaipin-creator-name {
+    color: #43556c;
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .aikaipin-updated-column,
@@ -1779,6 +1794,382 @@
     margin-bottom: 16px;
 }
 
+.aikaipin-product-library-page .aikaipin-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0 0 16px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-card {
+    appearance: none;
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #e2eaf1;
+    border-left: 4px solid #3c8dbc;
+    border-radius: 8px;
+    box-shadow: 0 3px 12px rgba(42, 69, 91, .06);
+    min-width: 0;
+    padding: 15px 17px 14px;
+    text-decoration: none;
+    transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.aikaipin-stat-detail-dialog {
+    width: min(1180px, calc(100vw - 40px));
+    margin-top: 5vh;
+}
+
+.aikaipin-stat-detail-content {
+    border: 0;
+    border-radius: 12px;
+    box-shadow: 0 18px 55px rgba(24, 59, 86, .24);
+    overflow: hidden;
+}
+
+.aikaipin-stat-detail-header {
+    position: relative;
+    padding: 18px 22px;
+    border-bottom: 1px solid #dce8f0;
+    background: linear-gradient(135deg, #f7fbfe 0%, #edf7fd 100%);
+}
+
+.aikaipin-stat-detail-header .close {
+    position: absolute;
+    top: 13px;
+    right: 17px;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    border-radius: 50%;
+    color: #688297;
+    font-size: 25px;
+    line-height: 28px;
+    opacity: 1;
+    transition: background .18s ease, color .18s ease;
+}
+
+.aikaipin-stat-detail-header .close:hover {
+    background: #deedf6;
+    color: #255b7d;
+}
+
+.aikaipin-stat-detail-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-right: 40px;
+}
+
+.aikaipin-stat-detail-heading .modal-title {
+    color: #173f5d;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.aikaipin-stat-detail-icon {
+    display: inline-flex;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #3c9bd0, #287daf);
+    box-shadow: 0 6px 13px rgba(45, 139, 190, .22);
+    color: #fff;
+    font-size: 17px;
+}
+
+.aikaipin-stat-detail-subtitle {
+    margin: 5px 0 0;
+    color: #71889a;
+    font-size: 13px;
+}
+
+.aikaipin-stat-detail-body {
+    min-height: 220px;
+    max-height: 68vh;
+    overflow: auto;
+    padding: 18px 20px;
+    background: #f5f8fb;
+}
+
+.aikaipin-stat-detail-state,
+.aikaipin-stat-detail-empty {
+    min-height: 190px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    color: #6f8497;
+}
+
+.aikaipin-stat-detail-state[hidden],
+.aikaipin-stat-detail-empty[hidden],
+.aikaipin-stat-detail-table-wrap[hidden] {
+    display: none !important;
+}
+
+.aikaipin-stat-detail-empty {
+    flex-direction: column;
+}
+
+.aikaipin-stat-detail-empty .fa {
+    font-size: 30px;
+    color: #abc0d1;
+}
+
+.aikaipin-stat-detail-table-wrap {
+    margin: 0;
+    border: 1px solid #d9e6ef;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(42, 69, 91, .05);
+    overflow: auto;
+}
+
+.aikaipin-stat-detail-table {
+    margin: 0;
+    table-layout: fixed;
+    min-width: 920px;
+    border: 0;
+}
+
+.aikaipin-stat-detail-table > thead > tr > th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    height: 44px;
+    padding: 11px 12px;
+    background: #e7f2f9;
+    color: #295875;
+    border-color: #d5e3ec;
+    border-top: 0;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.aikaipin-stat-detail-table > tbody > tr:nth-child(even) > td {
+    background: #f6faff;
+}
+
+.aikaipin-stat-detail-table > tbody > tr:hover > td {
+    background: #edf7fd;
+}
+
+.aikaipin-stat-detail-table > tbody > tr > td {
+    height: 54px;
+    padding: 10px 12px;
+    vertical-align: middle;
+    border-color: #e0eaf1;
+    color: #3f5c71;
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.aikaipin-stat-detail-table .is-code,
+.aikaipin-stat-detail-table .is-time {
+    white-space: nowrap;
+}
+
+.aikaipin-stat-detail-table .is-code {
+    color: #1f6f9e;
+    font-weight: 700;
+}
+
+.aikaipin-stat-detail-table .is-product {
+    width: 22%;
+    font-weight: 600;
+    color: #174f78;
+}
+
+.aikaipin-stat-detail-table .is-sku {
+    width: 22%;
+    color: #536f85;
+}
+
+.aikaipin-stat-detail-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 13px 20px;
+    border-top: 1px solid #dce8f0;
+    background: #fff;
+}
+
+.aikaipin-stat-detail-pagination {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #5f778b;
+}
+
+.aikaipin-stat-detail-range {
+    color: #70889a;
+    font-size: 13px;
+}
+
+.aikaipin-stat-detail-page-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.aikaipin-stat-detail-page-button {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 12px;
+    border: 1px solid #cddde8;
+    border-radius: 5px;
+    background: #fff;
+    color: #356783;
+    font-size: 13px;
+    transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+
+.aikaipin-stat-detail-page-button:not(:disabled):hover {
+    border-color: #3c8dbc;
+    background: #edf7fd;
+    color: #1f6f9e;
+}
+
+.aikaipin-stat-detail-page-button:disabled {
+    border-color: #e4ebf0;
+    background: #f6f8fa;
+    color: #b3c0ca;
+    cursor: not-allowed;
+}
+
+.aikaipin-stat-detail-page {
+    display: inline-flex;
+    min-width: 84px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border: 1px solid #d4e2eb;
+    border-radius: 5px;
+    background: #f8fbfd;
+    color: #71889a;
+    text-align: center;
+}
+
+.aikaipin-stat-detail-page b {
+    color: #247daa;
+    font-size: 14px;
+}
+
+.aikaipin-stat-detail-close {
+    min-width: 68px;
+    border-color: #d0dde6;
+}
+
+@media (max-width: 767px) {
+    .aikaipin-stat-detail-dialog {
+        width: auto;
+        margin: 12px;
+    }
+
+    .aikaipin-stat-detail-body {
+        padding: 12px;
+    }
+
+    .aikaipin-stat-detail-footer,
+    .aikaipin-stat-detail-pagination {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .aikaipin-stat-detail-page-controls {
+        justify-content: space-between;
+    }
+}
+
+.aikaipin-product-library-page .aikaipin-stat-card:hover,
+.aikaipin-product-library-page .aikaipin-stat-card:focus {
+    border-color: #b8dcef;
+    box-shadow: 0 7px 18px rgba(42, 112, 153, .14);
+    outline: 0;
+    text-decoration: none;
+    transform: translateY(-2px);
+}
+
+.aikaipin-product-library-page .aikaipin-stat-heading {
+    align-items: center;
+    color: #526a7e;
+    display: flex;
+    font-size: 13px;
+    font-weight: 600;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-heading small {
+    color: #98a6b3;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-heading small .fa {
+    margin-left: 3px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-value {
+    color: #183b56;
+    display: block;
+    font-size: 27px;
+    line-height: 1.15;
+    margin-bottom: 10px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison {
+    align-items: center;
+    color: #8493a2;
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 5px 8px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison b {
+    border-radius: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-up {
+    background: #e8f7ef;
+    color: #169455;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-down {
+    background: #fff0ef;
+    color: #dd5148;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison .is-flat {
+    background: #f1f4f7;
+    color: #778694;
+}
+
+.aikaipin-product-library-page .aikaipin-stat-comparison small {
+    color: #9aa7b3;
+    margin-left: auto;
+}
+
 .aikaipin-product-library-page .aikaipin-filter-grid {
     display: grid;
     grid-template-columns: minmax(280px, 1.6fr) repeat(3, minmax(180px, 1fr));
@@ -1935,6 +2326,10 @@
 }
 
 @media (max-width: 1280px) {
+    .aikaipin-product-library-page .aikaipin-stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .aikaipin-product-library-page .aikaipin-filter-grid {
         grid-template-columns: repeat(2, minmax(220px, 1fr));
     }
@@ -1946,6 +2341,10 @@
     }
 
     .aikaipin-product-library-page .aikaipin-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .aikaipin-product-library-page .aikaipin-stat-grid {
         grid-template-columns: 1fr;
     }
 

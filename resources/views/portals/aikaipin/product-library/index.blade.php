@@ -98,12 +98,12 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261125-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-4">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261125-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261127-6"></script>
 @endpush
 
 @section('content')
@@ -146,6 +146,23 @@
                             @endforeach
                         </select>
                     </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-creator" class="flt-field-label">创建人</label>
+                        <select id="aikaipin-creator" name="creator_id" data-filter-searchable>
+                            <option value="">全部创建人</option>
+                            @foreach ($creatorOptions as $creator)
+                                <option value="{{ $creator['id'] }}" @selected($filters['creator_id'] === (string) $creator['id'])>{{ $creator['name'] }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-created-date" class="flt-field-label">创建日期</label>
+                        <input id="aikaipin-created-date" type="date" name="created_date" value="{{ $filters['created_date'] }}">
+                    </div>
+                    <div class="aikaipin-filter-field">
+                        <label for="aikaipin-created-month" class="flt-field-label">创建月份</label>
+                        <input id="aikaipin-created-month" type="month" name="created_month" value="{{ $filters['created_month'] }}">
+                    </div>
                     <div class="flt-filter-actions aikaipin-filter-actions">
                         <button class="flt-btn flt-primary" type="submit">
                             <i class="fa fa-search" aria-hidden="true"></i> {{ $t('filters.search') }}
@@ -157,7 +174,51 @@
                 </div>
     </form>
 
-    <div class="flt-card flt-records aikaipin-table-box">
+    @php
+        $creatorFilter = $filters['creator_id'] !== '' ? $filters['creator_id'] : null;
+        $statCards = [
+            ['type' => 'day_listings', 'label' => '日上架数量', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_listings']],
+            ['type' => 'day_products', 'label' => '日上品数', 'period' => $publicationStats['day_label'], 'comparison' => '较昨日', 'metric' => $publicationStats['day_products']],
+            ['type' => 'month_listings', 'label' => '月上架数量', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_listings']],
+            ['type' => 'month_products', 'label' => '月上品数', 'period' => $publicationStats['month_label'], 'comparison' => '较上月', 'metric' => $publicationStats['month_products']],
+        ];
+    @endphp
+    <div class="aikaipin-stat-grid" aria-label="产品上架统计">
+        @foreach ($statCards as $card)
+            @php
+                $metric = $card['metric'];
+            @endphp
+            @php
+                $detailUrl = route('aikaipin.product-library.stat-details', array_filter([
+                    'type' => $card['type'],
+                    'period' => $card['period'],
+                    'creator_id' => $creatorFilter,
+                ], static fn ($value) => $value !== null && $value !== ''));
+            @endphp
+            <button class="aikaipin-stat-card is-{{ $metric['direction'] }}" type="button"
+                data-aikaipin-stat-detail data-stat-detail-url="{{ $detailUrl }}"
+                title="点击查看{{ $card['label'] }}明细">
+                <div class="aikaipin-stat-heading">
+                    <span>{{ $card['label'] }}</span>
+                    <small>{{ $card['period'] }} <i class="fa fa-angle-right" aria-hidden="true"></i></small>
+                </div>
+                <strong class="aikaipin-stat-value">{{ number_format($metric['value']) }}</strong>
+                <div class="aikaipin-stat-comparison">
+                    <span>{{ $card['comparison'] }}</span>
+                    @if ($metric['direction'] === 'up')
+                        <b class="is-up"><i class="fa fa-arrow-up" aria-hidden="true"></i> 增长 {{ number_format($metric['percentage'], 1) }}%</b>
+                    @elseif ($metric['direction'] === 'down')
+                        <b class="is-down"><i class="fa fa-arrow-down" aria-hidden="true"></i> 减少 {{ number_format($metric['percentage'], 1) }}%</b>
+                    @else
+                        <b class="is-flat"><i class="fa fa-minus" aria-hidden="true"></i> 持平 0.0%</b>
+                    @endif
+                    <small>对比值 {{ number_format($metric['previous']) }}</small>
+                </div>
+            </button>
+        @endforeach
+    </div>
+
+    <div class="flt-card flt-records aikaipin-table-box" id="aikaipin-product-list">
         <div class="flt-toolbar aikaipin-list-toolbar">
             <div class="flt-selection aikaipin-list-toolbar-summary">
                     <i class="fa fa-cubes" aria-hidden="true"></i>
@@ -196,6 +257,7 @@
                         <th class="aikaipin-name-column">{{ $t('table.product_name_sku') }}</th>
                         <th class="aikaipin-category-column">{{ $t('table.category') }}</th>
                         <th class="aikaipin-source-column">{{ $t('table.source_type') }}</th>
+                        <th class="aikaipin-creator-column">{{ $t('table.creator') }}</th>
                         <th class="aikaipin-updated-column">{{ $t('table.updated_at') }}</th>
                         <th style="width:82px;text-align:center;">上架状态</th>
                         <th class="aikaipin-operation-column">{{ $t('table.operation') }}</th>
@@ -229,10 +291,14 @@
                             );
                             $referenceFile = $product->referenceFilePayload();
                             $packageFile = $product->packageFilePayload();
+                            $creatorName = trim((string) $product->created_by_name);
+                            if ($creatorName === '' && (int) $product->created_by > 0) {
+                                $creatorName = '用户 #'.(int) $product->created_by;
+                            }
                             $updatedAt = $product->updated_at?->copy()->timezone('Asia/Shanghai');
                         @endphp
                         <tr data-aikaipin-product
-                            data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus) }}"
+                            data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus.' '.$creatorName) }}"
                             data-source="{{ $product->source_platform }}"
                             data-type="{{ $product->product_type }}">
                             @if ($canManageProductLibrary)
@@ -299,6 +365,13 @@
                             <td class="aikaipin-source-cell">
                                 <span class="aikaipin-source">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}</span>
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
+                            </td>
+                            <td class="aikaipin-creator-cell">
+                                @if ($creatorName !== '')
+                                    <span class="aikaipin-creator-name" title="{{ $creatorName }}">{{ $creatorName }}</span>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $updatedAt?->toAtomString() }}" title="北京时间">{{ $updatedAt?->format('Y-m-d H:i') }}</time></td>
                             <td class="aikaipin-publication-cell">
@@ -398,6 +471,42 @@
         @endif
     </div>
 </section>
+
+<div id="aikaipin-stat-detail-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg aikaipin-stat-detail-dialog" role="document">
+        <div class="modal-content aikaipin-stat-detail-content">
+            <div class="modal-header aikaipin-stat-detail-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+                <div class="aikaipin-stat-detail-heading">
+                    <span class="aikaipin-stat-detail-icon" aria-hidden="true"><i class="fa fa-bar-chart"></i></span>
+                    <div>
+                        <h4 class="modal-title" data-aikaipin-stat-detail-title>统计明细</h4>
+                        <p class="aikaipin-stat-detail-subtitle" data-aikaipin-stat-detail-summary></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body aikaipin-stat-detail-body">
+                <div class="aikaipin-stat-detail-state" data-aikaipin-stat-detail-loading>
+                    <i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 正在加载明细...
+                </div>
+                <div class="alert alert-danger" hidden data-aikaipin-stat-detail-error></div>
+                <div class="table-responsive aikaipin-stat-detail-table-wrap" hidden data-aikaipin-stat-detail-table>
+                    <table class="table table-bordered table-hover aikaipin-stat-detail-table">
+                        <thead data-aikaipin-stat-detail-head></thead>
+                        <tbody data-aikaipin-stat-detail-body></tbody>
+                    </table>
+                </div>
+                <div class="aikaipin-stat-detail-empty" hidden data-aikaipin-stat-detail-empty>
+                    <i class="fa fa-inbox" aria-hidden="true"></i><span>当前统计范围暂无明细</span>
+                </div>
+            </div>
+            <div class="modal-footer aikaipin-stat-detail-footer">
+                <div class="aikaipin-stat-detail-pagination" data-aikaipin-stat-detail-pagination></div>
+                <button type="button" class="btn btn-default aikaipin-stat-detail-close" data-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="aikaipin-image-preview-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">

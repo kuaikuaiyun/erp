@@ -13,6 +13,16 @@
     var visibilityTitle = document.querySelector('[data-aikaipin-visibility-title]');
     var visibilityDescription = document.querySelector('[data-aikaipin-visibility-description]');
     var visibilityConfirm = document.querySelector('[data-aikaipin-visibility-confirm]');
+    var statDetailModal = document.getElementById('aikaipin-stat-detail-modal');
+    var statDetailTitle = document.querySelector('[data-aikaipin-stat-detail-title]');
+    var statDetailSummary = document.querySelector('[data-aikaipin-stat-detail-summary]');
+    var statDetailLoading = document.querySelector('[data-aikaipin-stat-detail-loading]');
+    var statDetailError = document.querySelector('[data-aikaipin-stat-detail-error]');
+    var statDetailTable = document.querySelector('[data-aikaipin-stat-detail-table]');
+    var statDetailHead = document.querySelector('[data-aikaipin-stat-detail-head]');
+    var statDetailBody = document.querySelector('[data-aikaipin-stat-detail-body]');
+    var statDetailEmpty = document.querySelector('[data-aikaipin-stat-detail-empty]');
+    var statDetailPagination = document.querySelector('[data-aikaipin-stat-detail-pagination]');
     var productDeleteModal = document.getElementById('aikaipin-product-delete-modal');
     var productDeleteTitle = document.querySelector('[data-aikaipin-product-delete-title]');
     var productDeleteDescription = document.querySelector('[data-aikaipin-product-delete-description]');
@@ -2174,6 +2184,116 @@
         });
     }
 
+    function statDetailCell(row, value, className) {
+        var cell = document.createElement('td');
+        if (className) cell.className = className;
+        cell.textContent = value === null || value === undefined || value === '' ? '—' : String(value);
+        row.appendChild(cell);
+    }
+
+    function renderStatDetail(payload) {
+        var pagination = payload.pagination || {};
+        var isListings = payload.kind === 'listings';
+        var headers = isListings
+            ? ['产品编号', '产品信息', 'SKU', '创建人', '上架人', '上架店铺', '上架时间']
+            : ['产品编号', '产品信息', 'SKU', '创建人', '创建时间'];
+
+        statDetailTitle.textContent = payload.title || '统计明细';
+        statDetailSummary.textContent = (payload.period || '') + ' · 共 ' + (pagination.total || 0) + ' 条记录';
+        statDetailHead.innerHTML = '';
+        statDetailBody.innerHTML = '';
+        statDetailPagination.innerHTML = '';
+
+        var headerRow = document.createElement('tr');
+        headers.forEach(function (header) {
+            var th = document.createElement('th');
+            th.textContent = header;
+            headerRow.appendChild(th);
+        });
+        statDetailHead.appendChild(headerRow);
+
+        (payload.items || []).forEach(function (item) {
+            var row = document.createElement('tr');
+            statDetailCell(row, item.product_code, 'is-code');
+            statDetailCell(row, item.product_name, 'is-product');
+            statDetailCell(row, item.sku, 'is-sku');
+            statDetailCell(row, item.creator);
+            if (isListings) {
+                statDetailCell(row, item.publisher);
+                statDetailCell(row, [item.store_name, item.domain].filter(function (value) { return value && value !== '—'; }).join(' · '));
+            }
+            statDetailCell(row, item.occurred_at, 'is-time');
+            statDetailBody.appendChild(row);
+        });
+
+        var hasItems = (payload.items || []).length > 0;
+        statDetailTable.hidden = !hasItems;
+        statDetailEmpty.hidden = hasItems;
+        statDetailLoading.hidden = true;
+        statDetailError.hidden = true;
+
+        var range = document.createElement('div');
+        range.className = 'aikaipin-stat-detail-range';
+        range.textContent = pagination.total
+            ? '显示 ' + pagination.from + '-' + pagination.to + ' 条，共 ' + pagination.total + ' 条'
+            : '共 0 条';
+        statDetailPagination.appendChild(range);
+
+        var controls = document.createElement('div');
+        controls.className = 'aikaipin-stat-detail-page-controls';
+
+        var previous = document.createElement('button');
+        previous.type = 'button';
+        previous.className = 'aikaipin-stat-detail-page-button';
+        previous.innerHTML = '<i class="fa fa-angle-left" aria-hidden="true"></i><span>上一页</span>';
+        previous.disabled = !pagination.prev_page_url;
+        if (pagination.prev_page_url) previous.setAttribute('data-aikaipin-stat-detail-page', pagination.prev_page_url);
+        controls.appendChild(previous);
+
+        var page = document.createElement('span');
+        page.className = 'aikaipin-stat-detail-page';
+        page.innerHTML = '<b>' + (pagination.current_page || 1) + '</b><span>/</span><span>' + (pagination.last_page || 1) + ' 页</span>';
+        controls.appendChild(page);
+
+        var next = document.createElement('button');
+        next.type = 'button';
+        next.className = 'aikaipin-stat-detail-page-button';
+        next.innerHTML = '<span>下一页</span><i class="fa fa-angle-right" aria-hidden="true"></i>';
+        next.disabled = !pagination.next_page_url;
+        if (pagination.next_page_url) next.setAttribute('data-aikaipin-stat-detail-page', pagination.next_page_url);
+        controls.appendChild(next);
+        statDetailPagination.appendChild(controls);
+    }
+
+    function loadStatDetail(url) {
+        if (!url) return;
+        statDetailLoading.hidden = false;
+        statDetailError.hidden = true;
+        statDetailTable.hidden = true;
+        statDetailEmpty.hidden = true;
+        statDetailPagination.innerHTML = '';
+
+        window.fetch(url, {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (response) {
+            if (!response.ok) throw new Error('明细加载失败，请稍后重试。');
+            return response.json();
+        }).then(renderStatDetail).catch(function (error) {
+            statDetailLoading.hidden = true;
+            statDetailError.hidden = false;
+            statDetailError.textContent = error && error.message ? error.message : '明细加载失败，请稍后重试。';
+        });
+    }
+
+    function openStatDetail(button) {
+        if (!statDetailModal) return;
+        statDetailTitle.textContent = '统计明细';
+        statDetailSummary.textContent = '';
+        window.jQuery(statDetailModal).modal('show');
+        loadStatDetail(button.getAttribute('data-stat-detail-url'));
+    }
+
     document.addEventListener('change', function (event) {
         if (event.target.matches('[data-aikaipin-product-select]')) {
             refreshSelection();
@@ -2185,6 +2305,20 @@
     });
 
     document.addEventListener('click', function (event) {
+        var statDetailButton = event.target.closest('[data-aikaipin-stat-detail]');
+        if (statDetailButton) {
+            event.preventDefault();
+            openStatDetail(statDetailButton);
+            return;
+        }
+
+        var statDetailPage = event.target.closest('[data-aikaipin-stat-detail-page]');
+        if (statDetailPage && !statDetailPage.disabled) {
+            event.preventDefault();
+            loadStatDetail(statDetailPage.getAttribute('data-aikaipin-stat-detail-page'));
+            return;
+        }
+
         var imagePreviewButton = event.target.closest('[data-aikaipin-preview-image]');
         if (imagePreviewButton) {
             openImagePreview(imagePreviewButton);

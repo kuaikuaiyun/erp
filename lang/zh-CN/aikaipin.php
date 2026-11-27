@@ -61,6 +61,7 @@ return [
         'product_name_sku' => '产品名称 / SKU',
         'category' => '产品分类',
         'source_type' => '来源平台 / 类型',
+        'creator' => '创建人',
         'landing_page' => '落地页链接',
         'reference_page' => '参考页面',
         'updated_at' => '更新时间',

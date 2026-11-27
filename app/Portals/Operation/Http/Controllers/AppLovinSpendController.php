@@ -33,21 +33,29 @@ class AppLovinSpendController extends Controller
         if ($context instanceof Response) return $context;
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
         $user = $context['user'];
+        if ($request->has('attachment_status')) {
+            $request->merge(['attachment_status' => (array) $request->input('attachment_status')]);
+        }
         $filters = $request->validate([
             'over_threshold' => ['nullable', 'in:1'],
             'min_spend' => ['nullable', 'numeric', 'min:0'],
             'max_spend' => ['nullable', 'numeric', 'min:0'],
             'risk_status' => ['nullable', 'in:filled,empty'],
+            'agency' => ['nullable', 'string', 'max:191'],
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
             'department_id' => ['nullable', 'integer'],
             'operator_id' => ['nullable', 'integer'],
-            'attachment_status' => ['nullable', 'in:1,0,unset'],
+            'attachment_status' => ['nullable', 'array'],
+            'attachment_status.*' => ['string', 'distinct', 'in:1,0,unset'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $reports = $this->reportsFor($user)->orderBy('report_date')->get();
 
         $accounts = $this->withScreenshots($this->summarize($reports));
+        $agencyOptions = $accounts->pluck('agency')->map(fn ($agency): string => trim((string) $agency))
+            ->filter()->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values();
+        $agency = trim((string) ($filters['agency'] ?? ''));
         $departmentId = (int) ($filters['department_id'] ?? 0);
         $operatorId = (int) ($filters['operator_id'] ?? 0);
         $departments = $accounts->filter(fn (array $account) => ! empty($account['operation_department_id']))
@@ -58,6 +66,7 @@ class AppLovinSpendController extends Controller
             ->sort();
         if ($departmentId) $accounts = $accounts->where('operation_department_id', $departmentId)->values();
         if ($operatorId) $accounts = $accounts->where('operator_user_id', $operatorId)->values();
+        if ($agency !== '') $accounts = $accounts->filter(fn (array $account): bool => trim((string) $account['agency']) === $agency)->values();
         if (($filters['over_threshold'] ?? '') === '1') $accounts = $accounts->where('total', '>=', 5000)->values();
         $minSpend = array_key_exists('min_spend', $filters) && $filters['min_spend'] !== null
             ? (float) $filters['min_spend'] : null;
@@ -78,16 +87,19 @@ class AppLovinSpendController extends Controller
                 ? trim((string) $account['risk_factors']) !== ''
                 : trim((string) $account['risk_factors']) === '')->values();
         }
-        $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
-        if ($attachmentStatus !== '') $accounts = $accounts->filter(fn (array $account) => $attachmentStatus === 'unset'
-            ? $account['is_attached'] === null : $account['is_attached'] === ($attachmentStatus === '1'))->values();
+        $attachmentStatuses = array_values($filters['attachment_status'] ?? []);
+        if ($attachmentStatuses !== []) $accounts = $accounts->filter(fn (array $account): bool =>
+            ($account['is_attached'] === null && in_array('unset', $attachmentStatuses, true))
+            || ($account['is_attached'] === true && in_array('1', $attachmentStatuses, true))
+            || ($account['is_attached'] === false && in_array('0', $attachmentStatuses, true))
+        )->values();
         return view('portals.operation.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'accounts' => $this->paginate($accounts, $request), 'threshold' => 5000, 'overThreshold' => $filters['over_threshold'] ?? '',
-            'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'riskStatus' => $riskStatus,
+            'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'riskStatus' => $riskStatus, 'agency' => $agency, 'agencyOptions' => $agencyOptions,
             'accountName' => $accountName, 'accountNumber' => $accountNumber,
             'departments' => $departments, 'operators' => $operators,
-            'departmentId' => $departmentId, 'operatorId' => $operatorId, 'attachmentStatus' => $attachmentStatus,
+            'departmentId' => $departmentId, 'operatorId' => $operatorId, 'attachmentStatuses' => $attachmentStatuses,
         ]);
     }
 

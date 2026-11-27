@@ -54,8 +54,12 @@ class AppLovinSpendReviewController extends Controller
         $allowedDepartmentIds = $context['user']->isAdministrator()
             ? Department::business()->pluck('id')->map(fn ($id): int => (int) $id)->all()
             : $visibleIds;
+        if ($request->has('attachment_status')) {
+            $request->merge(['attachment_status' => (array) $request->input('attachment_status')]);
+        }
         $filters = $request->validate([
             'operator' => ['nullable', 'string', 'max:100'],
+            'agency' => ['nullable', 'string', 'max:191'],
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($allowedDepartmentIds)],
             'over_threshold' => ['nullable', 'in:1'],
@@ -63,8 +67,10 @@ class AppLovinSpendReviewController extends Controller
             'max_spend' => ['nullable', 'numeric', 'min:0'],
             'billing_status' => ['nullable', Rule::in(['filled', 'empty'])],
             'risk_status' => ['nullable', Rule::in(['filled', 'empty'])],
+            'binding_status' => ['nullable', Rule::in(['bound', 'unbound'])],
             'account_number' => ['nullable', 'string', 'max:191'],
-            'attachment_status' => ['nullable', Rule::in(['1', '0', 'unset'])],
+            'attachment_status' => ['nullable', 'array'],
+            'attachment_status.*' => ['string', 'distinct', Rule::in(['1', '0', 'unset'])],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
@@ -119,6 +125,8 @@ class AppLovinSpendReviewController extends Controller
                         'media_source' => (string) $entry->media,
                         'account_name' => (string) $entry->account_name,
                         'account_number' => (string) $entry->account_number,
+                        'assistant_domain_store_id' => $entry->assistant_domain_store_id ? (int) $entry->assistant_domain_store_id : null,
+                        'store_domain' => (string) ($entry->store_domain ?: ''),
                         'actual_spend' => (float) $entry->actual_spend_usd,
                         'report_id' => $report->getKey(),
                         'date' => $report->report_date->format('Y-m-d'),
@@ -212,6 +220,13 @@ class AppLovinSpendReviewController extends Controller
                     'details' => $ordered,
                 ];
             })->sortByDesc('total')->values();
+        $agencyOptions = $accounts->pluck('agency')
+            ->map(fn ($agency): string => trim((string) $agency))
+            ->filter()->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values();
+        $agency = trim((string) ($filters['agency'] ?? ''));
+        if ($agency !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => trim((string) $account['agency']) === $agency)->values();
+        }
         if ($selectedDepartmentIds !== []) {
             $accounts = $accounts->filter(fn (array $account): bool => collect($account['department_ids'])
                 ->intersect($selectedDepartmentIds)->isNotEmpty())->values();
@@ -246,10 +261,26 @@ class AppLovinSpendReviewController extends Controller
 
         $allAccountKeys = $accounts->pluck('account_keys')->flatten()->unique()->values();
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
-        $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
         $accountNumbers = $accounts->pluck('account_number')
             ->map(fn ($number) => AppLovinAccountRiskNote::normalizeAccountNumber((string) $number))
             ->filter()->unique()->values();
+        $bindings = $allAccountKeys->isEmpty() && $accountNumbers->isEmpty()
+            ? collect()
+            : AppLovinAccountStoreBinding::query()
+                ->where(function ($query) use ($allAccountKeys, $accountNumbers): void {
+                    if ($allAccountKeys->isNotEmpty()) {
+                        $query->whereIn('account_key', $allAccountKeys);
+                    }
+                    if ($accountNumbers->isNotEmpty()) {
+                        $method = $allAccountKeys->isNotEmpty() ? 'orWhereIn' : 'whereIn';
+                        $query->{$method}('account_number', $accountNumbers);
+                    }
+                })
+                ->orderBy('updated_at')
+                ->get();
+        $bindingsByKey = $bindings->keyBy('account_key');
+        $bindingsByNumber = $bindings->filter(fn (AppLovinAccountStoreBinding $binding): bool => trim((string) $binding->account_number) !== '')
+            ->keyBy(fn (AppLovinAccountStoreBinding $binding): string => AppLovinAccountRiskNote::normalizeAccountNumber((string) $binding->account_number));
         $riskNotes = AppLovinAccountRiskNote::query()
             ->whereIn('account_number', $accountNumbers)
             ->get()->keyBy('account_number');
@@ -275,11 +306,22 @@ class AppLovinSpendReviewController extends Controller
                 ->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
             $store->setAttribute('eligible_owner_ids', $ownerIds);
         });
-        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindings, $riskNotes, $isDashboard): array {
+        $accounts = $accounts->map(function (array $account) use ($screenshots, $bindingsByKey, $bindingsByNumber, $riskNotes, $isDashboard): array {
             $screenshot = $account['account_keys']->map(fn ($key) => $screenshots->get($key))->filter()
                 ->sortByDesc(fn (AppLovinSpendScreenshot $item) => $item->updated_at?->getTimestamp() ?? 0)->first();
-            $binding = $account['account_keys']->map(fn ($key) => $bindings->get($key))->filter()->first();
             $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
+            $binding = $bindingsByNumber->get($number)
+                ?: $account['account_keys']->map(fn ($key) => $bindingsByKey->get($key))->filter()->first();
+            if (! $binding) {
+                $fallbackStoreId = (int) collect($account['details'])
+                    ->pluck('assistant_domain_store_id')->filter()->last();
+                if ($fallbackStoreId > 0) {
+                    $binding = new AppLovinAccountStoreBinding([
+                        'account_number' => $number,
+                        'assistant_domain_store_id' => $fallbackStoreId,
+                    ]);
+                }
+            }
             $note = $riskNotes->get($number);
 
             return [
@@ -293,6 +335,12 @@ class AppLovinSpendReviewController extends Controller
                 'is_attached' => $note?->is_attached,
             ];
         });
+        $bindingStatus = (string) ($filters['binding_status'] ?? '');
+        if ($bindingStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $bindingStatus === 'bound'
+                ? (int) optional($account['store_binding'])->assistant_domain_store_id > 0
+                : (int) optional($account['store_binding'])->assistant_domain_store_id === 0)->values();
+        }
         $billingStatus = (string) ($filters['billing_status'] ?? '');
         if (! $isDashboard && $billingStatus !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => $billingStatus === 'filled'
@@ -305,11 +353,13 @@ class AppLovinSpendReviewController extends Controller
                 ? trim((string) $account['risk_factors']) !== ''
                 : trim((string) $account['risk_factors']) === '')->values();
         }
-        $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
-        if ($attachmentStatus !== '') {
-            $accounts = $accounts->filter(fn (array $account): bool => $attachmentStatus === 'unset'
-                ? $account['is_attached'] === null
-                : $account['is_attached'] === ($attachmentStatus === '1'))->values();
+        $attachmentStatuses = array_values($filters['attachment_status'] ?? []);
+        if ($attachmentStatuses !== []) {
+            $accounts = $accounts->filter(fn (array $account): bool =>
+                ($account['is_attached'] === null && in_array('unset', $attachmentStatuses, true))
+                || ($account['is_attached'] === true && in_array('1', $attachmentStatuses, true))
+                || ($account['is_attached'] === false && in_array('0', $attachmentStatuses, true))
+            )->values();
         }
         $page = max(1, (int) $request->query('page', 1));
         $perPage = (int) ($filters['per_page'] ?? 20);
@@ -319,7 +369,7 @@ class AppLovinSpendReviewController extends Controller
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'billingStatus' => $billingStatus, 'riskStatus' => $riskStatus, 'accountNumber' => $accountNumber, 'attachmentStatus' => $attachmentStatus, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $operator, 'agency' => $agency, 'agencyOptions' => $agencyOptions, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'billingStatus' => $billingStatus, 'riskStatus' => $riskStatus, 'bindingStatus' => $bindingStatus, 'accountNumber' => $accountNumber, 'attachmentStatuses' => $attachmentStatuses, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',
@@ -388,14 +438,18 @@ class AppLovinSpendReviewController extends Controller
         }
         $validated = $request->validate([
             'account_key' => ['required', 'string', 'size:64'],
+            'account_number' => ['required', 'string', 'max:191'],
             'store_id' => ['nullable', 'integer', Rule::exists((new AssistantDomainStore)->getTable(), 'id')],
         ]);
+        $requestedNumber = AppLovinAccountStoreBindingService::normalizeAccountNumber((string) $validated['account_number']);
+        abort_if($requestedNumber === '', 422, '账号编号不能为空。');
 
         $visibleIds = $isDashboard
             ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $account = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED)
             ->when($isDashboard || ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds))
+            ->where('advertising_rows', 'like', '%'.$requestedNumber.'%')
             ->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->map(function (array $row) use ($report): array {
                 return [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->operator_user_id, (string) ($row['agency'] ?? ''), (string) ($row['media_source'] ?? ''), (string) ($row['account_name'] ?? ''), (string) ($row['account_number'] ?? '')),
@@ -403,10 +457,15 @@ class AppLovinSpendReviewController extends Controller
                     'account_number' => (string) ($row['account_number'] ?? ''),
                     'media' => mb_strtolower(trim((string) ($row['media_source'] ?? ''))),
                 ];
-            }))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
+            }))->first(fn (array $row) => $row['media'] === 'applovin'
+                && AppLovinAccountStoreBindingService::normalizeAccountNumber((string) $row['account_number']) === $requestedNumber
+                && hash_equals($row['account_key'], $validated['account_key']));
         if (! $account) {
             $account = FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
                 ->with(['adSpendEntries', 'submitter.departments'])
+                ->whereHas('adSpendEntries', fn ($query) => $query
+                    ->whereRaw("LOWER(TRIM(media)) = 'applovin'")
+                    ->whereRaw('LOWER(TRIM(account_number)) = ?', [$requestedNumber]))
                 ->when($isDashboard || ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === []
                     ? $query->whereRaw('1=0')
                     : $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereIn('admin_roles.id', $visibleIds)))
@@ -415,7 +474,9 @@ class AppLovinSpendReviewController extends Controller
                     'operator_user_id' => (int) $report->submitter_id,
                     'account_number' => (string) $entry->account_number,
                     'media' => mb_strtolower(trim((string) $entry->media)),
-                ]))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
+                ]))->first(fn (array $row) => $row['media'] === 'applovin'
+                    && AppLovinAccountStoreBindingService::normalizeAccountNumber((string) $row['account_number']) === $requestedNumber
+                    && hash_equals($row['account_key'], $validated['account_key']));
         }
         abort_unless($account, 403);
 

@@ -36,6 +36,7 @@ return [
         'product_name_sku' => 'Product name / SKU',
         'category' => 'Category',
         'source_type' => 'Source / Type',
+        'creator' => 'Creator',
         'landing_page' => 'Landing page',
         'reference_page' => 'Reference page',
         'updated_at' => 'Updated at',
