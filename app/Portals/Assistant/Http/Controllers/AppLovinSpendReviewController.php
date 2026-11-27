@@ -59,6 +59,10 @@ class AppLovinSpendReviewController extends Controller
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($allowedDepartmentIds)],
             'over_threshold' => ['nullable', 'in:1'],
+            'min_spend' => ['nullable', 'numeric', 'min:0'],
+            'max_spend' => ['nullable', 'numeric', 'min:0'],
+            'billing_status' => ['nullable', Rule::in(['filled', 'empty'])],
+            'risk_status' => ['nullable', Rule::in(['filled', 'empty'])],
             'account_number' => ['nullable', 'string', 'max:191'],
             'attachment_status' => ['nullable', Rule::in(['1', '0', 'unset'])],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
@@ -220,6 +224,19 @@ class AppLovinSpendReviewController extends Controller
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', 5000)->values();
         }
+        $minSpend = array_key_exists('min_spend', $filters) && $filters['min_spend'] !== null
+            ? (float) $filters['min_spend'] : null;
+        $maxSpend = array_key_exists('max_spend', $filters) && $filters['max_spend'] !== null
+            ? (float) $filters['max_spend'] : null;
+        if ($minSpend !== null && $maxSpend !== null && $minSpend > $maxSpend) {
+            [$minSpend, $maxSpend] = [$maxSpend, $minSpend];
+        }
+        if ($minSpend !== null) {
+            $accounts = $accounts->where('total', '>=', $minSpend)->values();
+        }
+        if ($maxSpend !== null) {
+            $accounts = $accounts->where('total', '<=', $maxSpend)->values();
+        }
         if ($accountNumber !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => str_contains(
                 mb_strtolower((string) ($account['account_number'] ?? '')),
@@ -276,6 +293,18 @@ class AppLovinSpendReviewController extends Controller
                 'is_attached' => $note?->is_attached,
             ];
         });
+        $billingStatus = (string) ($filters['billing_status'] ?? '');
+        if (! $isDashboard && $billingStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $billingStatus === 'filled'
+                ? trim((string) $account['account_status_note']) !== ''
+                : trim((string) $account['account_status_note']) === '')->values();
+        }
+        $riskStatus = (string) ($filters['risk_status'] ?? '');
+        if ($riskStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $riskStatus === 'filled'
+                ? trim((string) $account['risk_factors']) !== ''
+                : trim((string) $account['risk_factors']) === '')->values();
+        }
         $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
         if ($attachmentStatus !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => $attachmentStatus === 'unset'
@@ -290,7 +319,7 @@ class AppLovinSpendReviewController extends Controller
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'attachmentStatus' => $attachmentStatus, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $operator, 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'minSpend' => $minSpend, 'maxSpend' => $maxSpend, 'billingStatus' => $billingStatus, 'riskStatus' => $riskStatus, 'accountNumber' => $accountNumber, 'attachmentStatus' => $attachmentStatus, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',

@@ -39,6 +39,9 @@ class AppLovinSpendController extends Controller
 
         $filters = $request->validate([
             'over_threshold' => ['nullable', 'in:1'],
+            'min_spend' => ['nullable', 'numeric', 'min:0'],
+            'max_spend' => ['nullable', 'numeric', 'min:0'],
+            'risk_status' => ['nullable', 'in:filled,empty'],
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
             'department_id' => ['nullable', 'integer'],
@@ -63,6 +66,19 @@ class AppLovinSpendController extends Controller
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', self::GIFT_THRESHOLD)->values();
         }
+        $minSpend = array_key_exists('min_spend', $filters) && $filters['min_spend'] !== null
+            ? (float) $filters['min_spend'] : null;
+        $maxSpend = array_key_exists('max_spend', $filters) && $filters['max_spend'] !== null
+            ? (float) $filters['max_spend'] : null;
+        if ($minSpend !== null && $maxSpend !== null && $minSpend > $maxSpend) {
+            [$minSpend, $maxSpend] = [$maxSpend, $minSpend];
+        }
+        if ($minSpend !== null) {
+            $accounts = $accounts->where('total', '>=', $minSpend)->values();
+        }
+        if ($maxSpend !== null) {
+            $accounts = $accounts->where('total', '<=', $maxSpend)->values();
+        }
         $accountName = trim((string) ($filters['account_name'] ?? ''));
         $accountNumber = trim((string) ($filters['account_number'] ?? ''));
         if ($accountName !== '') {
@@ -70,6 +86,12 @@ class AppLovinSpendController extends Controller
         }
         if ($accountNumber !== '') {
             $accounts = $accounts->filter(fn (array $account): bool => mb_stripos((string) $account['account_number'], $accountNumber) !== false)->values();
+        }
+        $riskStatus = (string) ($filters['risk_status'] ?? '');
+        if ($riskStatus !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => $riskStatus === 'filled'
+                ? trim((string) $account['risk_factors']) !== ''
+                : trim((string) $account['risk_factors']) === '')->values();
         }
         $attachmentStatus = (string) ($filters['attachment_status'] ?? '');
         if ($attachmentStatus !== '') {
@@ -83,6 +105,9 @@ class AppLovinSpendController extends Controller
             'accounts' => $this->paginate($accounts, $request),
             'threshold' => self::GIFT_THRESHOLD,
             'overThreshold' => $filters['over_threshold'] ?? '',
+            'minSpend' => $minSpend,
+            'maxSpend' => $maxSpend,
+            'riskStatus' => $riskStatus,
             'accountName' => $accountName,
             'accountNumber' => $accountNumber,
             'departments' => $departments,

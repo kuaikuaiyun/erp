@@ -21,7 +21,7 @@ class AccountStoreTransferReviewController extends Controller
     public function index(Request $request):Response|View
     {
         $context=$this->context($request);if($context instanceof Response)return $context;
-        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer'],'status'=>['nullable','in:pending,processing,processed,rejected'],'operator'=>['nullable','string','max:100'],'per_page'=>['nullable','integer','in:20,50,100']]);
+        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer,reset_appeal'],'status'=>['nullable','in:pending,processing,processed,rejected'],'operator'=>['nullable','string','max:100'],'per_page'=>['nullable','integer','in:20,50,100']]);
         $query=DailyAccountStoreTransfer::query();$all=$this->storeOwners->boundBusinessDepartments();$visible=null;
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null){$visible===[]?$query->whereRaw('1=0'):$query->whereIn('operation_department_id',$visible);}
         $departments=$visible===null?$all:$all->whereIn('id',$visible)->values();

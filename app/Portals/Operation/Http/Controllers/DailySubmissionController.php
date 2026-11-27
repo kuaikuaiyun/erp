@@ -306,7 +306,11 @@ class DailySubmissionController extends Controller
         $targetType = (string) $request->input('target_type');
         $actionType = (string) $request->input('action_type');
         $data = $request->validate([
-            'target_type' => ['required', Rule::in(['account', 'store'])], 'action_type' => ['required', Rule::in(['discard', 'transfer'])],
+            'target_type' => ['required', Rule::in(['account', 'store'])], 'action_type' => ['required', Rule::in([
+                DailyAccountStoreTransfer::ACTION_DISCARD,
+                DailyAccountStoreTransfer::ACTION_TRANSFER,
+                DailyAccountStoreTransfer::ACTION_RESET_APPEAL,
+            ])],
             'reason' => ['required', 'string', 'max:2000'],
             'reason_images' => ['nullable', 'array', 'max:5'],
             'reason_images.*' => ['image', 'mimes:jpg,jpeg,png,webp,gif', 'max:10240'],
@@ -316,7 +320,11 @@ class DailySubmissionController extends Controller
             'project_id' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'integer', Rule::in($projects->keys()->all())],
             'website_system_id' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'integer', Rule::in($systems->keys()->all())],
             'store_domain' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'string', 'max:255'],
-        ], ['reason.required' => $actionType === 'transfer' ? '请填写转让理由。' : '请填写弃用理由。']);
+        ], ['reason.required' => match ($actionType) {
+            DailyAccountStoreTransfer::ACTION_TRANSFER => '请填写转让理由。',
+            DailyAccountStoreTransfer::ACTION_RESET_APPEAL => '请填写清零申诉理由。',
+            default => '请填写弃用理由。',
+        }]);
         $agency = $targetType === 'account' ? $agencies->get((int) $data['agency_id']) : null;
         $project = $targetType === 'store' ? $projects->get((int) $data['project_id']) : null;
         $system = $targetType === 'store' ? $systems->get((int) $data['website_system_id']) : null;
