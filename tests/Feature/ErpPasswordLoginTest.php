@@ -68,7 +68,7 @@ class ErpPasswordLoginTest extends TestCase
         $login = 'http://a.test/kky/auth/login';
         $options = 'http://a.test/kky/auth/tencent-captcha/options';
         $this->get($login)->assertOk()->assertSessionHas('_previous.url', $login)
-            ->assertSee('已接入腾讯云天御安全验证，请按页面提示完成腾讯验证码验证。')
+            ->assertSee('腾讯云天御验证码 · 安全守护')
             ->assertDontSee('login-captcha__heading', false);
         $this->get($options, ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'])
             ->assertOk()->assertSessionHas('_previous.url', $login);

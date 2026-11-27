@@ -34,7 +34,7 @@
                     @endforeach
                 </select></div>
                 <div class="form-group"><label for="hr-status">{{ __('asset_accounts.status') }}</label><select id="hr-status" class="form-control" name="status"><option value="">{{ __('asset_accounts.all') }}</option><option value="1" @selected((string)($filters['status']??'')==='1')>{{ __('asset_accounts.enabled') }}</option><option value="0" @selected((string)($filters['status']??'')==='0')>{{ __('asset_accounts.disabled') }}</option></select></div>
-                <div class="form-group"><label for="hr-size">{{ __('asset_accounts.per_page') }}</label><select id="hr-size" class="form-control" name="per_page">
+                <div class="form-group"><label for="hr-size">{{ __('asset_accounts.per_page') }}</label><select id="hr-size" class="form-control" name="per_page" onchange="this.form.submit()">
                     @foreach([20,50,100] as $size)
                     <option value="{{ $size }}" @selected($rows->perPage()===$size)>{{ $size }}</option>
                     @endforeach
