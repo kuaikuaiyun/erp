@@ -11,7 +11,6 @@ use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -66,12 +65,12 @@ class SelectionPoolController extends Controller
         return $this->form($request, $product);
     }
 
-    public function store(Request $request): Response|RedirectResponse
+    public function store(Request $request): Response
     {
         return $this->save($request, new AliExpressSelectionProduct());
     }
 
-    public function update(Request $request, AliExpressSelectionProduct $product): Response|RedirectResponse
+    public function update(Request $request, AliExpressSelectionProduct $product): Response
     {
         return $this->save($request, $product);
     }
@@ -135,13 +134,17 @@ class SelectionPoolController extends Controller
             return $context;
         }
 
+        if (!$request->ajax()) {
+            return redirect()->route('aliexpress.selection.index');
+        }
+
         $product->loadMissing('skus');
         $prefix = $product->sku_prefix ?? $this->prefix($context['user']);
 
-        return view('portals.aliexpress.selection.form', $context + compact('product', 'prefix'));
+        return view('portals.aliexpress.selection.form', compact('product', 'prefix'));
     }
 
-    private function save(Request $request, AliExpressSelectionProduct $product): Response|RedirectResponse
+    private function save(Request $request, AliExpressSelectionProduct $product): Response
     {
         $context = $this->context($request, true);
         if ($context instanceof Response) {
@@ -245,7 +248,14 @@ class SelectionPoolController extends Controller
             throw ValidationException::withMessages(['rows' => __('aliexpress.messages.concurrent_duplicate')]);
         }
 
-        return redirect()->route('aliexpress.selection.index')->with('success', __('aliexpress.messages.saved'));
+        $message = __('aliexpress.messages.saved');
+        if ($request->expectsJson()) {
+            $request->session()->flash('success', $message);
+
+            return response()->json(['saved' => true]);
+        }
+
+        return redirect()->route('aliexpress.selection.index')->with('success', $message);
     }
 
     private function prefix(AdminUser $user): string

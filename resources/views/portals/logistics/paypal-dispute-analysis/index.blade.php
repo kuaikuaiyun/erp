@@ -4,13 +4,40 @@
 
 @php
     $origin = rtrim(request()->getSchemeAndHttpHost(), '/');
-    $text = static fn ($value): string => filled($value) ? (string) $value : '—';
+    $fields = __('logistics.paypal_dispute_analysis.fields');
+    $unmatched = __('logistics.paypal_dispute_analysis.unmatched');
+    $unrecorded = __('logistics.paypal_dispute_analysis.unrecorded');
+    $notAvailable = __('logistics.common.not_available');
+    $yes = __('logistics.paypal_dispute_analysis.yes');
+    $no = __('logistics.paypal_dispute_analysis.no');
+    $text = static fn ($value): string => filled($value) ? (string) $value : $notAvailable;
     $date = static fn ($value): string => $value ? $value->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '';
-    $flag = static fn ($value): string => $value === null ? '未处理' : ($value ? '是' : '否');
-    $amount = static fn ($value, $currency): string => $value === null || $value === '' ? '—' : number_format((float) $value, 2).' '.($currency ?: '');
+    $flag = static fn ($value): string => $value === null ? __('logistics.paypal_dispute_analysis.unhandled') : ($value ? $yes : $no);
+    $amount = static fn ($value, $currency): string => $value === null || $value === '' ? $notAvailable : number_format((float) $value, 2).' '.($currency ?: '');
     $messageTime = static function ($value): string {
         if (blank($value)) return '';
         try { return \Illuminate\Support\Carbon::parse((string) $value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'); } catch (\Throwable) { return (string) $value; }
+    };
+    $adjudicationTime = static function (mixed $adjudications): ?string {
+        if (!is_array($adjudications) || !array_is_list($adjudications) || count($adjudications) !== 1) {
+            return null;
+        }
+
+        $entry = $adjudications[0];
+        $value = is_array($entry) ? ($entry['adjudication_time'] ?? null) : null;
+        if (!is_string($value) || !preg_match('/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\z/i', $value)) {
+            return null;
+        }
+
+        try {
+            $time = new \DateTimeImmutable($value);
+        } catch (\Exception) {
+            return null;
+        }
+
+        return \DateTimeImmutable::getLastErrors() === false
+            ? $time->setTimezone(new \DateTimeZone('Asia/Shanghai'))->format('Y-m-d H:i:s')
+            : null;
     };
     $hasFilters = collect($filters)->except('per_page')->contains(fn ($value) => $value !== '' && $value !== []);
     $disputeStatuses = ['OPEN' => '处理中', 'WAITING_FOR_BUYER_RESPONSE' => '等待买家回复', 'WAITING_FOR_SELLER_RESPONSE' => '等待卖家回复', 'UNDER_REVIEW' => '审核中', 'RESOLVED' => '已解决'];
@@ -29,7 +56,7 @@
 @push('styles')
 <link rel="stylesheet" href="{{ $origin }}/css/frontend-list-template.css?v=20261123-19">
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-17">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261127-1">
 @endpush
 
 @section('content')
@@ -77,28 +104,83 @@
                             $latestOperation = $dispute->operations->first(fn ($operation) => filled($operation->payload['note'] ?? null));
                             $latestNote = $latestOperation ? ($latestOperation->payload['note'] ?? null) : null;
                             $rawPayload = json_decode((string) $dispute->raw_payload, true);
+                            $isResolved = strtoupper((string) $dispute->status) === 'RESOLVED';
+                            $resolvedTime = $isResolved ? $adjudicationTime($rawPayload['adjudications'] ?? null) : null;
                             $buyerMessages = collect(is_array($rawPayload) ? ($rawPayload['messages'] ?? []) : [])->filter(fn ($message) => is_array($message) && strtoupper(trim((string) ($message['posted_by'] ?? ''))) === 'BUYER' && filled($message['content'] ?? null))->sortBy('time_posted')->values();
                         @endphp
-                        <tr data-logistics-handling-row="{{ $dispute->id }}" class="{{ strtoupper((string) $dispute->status) === 'RESOLVED' ? 'pd-dispute-resolved' : '' }}">
+                        <tr data-logistics-handling-row="{{ $dispute->id }}" class="{{ $isResolved ? 'pd-dispute-resolved' : '' }}">
                             <td class="pd-dispute-select-cell"><input class="paypal-dispute-check" type="checkbox" value="{{ $dispute->id }}" aria-label="选择事件 {{ $dispute->dispute_id }}"></td>
-                            <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->dispute_id }}" title="复制事件 ID" aria-label="复制事件 ID"><i class="fa fa-copy"></i></button><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->disputed_transaction_id }}" title="复制交易 ID" aria-label="复制交易 ID"><i class="fa fa-copy"></i></button></div></td>
-                            <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['account'] }}</dt><dd>{{ $text($dispute->account?->account_name) }}</dd>
+                                <dt>{{ $fields['dispute_id'] }}</dt><dd>
+                                    <span class="pd-mono">{{ $text($dispute->dispute_id) }}</span>
+                                    <button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->dispute_id }}" title="{{ __('logistics.paypal_dispute_analysis.copy_dispute_id') }}" aria-label="{{ __('logistics.paypal_dispute_analysis.copy_dispute_id') }}"><i class="fa fa-copy"></i></button>
+                                </dd>
+                                <dt>{{ $fields['transaction_id'] }}</dt><dd>
+                                    <span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span>
+                                    <button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->disputed_transaction_id }}" title="{{ __('logistics.paypal_dispute_analysis.copy_transaction_id') }}" aria-label="{{ __('logistics.paypal_dispute_analysis.copy_transaction_id') }}"><i class="fa fa-copy"></i></button>
+                                </dd>
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['customer_email'] }}</dt><dd>{{ $text($order?->buyer_email ?: $unmatched) }}</dd>
+                                <dt>{{ $fields['dispute_date'] }}</dt><dd>{{ $date($dispute->dispute_created_at) ?: $notAvailable }}</dd>
+                                <dt>{{ $fields['order_date'] }}</dt><dd>{{ $date($order?->order_created_at) ?: $unmatched }}</dd>
+                                <dt>{{ $fields['resolution'] }}</dt><dd>
+                                    @if($resolvedTime !== null)
+                                        {{ __('logistics.paypal_dispute_analysis.resolved_with_time', ['time' => $resolvedTime]) }}
+                                    @elseif($isResolved)
+                                        {{ __('logistics.paypal_dispute_analysis.resolved') }}
+                                    @else
+                                        {{ __('logistics.paypal_dispute_analysis.unresolved') }}
+                                    @endif
+                                </dd>
+                            </dl></td>
                             <td class="pd-customer-message-cell"><div class="pd-customer-messages">@forelse($buyerMessages as $message)<div class="pd-customer-message"><div class="pd-customer-message-head"><b>客户留言 {{ $loop->iteration }}</b><span>{{ $messageTime($message['time_posted'] ?? null) }}</span></div><div class="pd-customer-message-content">{{ $message['content'] }}</div></div>@empty<span class="text-muted">暂无客户留言</span>@endforelse</div></td>
-                            <td><div class="pd-block"><b>申诉金额：</b>{{ $amount($dispute->original_amount ?? $dispute->dispute_amount_usd, $dispute->currency_code) }}<br><b>订单金额：</b>{{ $amount($orderAmount, $orderCurrency) }}<br><b>退款金额：</b>{{ $refunds->isEmpty() ? '—' : $amount($refundAmount, $refundCurrency) }}<br><b>纠纷费：</b>—</div></td>
-                            <td><div class="pd-block"><b>订阅/定期：</b>{{ $text($order?->subscription_type ?: '未匹配') }}<br><b>PostUpsell：</b>{{ $order ? ($order->is_add_on === '已加购' ? '是' : '否') : '未匹配' }}<br><b>是否复购单：</b>{{ $order ? (filled($order->subscription_origin_order_id) ? '是' : '否') : '未匹配' }}<br><b>取消订阅：</b><span class="pd-manual">{{ $flag($dispute->subscription_cancelled) }}</span><br><b>取消加购：</b><span class="pd-manual">{{ $flag($dispute->add_on_cancelled) }}</span></div></td>
-                            <td><div class="pd-block"><b>类型：</b>{{ $dispute->typeLabel() }}<br><b>纠纷理由：</b>{{ $dispute->reasonLabel() }}</div></td>
-                            <td><div class="pd-block"><b>事件时状态：</b>{{ $dispute->event_logistics_captured_at ? $text($dispute->event_logistics_status ?: '待发货') : '未留存' }}<br><b>事件时是否发货：</b>{{ $dispute->event_logistics_captured_at ? ($dispute->event_shipped ? '是' : '否') : '未留存' }}<br><b>事件时单号：</b><span class="pd-mono">{{ $dispute->event_logistics_captured_at ? $text($dispute->event_tracking_number ?: '无') : '未留存' }}</span><hr><b>当前物流状态：</b>{{ $text($order?->logistics_status ?: '未匹配') }}<br><b>当前是否发货：</b>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? '是' : '否') : '未匹配' }}<br><b>当前物流单号：</b><span class="pd-mono">{{ $text($order?->tracking_number ?: '未匹配') }}</span></div></td>
-                            <td><div class="pd-block"><b>通途订单号：</b>{{ $text($order?->tongtu_order_number ?: '未匹配') }}@forelse($items as $item)<hr><b>通途SKU：</b>{{ $text($item->tongtu_sku) }}<br><b>中文品名：</b>{{ $text($item->tongtu_product_name ?: $item->product_title) }}@empty<hr><b>通途SKU：</b>未匹配<br><b>中文品名：</b>未匹配@endforelse</div></td>
-                            <td><div class="pd-block">
-                                <b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br>
-                                <b>状态：</b>{{ $dispute->statusLabel() }}
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['dispute_amount'] }}</dt><dd>{{ $amount($dispute->original_amount ?? $dispute->dispute_amount_usd, $dispute->currency_code) }}</dd>
+                                <dt>{{ $fields['order_amount'] }}</dt><dd>{{ $amount($orderAmount, $orderCurrency) }}</dd>
+                                <dt>{{ $fields['refund_amount'] }}</dt><dd>{{ $refunds->isEmpty() ? $notAvailable : $amount($refundAmount, $refundCurrency) }}</dd>
+                                <dt>{{ $fields['dispute_fee'] }}</dt><dd>{{ $notAvailable }}</dd>
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['subscription_type'] }}</dt><dd>{{ $text($order?->subscription_type ?: $unmatched) }}</dd>
+                                <dt>{{ $fields['post_upsell'] }}</dt><dd>{{ $order ? ($order->is_add_on === '已加购' ? $yes : $no) : $unmatched }}</dd>
+                                <dt>{{ $fields['repurchase'] }}</dt><dd>{{ $order ? (filled($order->subscription_origin_order_id) ? $yes : $no) : $unmatched }}</dd>
+                                <dt>{{ $fields['subscription_cancelled'] }}</dt><dd class="pd-manual">{{ $flag($dispute->subscription_cancelled) }}</dd>
+                                <dt>{{ $fields['add_on_cancelled'] }}</dt><dd class="pd-manual">{{ $flag($dispute->add_on_cancelled) }}</dd>
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['type'] }}</dt><dd>{{ $dispute->typeLabel() }}</dd>
+                                <dt>{{ $fields['reason'] }}</dt><dd>{{ $dispute->reasonLabel() }}</dd>
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['event_logistics_status'] }}</dt><dd>{{ $dispute->event_logistics_captured_at ? $text($dispute->event_logistics_status ?: __('logistics.paypal_dispute_analysis.pending_shipment')) : $unrecorded }}</dd>
+                                <dt>{{ $fields['event_shipped'] }}</dt><dd>{{ $dispute->event_logistics_captured_at ? ($dispute->event_shipped ? $yes : $no) : $unrecorded }}</dd>
+                                <dt>{{ $fields['event_tracking_number'] }}</dt><dd class="pd-mono">{{ $dispute->event_logistics_captured_at ? $text($dispute->event_tracking_number ?: __('logistics.paypal_dispute_analysis.no_tracking_number')) : $unrecorded }}</dd>
+                                <dt class="pd-field-divider">{{ $fields['logistics_status'] }}</dt><dd class="pd-field-divider">{{ $text($order?->logistics_status ?: $unmatched) }}</dd>
+                                <dt>{{ $fields['shipped'] }}</dt><dd>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? $yes : $no) : $unmatched }}</dd>
+                                <dt>{{ $fields['tracking_number'] }}</dt><dd class="pd-mono">{{ $text($order?->tracking_number ?: $unmatched) }}</dd>
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['tongtu_order_number'] }}</dt><dd>{{ $text($order?->tongtu_order_number ?: $unmatched) }}</dd>
+                                @forelse($items as $item)
+                                    <dt class="pd-field-divider">{{ $fields['tongtu_sku'] }}</dt><dd class="pd-field-divider">{{ $text($item->tongtu_sku) }}</dd>
+                                    <dt>{{ $fields['product_name'] }}</dt><dd>{{ $text($item->tongtu_product_name ?: $item->product_title) }}</dd>
+                                @empty
+                                    <dt class="pd-field-divider">{{ $fields['tongtu_sku'] }}</dt><dd class="pd-field-divider">{{ $unmatched }}</dd>
+                                    <dt>{{ $fields['product_name'] }}</dt><dd>{{ $unmatched }}</dd>
+                                @endforelse
+                            </dl></td>
+                            <td><dl class="pd-block">
+                                <dt>{{ $fields['outcome'] }}</dt><dd>{{ $dispute->outcomeLabel() }}</dd>
+                                <dt>{{ $fields['status'] }}</dt><dd>{{ $dispute->statusLabel() }}</dd>
                                 @if($dispute->first_handled_by_name)
-                                    <br><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}
+                                    <dt>{{ $fields['first_handler'] }}</dt><dd>{{ $dispute->first_handled_by_name }}</dd>
                                 @endif
                                 @if(filled($latestNote))
-                                    <hr><b>最新处理备注：</b><div class="pd-latest-note">{{ $latestNote }}</div>
+                                    <dt class="pd-field-divider">{{ $fields['latest_note'] }}</dt><dd class="pd-field-divider pd-latest-note">{{ $latestNote }}</dd>
                                 @endif
-                            </div></td>
+                            </dl></td>
                             <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}" data-logistics-handling-open><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
                     @empty<tr><td colspan="11" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>

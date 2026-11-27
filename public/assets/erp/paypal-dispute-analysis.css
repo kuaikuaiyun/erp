@@ -4,15 +4,15 @@
 .paypal-dispute-table td, .paypal-dispute-table th { border-right: 1px solid #ced9e3; }
 .paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { border-right: 0; }
 .paypal-dispute-table .pd-dispute-select-cell { min-width: 46px; width: 46px; padding: 10px 6px !important; text-align: center; }
-.paypal-dispute-table td:nth-child(2) { min-width: 230px; width: 230px; }
-.paypal-dispute-table td:nth-child(3) { min-width: 270px; width: 270px; }
+.paypal-dispute-table td:nth-child(2) { min-width: 230px; width: 230px; --pd-label-width: 5em; }
+.paypal-dispute-table td:nth-child(3) { min-width: 320px; width: 320px; --pd-label-width: 5em; }
 .paypal-dispute-table td:nth-child(4) { min-width: 430px; width: 430px; white-space: normal; }
-.paypal-dispute-table td:nth-child(5) { min-width: 205px; width: 205px; }
+.paypal-dispute-table td:nth-child(5) { min-width: 205px; width: 205px; --pd-label-width: 5em; }
 .paypal-dispute-table td:nth-child(6) { min-width: 275px; width: 275px; }
-.paypal-dispute-table td:nth-child(7) { min-width: 245px; width: 245px; }
-.paypal-dispute-table td:nth-child(8) { min-width: 285px; width: 285px; }
+.paypal-dispute-table td:nth-child(7) { min-width: 245px; width: 245px; --pd-label-width: 5em; }
+.paypal-dispute-table td:nth-child(8) { min-width: 285px; width: 285px; --pd-label-width: 8em; }
 .paypal-dispute-table td:nth-child(9) { min-width: 465px; width: 465px; }
-.paypal-dispute-table td:nth-child(10) { min-width: 300px; width: 300px; white-space: normal; }
+.paypal-dispute-table td:nth-child(10) { min-width: 300px; width: 300px; white-space: normal; --pd-label-width: 7em; }
 .paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { position: sticky; right: 0; min-width: 145px; width: 145px; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
 .paypal-dispute-table td:last-child { z-index: 2; background: #fff; }
 .paypal-dispute-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }
@@ -21,14 +21,25 @@
 .paypal-dispute-table tbody tr.pd-dispute-resolved > td:last-child { background: #a7e9bb !important; }
 .paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td { background: #92dfaa !important; }
 .paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td:last-child { background: #92dfaa !important; }
-.pd-block { color: #526f8b; font-size: 13px; line-height: 21px; white-space: nowrap; }
-.pd-block b { color: #365875; font-size: 13px; font-weight: 800; white-space: nowrap; }
-.pd-block hr { margin: 5px 0 4px; border-top: 1px dashed #dce5ee; }
-.pd-mono { color: #2f73ae; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 12px; white-space: nowrap; overflow-wrap: normal; }
+.pd-block {
+    display: grid;
+    grid-template-columns: var(--pd-label-width, 6em) minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: baseline;
+    margin: 0;
+    color: #526f8b;
+    font-size: 13px;
+    line-height: 21px;
+    white-space: normal;
+}
+.pd-block dt { color: #365875; font-weight: 800; text-align: right; white-space: nowrap; }
+.pd-block dd { min-width: 0; margin: 0; text-align: left; overflow-wrap: anywhere; }
+.pd-block .pd-field-divider { align-self: stretch; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #dce5ee; }
+.pd-mono { color: #2f73ae; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
 .pd-copy-button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #5584a9; font-size: 12px; vertical-align: middle; }
 .pd-copy-button:hover, .pd-copy-button:focus { background: #dcebf6; color: #1f6c9f; outline: 0; }
 .pd-manual { color: #b16c18; font-weight: 800; }
-.pd-latest-note { margin-top: 3px; color: #526f8b; line-height: 1.58; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pd-latest-note { line-height: 1.58; white-space: pre-wrap; }
 .pd-customer-messages { min-width: 0; }
 .pd-customer-message + .pd-customer-message { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #d4e0e9; }
 .pd-customer-message-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: #4c6f8a; font-size: 12px; line-height: 1.4; }

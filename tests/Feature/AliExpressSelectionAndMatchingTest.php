@@ -19,6 +19,7 @@ class AliExpressSelectionAndMatchingTest extends TestCase
     private const HOST = 'http://caigou.erp.test';
     private const MANAGE = '/aliexpress/selection/manage';
     private const LINK = 'https://www.aliexpress.com/item/1005007770001.html';
+    private const AJAX = ['X-Requested-With' => 'XMLHttpRequest'];
 
     private Portal $portal;
 
@@ -81,10 +82,17 @@ class AliExpressSelectionAndMatchingTest extends TestCase
     public function test_selection_creates_stable_skus_and_resolves_duplicate_product_links(): void
     {
         $this->signIn('entry', ['aliexpress_selection_manage']);
-        $this->get(self::HOST.self::MANAGE.'/create')->assertOk()->assertSee('SMT-TEAM-20261126-');
+        $this->get(self::HOST.self::MANAGE)->assertOk()
+            ->assertSee('<section class="content-header"><h1>速卖通选品维护 <small>', false)
+            ->assertSee('data-ae-form-url=', false)->assertSee('data-ae-dialog', false);
+        $this->get(self::HOST.self::MANAGE.'/create')->assertRedirect(self::HOST.self::MANAGE);
+        $this->get(self::HOST.self::MANAGE.'/create', self::AJAX)->assertOk()
+            ->assertSee('SMT-TEAM-20261126-')->assertSee('data-ae-editor', false)->assertDontSee('<html', false);
 
         $data = ['supplier_url' => self::LINK.'?spm=first', 'name' => '保温水杯', 'rows' => [$this->row('heise'), $this->row('baise')]];
-        $this->post(self::HOST.self::MANAGE, $data)->assertRedirect(self::HOST.self::MANAGE);
+        $this->postJson(self::HOST.self::MANAGE, $data, self::AJAX)->assertOk()->assertExactJson(['saved' => true]);
+        $this->get(self::HOST.self::MANAGE.'?keyword=保温水杯&per_page=20&page=1')->assertOk()
+            ->assertSee('已保存速卖通商品资料。')->assertSee('保温水杯');
         $product = AliExpressSelectionProduct::query()->sole();
         $black = $product->skus->first();
         $white = $product->skus->last();
@@ -100,19 +108,22 @@ class AliExpressSelectionAndMatchingTest extends TestCase
         $this->assertDatabaseCount('aliexpress_selection_products', 1);
 
         $this->travel(1)->day();
-        $this->get(self::HOST.self::MANAGE.'/'.$product->id.'/edit')->assertOk()->assertSee($black->sku);
-        $this->put(self::HOST.self::MANAGE.'/'.$product->id, array_replace($data, ['rows' => [
+        $this->get(self::HOST.self::MANAGE.'/'.$product->id.'/edit', self::AJAX)->assertOk()
+            ->assertSee($black->sku)->assertDontSee('<html', false);
+        $this->putJson(self::HOST.self::MANAGE.'/'.$product->id, array_replace($data, ['rows' => [
             ['id' => $black->id, 'supplier_sku' => 'sku-100', 'is_enabled' => '1'],
             ['id' => $white->id, 'supplier_sku' => 'sku-200', 'is_enabled' => '0'],
             $this->row('lanse'),
-        ]]))->assertRedirect(self::HOST.self::MANAGE);
+        ]]), self::AJAX)->assertOk()->assertExactJson(['saved' => true]);
         $this->assertDatabaseHas('aliexpress_selection_skus', ['id' => $white->id, 'sku' => $white->sku, 'is_enabled' => false]);
         $this->assertDatabaseHas('aliexpress_selection_skus', ['sku' => 'SMT-TEAM-20261126-baowenbei-lanse-1pc']);
 
         $this->signIn('browse', ['aliexpress_selection_browse']);
         $this->get(self::HOST.'/aliexpress/selection')->assertOk()->assertSee($black->sku)->assertDontSee($white->sku)
-            ->assertSee('复制 SKU')->assertDontSee('录入商品');
+            ->assertSee('<section class="content-header"><h1>速卖通选品查看 <small>', false)
+            ->assertSee('data-ae-details-template', false)->assertSee('复制 SKU')->assertDontSee('录入商品');
         $this->postJson(self::HOST.self::MANAGE, $data)->assertForbidden();
+        $this->get(self::HOST.self::MANAGE.'/'.$product->id.'/edit', self::AJAX)->assertForbidden();
         $this->getJson($url)->assertForbidden();
     }
 
@@ -140,6 +151,7 @@ class AliExpressSelectionAndMatchingTest extends TestCase
         $this->assertDatabaseMissing('aliexpress_procurement_items', ['shop_domain' => 'old.myshopify.com']);
 
         $this->get(self::HOST.'/aliexpress/procurement?status=ready')->assertOk()
+            ->assertSee('<section class="content-header"><h1>速卖通待采购 <small>', false)
             ->assertViewHas('summary', ['ready' => 2, 'exception' => 2])
             ->assertSee('store-a.myshopify.com')->assertSee('store-b.myshopify.com')->assertDontSee('SMT-NOT-RECORDED');
         $this->get(self::HOST.'/aliexpress/procurement?status=exception')->assertOk()

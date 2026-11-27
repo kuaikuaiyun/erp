@@ -23,9 +23,8 @@
 @endpush
 
 @section('content')
+<section class="content-header"><h1>{{ $title }} <small>{{ __('aliexpress.page_descriptions.aliexpress_procurement') }}</small></h1></section>
 <section class="content flt ae-procurement">
-    <h2 class="page-header">{{ $title }}</h2>
-
     <form class="flt-card flt-filters" method="get" action="{{ $action }}" data-loading="region" data-loading-target="#ae-procurement-list"
         data-logistics-filters data-search-options="{{ __('frontend_list_template.search_options') }}"
         data-no-options="{{ __('frontend_list_template.no_options') }}" data-clear-choice="{{ __('frontend_list_template.clear_choice') }}">

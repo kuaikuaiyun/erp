@@ -6,6 +6,11 @@ return [
         'aliexpress_selection_browse' => '速卖通选品查看',
         'aliexpress_procurement' => '速卖通待采购',
     ],
+    'page_descriptions' => [
+        'aliexpress_selection_manage' => '录入速卖通商品并维护 SKU 与货源规格',
+        'aliexpress_selection_browse' => '查看商品与规格，复制资料用于店铺上架',
+        'aliexpress_procurement' => '查看匹配到速卖通货源的 Shopify 商品行及采购异常',
+    ],
     'fields' => [
         'keyword' => '关键词',
         'name' => '商品名称',
@@ -47,6 +52,7 @@ return [
         'create' => '录入商品',
         'edit' => '编辑商品',
         'view_skus' => '查看规格（:count）',
+        'sku_details' => ':name的规格',
         'open_link' => '查看商品链接',
         'copy' => '复制商品资料',
         'copy_sku' => '复制 SKU',
@@ -55,7 +61,6 @@ return [
         'add_row' => '添加规格',
         'remove_row' => '移除此行',
         'save' => '保存',
-        'back' => '返回列表',
     ],
     'hints' => [
         'selection_search' => '输入商品名称、速卖通商品 ID 或完整 SKU',
@@ -70,6 +75,9 @@ return [
     ],
     'messages' => [
         'saved' => '已保存速卖通商品资料。',
+        'form_load_failed' => '表单加载失败，请重试。',
+        'form_save_failed' => '保存未完成，请检查登录状态或稍后重试。',
+        'form_retry' => '重新加载',
         'link_invalid' => '请输入带商品 ID 的速卖通商品详情链接。',
         'product_exists' => '该速卖通商品已存在，请查重后打开已有记录。',
         'checking' => '正在查重…',
