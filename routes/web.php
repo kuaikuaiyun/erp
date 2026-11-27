@@ -358,6 +358,8 @@ Route::get('/assistant/fashion-applovin-performance-reports', [FashionAppLovinPe
     ->name('assistant.fashion-applovin-performance-reports.index');
 Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
     ->name('assistant.applovin-spends.store-binding');
+Route::post('/assistant/daily-submissions/applovin-spends/account-details', [AppLovinSpendReviewController::class, 'saveAccountDetails'])
+    ->name('assistant.applovin-spends.account-details.save');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('assistant.applovin-spends.screenshot');
 Route::get('/operation/reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation.reports.order-details');

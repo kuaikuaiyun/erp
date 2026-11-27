@@ -104,7 +104,16 @@ class AppLovinSpendController extends Controller
         abort_if($number === '', 422, '账号编号为空，无法保存账户限额/风控等因素。');
         $content = trim((string) ($validated['risk_factors'] ?? ''));
         if ($content === '') {
-            AppLovinAccountRiskNote::query()->where('account_number', $number)->delete();
+            $note = AppLovinAccountRiskNote::query()->where('account_number', $number)->first();
+            if ($note) {
+                $note->risk_factors = null;
+                $note->updated_by = $context['user']->getKey();
+                if ($note->closed_at || $note->gift_granted_at || trim((string) $note->account_status_note) !== '') {
+                    $note->save();
+                } else {
+                    $note->delete();
+                }
+            }
         } else {
             AppLovinAccountRiskNote::query()->updateOrCreate(['account_number' => $number], [
                 'risk_factors' => $content, 'updated_by' => $context['user']->getKey(),
@@ -195,10 +204,19 @@ class AppLovinSpendController extends Controller
     {
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
         $numbers = $accounts->pluck('account_number')->map(fn ($number) => AppLovinAccountRiskNote::normalizeAccountNumber((string) $number))->filter()->unique();
-        $notes = AppLovinAccountRiskNote::query()->whereIn('account_number', $numbers)->pluck('risk_factors', 'account_number');
+        $notes = AppLovinAccountRiskNote::query()->whereIn('account_number', $numbers)->get()->keyBy('account_number');
         return $accounts->map(function (array $account) use ($screenshots, $notes): array {
             $number = AppLovinAccountRiskNote::normalizeAccountNumber((string) $account['account_number']);
-            return [...$account, 'uploaded_screenshot' => $screenshots->get($account['account_key']), 'risk_factors' => (string) ($notes->get($number) ?: '')];
+            $screenshot = $screenshots->get($account['account_key']);
+            $note = $notes->get($number);
+            return [
+                ...$account,
+                'uploaded_screenshot' => $screenshot,
+                'gift_uploaded_at' => $note?->gift_granted_at ?: $screenshot?->updated_at,
+                'risk_factors' => (string) ($note?->risk_factors ?: ''),
+                'closed_at' => $note?->closed_at,
+                'account_status_note' => (string) ($note?->account_status_note ?: ''),
+            ];
         });
     }
 

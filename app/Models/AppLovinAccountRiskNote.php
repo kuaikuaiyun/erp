@@ -8,7 +8,12 @@ class AppLovinAccountRiskNote extends Model
 {
     protected $table = 'applovin_account_risk_notes';
 
-    protected $fillable = ['account_number', 'risk_factors', 'updated_by'];
+    protected $fillable = ['account_number', 'risk_factors', 'closed_at', 'gift_granted_at', 'account_status_note', 'updated_by'];
+
+    protected $casts = [
+        'closed_at' => 'datetime',
+        'gift_granted_at' => 'datetime',
+    ];
 
     public function __construct(array $attributes = [])
     {
