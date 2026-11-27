@@ -75,7 +75,7 @@
 }
 
 .aikaipin-product-table {
-    min-width: 1210px;
+    min-width: 1380px;
     margin-bottom: 0;
     table-layout: fixed;
     width: 100%;
@@ -110,6 +110,21 @@
 .aikaipin-source-column,
 .aikaipin-source-cell {
     width: 136px;
+}
+
+.aikaipin-creator-column,
+.aikaipin-creator-cell {
+    width: 126px;
+}
+
+.aikaipin-creator-name {
+    color: #43556c;
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .aikaipin-updated-column,

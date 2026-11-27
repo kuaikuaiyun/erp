@@ -98,7 +98,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/css/frontend-list-template.css?v=20261125-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261127-2">
 @endpush
 
 @push('scripts')
@@ -247,6 +247,7 @@
                         <th class="aikaipin-name-column">{{ $t('table.product_name_sku') }}</th>
                         <th class="aikaipin-category-column">{{ $t('table.category') }}</th>
                         <th class="aikaipin-source-column">{{ $t('table.source_type') }}</th>
+                        <th class="aikaipin-creator-column">{{ $t('table.creator') }}</th>
                         <th class="aikaipin-updated-column">{{ $t('table.updated_at') }}</th>
                         <th style="width:82px;text-align:center;">上架状态</th>
                         <th class="aikaipin-operation-column">{{ $t('table.operation') }}</th>
@@ -280,10 +281,14 @@
                             );
                             $referenceFile = $product->referenceFilePayload();
                             $packageFile = $product->packageFilePayload();
+                            $creatorName = trim((string) $product->created_by_name);
+                            if ($creatorName === '' && (int) $product->created_by > 0) {
+                                $creatorName = '用户 #'.(int) $product->created_by;
+                            }
                             $updatedAt = $product->updated_at?->copy()->timezone('Asia/Shanghai');
                         @endphp
                         <tr data-aikaipin-product
-                            data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus) }}"
+                            data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus.' '.$creatorName) }}"
                             data-source="{{ $product->source_platform }}"
                             data-type="{{ $product->product_type }}">
                             @if ($canManageProductLibrary)
@@ -350,6 +355,13 @@
                             <td class="aikaipin-source-cell">
                                 <span class="aikaipin-source">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}</span>
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
+                            </td>
+                            <td class="aikaipin-creator-cell">
+                                @if ($creatorName !== '')
+                                    <span class="aikaipin-creator-name" title="{{ $creatorName }}">{{ $creatorName }}</span>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $updatedAt?->toAtomString() }}" title="北京时间">{{ $updatedAt?->format('Y-m-d H:i') }}</time></td>
                             <td class="aikaipin-publication-cell">
