@@ -8,10 +8,12 @@ use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -39,7 +41,7 @@ class AdvertisingSpendSummaryController extends Controller
             'operator' => ['nullable', 'string', 'max:100'],
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
-            'project' => ['nullable', 'in:shopify,fashion'],
+            'project' => ['nullable', Rule::in(['shopify', ...array_keys(OperationProjectCatalog::all())])],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
@@ -85,6 +87,7 @@ class AdvertisingSpendSummaryController extends Controller
         })->values();
         $fashionReports = FashionAdvertisingReport::query()
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+            ->whereIn('project_code', array_keys(OperationProjectCatalog::all()))
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereHas('submitter.departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleDepartmentIds))
             ->with('adSpendEntries')->get();
@@ -92,8 +95,10 @@ class AdvertisingSpendSummaryController extends Controller
             return $report->adSpendEntries->map(function ($entry) use ($report): array {
                 $bookSpend = (float) $entry->book_spend_usd;
                 $actualSpend = (float) $entry->actual_spend_usd;
+                $projectCode = (string) $report->project_code;
                 return [
-                    'project' => 'fashion', 'project_label' => '服装项目',
+                    'project' => $projectCode,
+                    'project_label' => OperationProjectCatalog::shortName($projectCode).'项目',
                     'date' => $report->report_date->format('Y-m-d'),
                     'agency' => trim((string) $entry->agency) ?: '未填写代理',
                     'media' => trim((string) $entry->media) ?: '其他',
@@ -111,9 +116,16 @@ class AdvertisingSpendSummaryController extends Controller
                 ];
             })->all();
         })->values();
-        $allRows = collect()
-            ->when($selectedProject !== 'fashion', fn ($rows) => $rows->concat($shopifyRows))
-            ->when($selectedProject !== 'shopify', fn ($rows) => $rows->concat($fashionRows))
+        $projectOptions = collect()
+            ->when($reports->isNotEmpty(), fn ($options) => $options->put('shopify', 'Shopify订阅项目'))
+            ->merge($fashionReports->pluck('project_code')->unique()->mapWithKeys(
+                fn (string $code): array => [$code => OperationProjectCatalog::shortName($code).'项目']
+            ))
+            ->sortBy(fn (string $label, string $code): int => (int) array_search($code, ['shopify', 'fuzhuang', 'danbao-general', 'baokuan-fashion', 'baokuan-general'], true))
+            ->all();
+        $submittedRows = collect()->concat($shopifyRows)->concat($fashionRows)->values();
+        $allRows = $submittedRows
+            ->when($selectedProject !== '', fn ($rows) => $rows->where('project', $selectedProject))
             ->sortBy([
                 ['date', 'desc'],
                 ['operator_name', 'asc'],
@@ -160,6 +172,7 @@ class AdvertisingSpendSummaryController extends Controller
             'rows' => $rows,
             'agencyOptions' => $agencyOptions,
             'mediaOptions' => $mediaOptions,
+            'projectOptions' => $projectOptions,
             'filters' => $filters,
             'totals' => [
                 'book_spend' => (float) $filteredRows->sum('book_spend'),

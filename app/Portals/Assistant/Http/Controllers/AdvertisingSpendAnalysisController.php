@@ -9,10 +9,12 @@ use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -37,7 +39,7 @@ class AdvertisingSpendAnalysisController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
-            'project' => ['nullable', 'in:shopify,fashion'],
+            'project' => ['nullable', Rule::in(['shopify', ...array_keys(OperationProjectCatalog::all())])],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
@@ -89,6 +91,7 @@ class AdvertisingSpendAnalysisController extends Controller
         })->values();
         $fashionReports = FashionAdvertisingReport::query()
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+            ->whereIn('project_code', array_keys(OperationProjectCatalog::all()))
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereHas('submitter.departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleDepartmentIds))
             ->with('adSpendEntries')->get();
@@ -97,9 +100,11 @@ class AdvertisingSpendAnalysisController extends Controller
                 $agency = $this->matchConfiguredAgency($agencies, (string) $entry->agency, (string) $entry->media);
                 $agencyName = $this->normalizeDimension((string) ($agency?->name ?? $entry->agency), '未填写代理');
                 $mediaName = $this->normalizeDimension((string) ($agency?->advertisingMedia?->name ?? $entry->media), '其他');
+                $projectCode = (string) $report->project_code;
 
                 return [
-                    'project' => 'fashion', 'project_label' => '服装项目',
+                    'project' => $projectCode,
+                    'project_label' => OperationProjectCatalog::shortName($projectCode).'项目',
                     'date' => $report->report_date->format('Y-m-d'),
                     'agency_key' => $this->dimensionKey($agency?->getKey(), $agencyName),
                     'media_key' => $this->dimensionKey($agency?->advertising_media_id, $mediaName),
@@ -110,9 +115,16 @@ class AdvertisingSpendAnalysisController extends Controller
                 ];
             })->all();
         })->values();
-        $allRows = collect()
-            ->when($selectedProject !== 'fashion', fn ($rows) => $rows->concat($shopifyRows))
-            ->when($selectedProject !== 'shopify', fn ($rows) => $rows->concat($fashionRows))
+        $projectOptions = collect()
+            ->when($reports->isNotEmpty(), fn ($options) => $options->put('shopify', 'Shopify订阅项目'))
+            ->merge($fashionReports->pluck('project_code')->unique()->mapWithKeys(
+                fn (string $code): array => [$code => OperationProjectCatalog::shortName($code).'项目']
+            ))
+            ->sortBy(fn (string $label, string $code): int => (int) array_search($code, ['shopify', 'fuzhuang', 'danbao-general', 'baokuan-fashion', 'baokuan-general'], true))
+            ->all();
+        $submittedRows = collect()->concat($shopifyRows)->concat($fashionRows)->values();
+        $allRows = $submittedRows
+            ->when($selectedProject !== '', fn ($rows) => $rows->where('project', $selectedProject))
             ->map(fn (array $row): array => [
                 ...$row,
                 'agency_group_key' => $this->displayGroupKey((string) $row['agency']),
@@ -178,6 +190,7 @@ class AdvertisingSpendAnalysisController extends Controller
             'selectedAgency' => $selectedAgency,
             'selectedMedia' => $selectedMedia,
             'selectedProject' => $selectedProject,
+            'projectOptions' => $projectOptions,
             'agencyRows' => $agencyRows,
             'mediaRows' => $mediaRows,
             'detailRows' => $detailRows,
