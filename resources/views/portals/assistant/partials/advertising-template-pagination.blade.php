@@ -15,7 +15,7 @@
 <nav class="assistant-ad-pagination" aria-label="广告费数据分页">
     <span class="assistant-ad-pagination-summary">显示 {{ $paginator->firstItem() ?? 0 }}-{{ $paginator->lastItem() ?? 0 }} {{ $paginationUnit }}，共 {{ $paginator->total() }} {{ $paginationUnit }}</span>
     <label class="assistant-ad-pagination-size">每页显示
-        <select aria-label="每页显示数量" onchange="var url=new URL(window.location.href);url.searchParams.set('per_page',this.value);url.searchParams.delete(@js($paginationPageName));window.location.href=url.toString()">
+        <select aria-label="每页显示数量" data-assistant-page-size data-page-name="{{ $paginationPageName }}">
             @foreach($paginationPerPageOptions as $size)
                 <option value="{{ $size }}" @selected($paginator->perPage() === $size)>{{ $size }}</option>
             @endforeach
@@ -41,3 +41,19 @@
     @endif
 </nav>
 @endif
+
+@once
+@push('scripts')
+<script>
+document.addEventListener('change', function (event) {
+    var selector = event.target.closest && event.target.closest('[data-assistant-page-size]');
+    if (!selector) return;
+
+    var url = new URL(window.location.href);
+    url.searchParams.set('per_page', selector.value);
+    url.searchParams.delete(selector.dataset.pageName || 'page');
+    window.location.assign(url.toString());
+});
+</script>
+@endpush
+@endonce

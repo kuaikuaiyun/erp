@@ -16,7 +16,7 @@
 <input type="hidden" name="sort_direction" value="{{ $filters['sort_direction'] }}">
 @include('portals.assistant.partials.operation-department-multi-filter',['departments'=>$departmentOptions,'selectedIds'=>$filters['department_ids'],'inputName'=>'department_ids','label'=>'运营团队'])
 <div class="form-group"><label>运营名称</label><input class="form-control" name="operator" value="{{$filters['operator']}}" placeholder="输入运营姓名"></div>
-<div class="form-group"><label>每页显示</label><select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option value="{{$size}}" @selected($filters['per_page']===$size)>{{$size}} 条</option>@endforeach</select></div>
+<div class="form-group"><label>每页显示</label><select class="form-control" name="per_page" onchange="this.form.submit()">@foreach([20,50,100] as $size)<option value="{{$size}}" @selected($filters['per_page']===$size)>{{$size}} 条</option>@endforeach</select></div>
 <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route($statisticsRoutes['index'])}}">重置</a>
 </form></div></div>
 @php($bandQuery=['department_ids'=>$filters['department_ids']?:null,'operator'=>$filters['operator']?:null])
